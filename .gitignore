@@ -1,0 +1,21 @@
+# --- Python / Backend ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+*.db
+backend/backend.log
+
+# --- IDEs (JetBrains) ---
+.idea/
+*.iml
+
+# --- System / OS ---
+.DS_Store
+Thumbs.db
+
+# --- WeChat Miniprogram ---
+node_modules/
+miniprogram_npm/
