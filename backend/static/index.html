@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>我的智能家</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1677ff;
+            --bg: #f2f4f8; /* Match other pages */
+            --card-bg: #ffffff;
+            --text-main: #333333;
+            --text-sub: #888888;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+        }
+
+        .app-header {
+            padding: 20px 16px; /* Match container padding */
+            background: transparent;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 480px; /* Match container width */
+            margin: 0 auto;
+            margin-bottom: 4px; /* Slight spacing */
+        }
+
+        .app-title {
+            font-size: 24px; /* Slightly smaller for mobile feel */
+            font-weight: 700;
+            margin: 0;
+            color: var(--text-main);
+        }
+
+        .add-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: var(--primary);
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            transition: transform 0.2s;
+        }
+        .add-btn:active { transform: scale(0.95); }
+
+        .container {
+            padding: 0 16px 40px;
+            max-width: 480px; /* Mobile width for all screens */
+            margin: 0 auto;
+            min-height: 100vh;
+        }
+
+        .section-title {
+            font-size: 14px;
+            color: var(--text-sub);
+            margin: 20px 0 12px 4px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        /* Revert to Single Row Item Layout */
+        .device-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .device-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: row; /* Horizontal layout */
+            align-items: center; /* Center vertically */
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+            position: relative;
+            overflow: hidden;
+            border: none;
+            min-height: 72px; /* Ensure touch target */
+        }
+        
+        .device-card:active {
+            transform: scale(0.99);
+            background: #fafafa;
+        }
+
+        /* Remove old split structure styles if conflicting, or override */
+        .device-header { display: contents; } /* Unwrap header */
+        .device-data { 
+            display: flex; 
+            flex-direction: row; /* Horizontal stats */
+            gap: 16px; 
+            margin-top: 0; 
+            background: transparent; 
+            padding: 0; 
+            border-radius: 0;
+            margin-left: auto; /* Push to right */
+            align-items: center;
+        }
+
+        .device-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+
+        .device-info { 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center;
+            margin-right: 12px;
+        }
+        
+        .device-name {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 2px;
+            color: var(--text-main);
+            white-space: nowrap;
+        }
+        
+        .device-status {
+            font-size: 11px;
+            color: var(--text-sub);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .status-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #d9d9d9;
+        }
+        .dot-online { background: #52c41a; box-shadow: 0 0 0 1px rgba(82, 196, 26, 0.2); }
+        .dot-offline { background: #d9d9d9; }
+
+        .data-item { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: flex-end; /* Align right */
+            min-width: 60px;
+        }
+        
+        .data-val { 
+            font-size: 15px; 
+            font-weight: 700; 
+            color: var(--text-main); 
+            margin-bottom: 0;
+            line-height: 1.2;
+        }
+        
+        .data-label { 
+            font-size: 10px; 
+            color: var(--text-sub); 
+            font-weight: 400;
+        }
+        
+        .arrow-icon {
+            margin-left: 8px;
+            color: #e0e0e0;
+            font-size: 14px;
+            position: static; /* Flow naturally */
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            backdrop-filter: blur(4px);
+        }
+        .modal-overlay.show { opacity: 1; pointer-events: auto; }
+
+        .modal-card {
+            background: white;
+            width: 90%;
+            max-width: 320px;
+            border-radius: 24px;
+            padding: 24px;
+            transform: scale(0.9);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        .modal-overlay.show .modal-card { transform: scale(1); }
+
+        .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; text-align: center; }
+        .modal-desc { font-size: 14px; color: var(--text-sub); margin-bottom: 24px; text-align: center; }
+
+        .discovery-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .discovery-item {
+            background: #f9f9f9;
+            border-radius: 16px;
+            padding: 20px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+        .discovery-item:active { transform: scale(0.95); background: #f0f0f0; }
+        .discovery-item i { font-size: 24px; margin-bottom: 8px; color: var(--primary); }
+        .discovery-item span { display: block; font-size: 12px; font-weight: 500; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s;
+            pointer-events: none;
+            z-index: 2000;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    </style>
+</head>
+<body>
+    <div class="app-header">
+        <h1 class="app-title">我的智能家</h1>
+        <button class="add-btn" onclick="showDiscoveryModal()"><i class="fas fa-plus"></i></button>
+    </div>
+
+    <div class="container" id="device-sections">
+        <!-- Devices injected by JS -->
+        <div style="text-align: center; padding: 40px; color: #999;">
+            <i class="fas fa-circle-notch fa-spin fa-2x"></i>
+            <p style="margin-top: 10px; font-size: 14px;">正在连接设备...</p>
+        </div>
+    </div>
+
+    <!-- Discovery Modal -->
+    <div id="discovery-modal" class="modal-overlay" onclick="hideDiscoveryModal(event)">
+        <div class="modal-card">
+            <div class="modal-title">发现新设备</div>
+            <div class="modal-desc">请选择扫描方式</div>
+            <div class="discovery-grid">
+                <div class="discovery-item" onclick="startDiscovery('scale')">
+                    <i class="fas fa-bluetooth-b"></i>
+                    <span>蓝牙扫描</span>
+                </div>
+                <div class="discovery-item" onclick="showToast('敬请期待')">
+                    <i class="fas fa-wifi"></i>
+                    <span>红外扫描</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast">操作成功</div>
+
+    <script>
+        // Init
+        fetchDevices();
+        setInterval(fetchDevices, 10000); // Auto refresh every 10s
+
+        async function fetchDevices() {
+            try {
+                // Parallel fetch
+                const [petkitRes, scanRes] = await Promise.all([
+                    fetch('/api/petkit/devices').catch(() => ({ json: () => [] })),
+                    fetch('/api/devices/known').catch(() => ({ json: () => [] }))
+                ]);
+
+                const petkit = await petkitRes.json();
+                const known = await scanRes.json();
+
+                renderAllDevices(Array.isArray(petkit) ? petkit : [], Array.isArray(known) ? known : []);
+            } catch (error) {
+                console.error('Fetch error:', error);
+            }
+        }
+
+        function renderAllDevices(petkit, known) {
+            const container = document.getElementById('device-sections');
+            container.innerHTML = '';
+
+            // --- 1. 宠物生活 ---
+            container.innerHTML += `<div class="section-title"><i class="fas fa-paw"></i> 宠物生活</div>`;
+            let petHtml = '<div class="device-grid">';
+            
+            // 1.1 固定卡片：云宠智能喂食机
+            petHtml += `
+                <div class="device-card" onclick="location.href='/feeder'">
+                    <div class="device-icon" style="background: #fff7e6; color: #fa8c16;"><i class="fas fa-cookie-bite"></i></div>
+                    <div class="device-info">
+                        <div class="device-name">喂食机</div>
+                        <div class="device-status"><span class="status-dot dot-online"></span>在线</div>
+                    </div>
+                    <div class="device-data">
+                        <div class="data-item">
+                            <div class="data-val" id="feeder-servings">--</div>
+                            <div class="data-label">今日投喂</div>
+                        </div>
+                        <div class="data-item">
+                            <div class="data-val" id="feeder-remaining">--</div>
+                            <div class="data-label">计划剩余</div>
+                        </div>
+                    </div>
+                    <div class="arrow-icon"><i class="fas fa-chevron-right"></i></div>
+                </div>`;
+
+            // 1.2 动态扫描到的猫厕所
+            const litterbox = petkit.find(d => {
+                if (!d || !d.type) return false;
+                const name = d.name || '';
+                return ['T3', 'T4', 'T4 Pura MAX', 'T5'].includes(d.type) || name.includes('MAX');
+            });
+            
+            if (litterbox) {
+                const stats = litterbox.state_summary || {};
+                petHtml += `
+                    <div class="device-card" onclick="location.href='/litterbox?device_id=${litterbox.id}'">
+                        <div class="device-icon" style="background: #e6f7ff; color: #1890ff;"><i class="fas fa-cat"></i></div>
+                        <div class="device-info">
+                            <div class="device-name">猫厕所</div>
+                            <div class="device-status"><span class="status-dot dot-online"></span>在线</div>
+                        </div>
+                        <div class="device-data">
+                            <div class="data-item">
+                                <div class="data-val">${stats.used_times || 0}次</div>
+                                <div class="data-label">今日如厕</div>
+                            </div>
+                            <div class="data-item">
+                                <div class="data-val">${stats.sand_percent || 0}%</div>
+                                <div class="data-label">猫砂余量</div>
+                            </div>
+                        </div>
+                        <div class="arrow-icon"><i class="fas fa-chevron-right"></i></div>
+                    </div>`;
+            } else {
+                petHtml += `
+                    <div class="device-card" onclick="showToast('正在搜索设备...')">
+                        <div class="device-icon" style="background: #f0f0f0; color: #999;"><i class="fas fa-cat"></i></div>
+                        <div class="device-info">
+                            <div class="device-name">猫厕所</div>
+                            <div class="device-status"><span class="status-dot dot-offline"></span>未连接</div>
+                        </div>
+                        <div class="device-data" style="opacity:0.5;">
+                            <div class="data-item">
+                                <div class="data-val">--</div>
+                                <div class="data-label">今日如厕</div>
+                            </div>
+                        </div>
+                        <div class="arrow-icon"><i class="fas fa-chevron-right"></i></div>
+                    </div>`;
+            }
+
+            petHtml += '</div>';
+            container.innerHTML += petHtml;
+
+            // --- 2. 健康与体质 ---
+            const scalesKnown = known.filter(d => d && d.type === 'scale');
+            if (scalesKnown.length > 0) {
+                container.innerHTML += `<div class="section-title"><i class="fas fa-weight"></i> 健康与体质</div>`;
+                let html = '<div class="device-grid">';
+                scalesKnown.forEach(d => {
+                    html += `
+                        <div class="device-card" onclick="location.href='/scale'">
+                            <div class="device-icon" style="background: #fff0f6; color: #eb2f96;"><i class="fas fa-weight"></i></div>
+                            <div class="device-info">
+                                <div class="device-name">${d.name || '体脂秤'}</div>
+                                <div class="device-status"><span class="status-dot dot-online"></span>点击称重</div>
+                            </div>
+                            <div class="device-data">
+                                <div class="data-item">
+                                    <div class="data-val" id="last-weight-${d.id}">--kg</div>
+                                    <div class="data-label">最近称重</div>
+                                </div>
+                            </div>
+                            <div class="arrow-icon"><i class="fas fa-chevron-right"></i></div>
+                        </div>`;
+                });
+                html += '</div>';
+                container.innerHTML += html;
+                
+                scalesKnown.forEach(d => updateLastWeight(d.id));
+            }
+            
+            updateFeederStats();
+        }
+
+        async function updateFeederStats() {
+            try {
+                // 1. 获取今日投喂
+                const servingsRes = await fetch('/api/cloudpets/servings_today');
+                const servingsData = await servingsRes.json();
+                const servingsEl = document.getElementById('feeder-servings');
+                if (servingsEl && servingsData.code === 200) {
+                    servingsEl.innerText = `${servingsData.result || 0} 次`;
+                }
+
+                // 2. 获取计划并计算剩余
+                const plansRes = await fetch('/api/cloudpets/plans');
+                const plans = await plansRes.json();
+                
+                if (Array.isArray(plans)) {
+                    // 获取当前时间 HH:mm
+                    const now = new Date();
+                    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+                    
+                    let remaining = 0;
+                    plans.forEach(p => {
+                        // 确保 plan 结构中有 time 且 enabled
+                        // 假设 p.time 是 "HH:mm"
+                        // 假设 p.enabled 默认 true (如果 undefined)
+                        if (p.time && p.enabled !== false && p.enabled !== 0 && p.enabled !== '0') {
+                            const [h, m] = p.time.split(':').map(Number);
+                            const planMinutes = h * 60 + m;
+                            if (planMinutes > currentMinutes) {
+                                remaining++;
+                            }
+                        }
+                    });
+                    
+                    const remainingEl = document.getElementById('feeder-remaining');
+                    if (remainingEl) remainingEl.innerText = `${remaining} 次`;
+                }
+            } catch (e) {
+                console.error('Failed to update feeder stats', e);
+            }
+        }
+
+        async function updateLastWeight(deviceId) {
+             try {
+                const res = await fetch(`/api/devices/${deviceId}/history?limit=1`);
+                const history = await res.json();
+                if (history && history.length > 0) {
+                    const el = document.getElementById(`last-weight-${deviceId}`);
+                    if (el) el.innerText = `${history[0].weight.toFixed(2)} kg`;
+                }
+            } catch (e) {}
+        }
+
+        // --- Discovery Modal ---
+        function showDiscoveryModal() {
+            document.getElementById('discovery-modal').classList.add('show');
+        }
+        function hideDiscoveryModal(e) {
+            if (e.target.id === 'discovery-modal') {
+                document.getElementById('discovery-modal').classList.remove('show');
+            }
+        }
+        async function startDiscovery(type) {
+            hideDiscoveryModal({target: {id: 'discovery-modal'}});
+            showToast('开始扫描蓝牙设备...');
+            try {
+                const res = await fetch(`/api/devices/scan?type=${type}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'started') {
+                    showToast('扫描中，请稍候...');
+                    setTimeout(fetchDevices, 5000); // Refresh after 5s
+                }
+            } catch (e) {
+                showToast('扫描启动失败');
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+    </script>
+</body>
+</html>

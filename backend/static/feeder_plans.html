@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>喂食计划</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #FF9800;
+            --primary-dark: #F57C00;
+            --bg: #f2f4f8;
+            --card-bg: #ffffff;
+            --text-main: #333333;
+            --text-sub: #888888;
+            --danger: #ff4d4f;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text-main); }
+        .app-container { max-width: 480px; margin: 0 auto; padding: 20px 16px; min-height: 100vh; }
+        
+        header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .back-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
+        h1 { font-size: 20px; margin: 0; font-weight: 700; flex: 1; text-align: center; }
+        .add-btn { background: none; border: none; font-size: 20px; color: var(--primary); cursor: pointer; padding: 8px; }
+
+        .plan-list { display: flex; flex-direction: column; gap: 12px; }
+        .plan-item {
+            background: white; border-radius: 16px; padding: 16px 20px;
+            display: flex; align-items: center; justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+            transition: transform 0.2s; cursor: pointer;
+        }
+        .plan-item:active { transform: scale(0.99); background: #fafafa; }
+        
+        .plan-info { flex: 1; }
+        .plan-time { font-size: 24px; font-weight: 700; color: var(--text-main); line-height: 1.2; }
+        .plan-amount-tag { 
+            font-size: 13px; font-weight: 600; color: var(--primary); 
+            background: #fff7e6; padding: 2px 8px; border-radius: 6px; 
+            margin-left: 8px; vertical-align: middle;
+        }
+        .plan-detail { font-size: 14px; color: var(--text-sub); margin-top: 6px; }
+        
+        .plan-actions-right { display: flex; align-items: center; gap: 16px; }
+        .plan-delete-icon { 
+            color: #ffccc7; font-size: 18px; padding: 8px; 
+            transition: color 0.2s;
+        }
+        .plan-delete-icon:active { color: var(--danger); }
+
+        .plan-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+        .plan-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #e0e0e0; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 22px; width: 22px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--primary); }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+        /* Add/Edit Plan Modal (Center) */
+        .center-modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); z-index: 300;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.3s;
+            backdrop-filter: blur(4px);
+        }
+        .center-modal-overlay.show { opacity: 1; pointer-events: auto; }
+        .center-modal {
+            background: white; width: 90%; max-width: 340px; border-radius: 24px; padding: 24px;
+            transform: scale(0.9); transition: transform 0.3s; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        .center-modal-overlay.show .center-modal { transform: scale(1); }
+        
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; font-size: 14px; color: var(--text-sub); margin-bottom: 8px; }
+        .form-input { 
+            width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 12px; 
+            font-size: 16px; outline: none; transition: border-color 0.2s; background: #f9f9f9;
+        }
+        .form-input:focus { border-color: var(--primary); background: white; }
+        
+        .week-selector { display: flex; justify-content: space-between; margin-top: 10px; }
+        .week-day { 
+            width: 32px; height: 32px; border-radius: 50%; background: #f0f2f5; 
+            display: flex; align-items: center; justify-content: center; 
+            font-size: 12px; color: var(--text-sub); cursor: pointer; transition: all 0.2s;
+        }
+        .week-day.active { background: var(--primary); color: white; transform: scale(1.1); }
+
+        .feed-amount-selector { display: flex; gap: 10px; margin: 20px 0; justify-content: center; }
+        .amount-chip { 
+            width: 40px; height: 40px; border-radius: 50%; border: 1px solid #eee; 
+            display: flex; align-items: center; justify-content: center; 
+            font-weight: 700; color: var(--text-sub); cursor: pointer;
+        }
+        .amount-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+        .btn { border: none; padding: 14px; border-radius: 14px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; }
+        .btn-primary { background: var(--primary); color: white; margin-bottom: 12px; }
+        .btn-secondary { background: #f0f2f5; color: #666; }
+
+        .loading-mask {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.8); z-index: 99;
+            display: flex; justify-content: center; align-items: center;
+            backdrop-filter: blur(2px);
+        }
+        .hidden { display: none !important; }
+
+        .toast {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: rgba(0,0,0,0.8); color: white; padding: 12px 24px; border-radius: 30px;
+            font-size: 14px; opacity: 0; transition: all 0.3s; pointer-events: none; z-index: 400;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <button class="back-btn" onclick="location.href='/feeder'"><i class="fas fa-chevron-left"></i></button>
+            <h1>喂食计划</h1>
+            <button class="add-btn" onclick="openEditPlan()"><i class="fas fa-plus"></i></button>
+        </header>
+
+        <div class="plan-list" id="plan-list-container">
+            <!-- Plans -->
+        </div>
+    </div>
+
+    <!-- Edit Plan Modal -->
+    <div id="edit-plan-modal" class="center-modal-overlay">
+        <div class="center-modal">
+            <h3 style="margin-top:0; margin-bottom:20px; text-align:center;" id="edit-modal-title">添加计划</h3>
+            
+            <div class="form-group">
+                <label class="form-label">时间</label>
+                <input type="time" class="form-input" id="plan-time-input" required>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">份数</label>
+                <div class="feed-amount-selector" style="margin:0; justify-content:flex-start;">
+                    <div class="amount-chip active" id="plan-amount-1" onclick="selectPlanAmount(1)">1</div>
+                    <div class="amount-chip" id="plan-amount-2" onclick="selectPlanAmount(2)">2</div>
+                    <div class="amount-chip" id="plan-amount-3" onclick="selectPlanAmount(3)">3</div>
+                    <div class="amount-chip" id="plan-amount-4" onclick="selectPlanAmount(4)">4</div>
+                    <div class="amount-chip" id="plan-amount-5" onclick="selectPlanAmount(5)">5</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">重复</label>
+                <div class="week-selector">
+                    <div class="week-day" onclick="toggleWeek(1)" data-day="1">一</div>
+                    <div class="week-day" onclick="toggleWeek(2)" data-day="2">二</div>
+                    <div class="week-day" onclick="toggleWeek(3)" data-day="3">三</div>
+                    <div class="week-day" onclick="toggleWeek(4)" data-day="4">四</div>
+                    <div class="week-day" onclick="toggleWeek(5)" data-day="5">五</div>
+                    <div class="week-day" onclick="toggleWeek(6)" data-day="6">六</div>
+                    <div class="week-day" onclick="toggleWeek(7)" data-day="7">日</div>
+                </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="savePlan()">保存</button>
+            <button class="btn btn-secondary" onclick="closeEditPlan()">取消</button>
+        </div>
+    </div>
+
+    <!-- Delete Confirm Modal -->
+    <div id="confirm-modal" class="center-modal-overlay">
+        <div class="center-modal" style="text-align: center;">
+            <i class="fas fa-exclamation-circle" style="font-size: 48px; color: var(--danger); margin-bottom: 16px;"></i>
+            <h3 style="margin: 0 0 12px; color: var(--text-main);">确认删除？</h3>
+            <p style="margin: 0 0 24px; color: var(--text-sub); font-size: 14px;">此操作无法撤销，确定要删除该喂食计划吗？</p>
+            <div style="display: flex; gap: 12px;">
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">取消</button>
+                <button class="btn btn-primary" style="background: var(--danger); margin-bottom: 0;" onclick="doDeletePlan()">确认删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading" class="loading-mask hidden">
+        <div style="text-align:center; color: var(--primary);">
+            <i class="fas fa-circle-notch fa-spin fa-2x"></i>
+        </div>
+    </div>
+    <div id="toast" class="toast">操作成功</div>
+
+    <!-- Debug Log Area -->
+    <div id="debug-log" style="margin-top: 20px; padding: 10px; background: #eee; border-radius: 8px; font-family: monospace; font-size: 12px; color: #333; display: none;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+            <strong>Debug Log</strong>
+            <button onclick="document.getElementById('debug-log').style.display='none'" style="border:none; background:none; color:blue;">Hide</button>
+        </div>
+        <div id="log-content" style="max-height: 200px; overflow-y: auto;"></div>
+    </div>
+
+    <script>
+        let plans = [];
+        let currentPlanId = null; 
+        let deletePlanId = null; 
+        let planAmount = 1;
+        let planWeekdays = [1,2,3,4,5,6,7];
+
+        // Show debug log automatically
+        document.getElementById('debug-log').style.display = 'block';
+
+        function log(msg, data) {
+            console.log(msg, data);
+            const el = document.getElementById('log-content');
+            const entry = document.createElement('div');
+            entry.style.borderBottom = '1px solid #ccc';
+            entry.style.padding = '4px 0';
+            const time = new Date().toLocaleTimeString();
+            let dataStr = '';
+            try { dataStr = data ? JSON.stringify(data, null, 2) : ''; } catch(e) { dataStr = String(data); }
+            entry.innerText = `[${time}] ${msg}\n${dataStr}`;
+            el.prepend(entry);
+        }
+
+        loadPlans();
+
+        async function loadPlans(manageLoading=true) {
+            if(manageLoading) showLoading(true);
+            log('Loading plans...');
+            try {
+                const res = await fetch('/api/cloudpets/plans');
+                plans = await res.json();
+                log('Plans loaded:', plans);
+                renderPlans();
+            } catch(e) {
+                console.error(e);
+                log('Load error:', e.message);
+                showToast('加载失败');
+            } finally {
+                if(manageLoading) showLoading(false);
+            }
+        }
+
+        function renderPlans() {
+            const container = document.getElementById('plan-list-container');
+            if (!plans || plans.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#999; margin-top:50px;">暂无计划</div>';
+                return;
+            }
+
+            container.innerHTML = plans.map(p => {
+                const weekdaysStr = formatWeekdays(p.weekdays || [1,2,3,4,5,6,7]);
+                const timeStr = p.time;
+                const isEnabled = String(p.enabled) === 'true';
+
+                return `
+                <div class="plan-item" id="plan-${p.id}" onclick="openEditPlan('${p.id}')">
+                    <div class="plan-info">
+                        <div>
+                            <span class="plan-time">${timeStr}</span>
+                            <span class="plan-amount-tag">${p.amount} 份</span>
+                        </div>
+                        <div class="plan-detail">${weekdaysStr}</div>
+                    </div>
+                    <div class="plan-actions-right">
+                        <label class="plan-switch" onclick="event.stopPropagation()">
+                            <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="togglePlan('${p.id}', this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                        <i class="fas fa-trash-alt plan-delete-icon" onclick="event.stopPropagation(); deletePlan('${p.id}')"></i>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function formatWeekdays(days) {
+            if (days.length === 7) return '每天';
+            const map = {1:'周一', 2:'周二', 3:'周三', 4:'周四', 5:'周五', 6:'周六', 7:'周日'};
+            return days.sort().map(d => map[d]).join(' ');
+        }
+
+        // --- Edit Plan Actions ---
+        function openEditPlan(id = null) {
+            currentPlanId = id;
+            document.getElementById('edit-plan-modal').classList.add('show');
+            
+            if (id) {
+                const p = plans.find(x => x.id === id);
+                document.getElementById('edit-modal-title').innerText = '修改计划';
+                document.getElementById('plan-time-input').value = p.time;
+                selectPlanAmount(p.amount);
+                setWeekdays(p.weekdays || [1,2,3,4,5,6,7]);
+            } else {
+                document.getElementById('edit-modal-title').innerText = '添加计划';
+                document.getElementById('plan-time-input').value = '08:00';
+                selectPlanAmount(2);
+                setWeekdays([1,2,3,4,5,6,7]);
+            }
+        }
+        function closeEditPlan() { document.getElementById('edit-plan-modal').classList.remove('show'); }
+
+        function selectPlanAmount(n) {
+            planAmount = n;
+            for(let i=1; i<=5; i++) {
+                document.getElementById(`plan-amount-${i}`).classList.toggle('active', i === n);
+            }
+        }
+        function toggleWeek(day) {
+            const idx = planWeekdays.indexOf(day);
+            if (idx > -1) planWeekdays.splice(idx, 1);
+            else planWeekdays.push(day);
+            setWeekdays(planWeekdays);
+        }
+        function setWeekdays(days) {
+            planWeekdays = [...days];
+            document.querySelectorAll('.week-day').forEach(el => {
+                const d = parseInt(el.getAttribute('data-day'));
+                el.classList.toggle('active', days.includes(d));
+            });
+        }
+
+        async function savePlan() {
+            const time = document.getElementById('plan-time-input').value;
+            if (!time) return showToast('请选择时间');
+            if (planWeekdays.length === 0) return showToast('请选择重复日期');
+
+            const payload = {
+                time: time,
+                amount: planAmount,
+                weekdays: planWeekdays,
+                enabled: true
+            };
+
+            log('Saving plan payload:', payload);
+            showLoading(true);
+            try {
+                let res;
+                if (currentPlanId) {
+                    const existing = plans.find(x => x.id === currentPlanId);
+                    payload.enabled = existing ? existing.enabled : true;
+                    res = await fetch(`/api/cloudpets/plans/${currentPlanId}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    res = await fetch('/api/cloudpets/plans', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                }
+
+                let data = {};
+                try { data = await res.json(); } catch(e) { console.error('JSON parse error', e); }
+
+                log('Save Plan Response:', {status: res.status, data: data});
+
+                if (res.ok && (data.code === 200 || data.code === 0 || !data.code)) {
+                    showToast('保存成功');
+                    closeEditPlan();
+                    await loadPlans(false);
+                } else {
+                    showToast('保存失败: ' + (data.message || '未知错误'));
+                }
+            } catch(e) { 
+                console.error(e);
+                log('Save error:', e.message);
+                showToast('网络错误'); 
+            } finally { showLoading(false); }
+        }
+
+        // --- Delete Logic ---
+        function deletePlan(id) {
+            deletePlanId = id;
+            document.getElementById('confirm-modal').classList.add('show');
+        }
+        function closeConfirmModal() {
+            document.getElementById('confirm-modal').classList.remove('show');
+            deletePlanId = null;
+        }
+
+        async function doDeletePlan() {
+            if (!deletePlanId) return;
+            const id = deletePlanId;
+            closeConfirmModal();
+            showLoading(true);
+            log('Deleting plan:', id);
+
+            try {
+                const res = await fetch(`/api/cloudpets/plans/${id}`, { method: 'DELETE' });
+                let data = {};
+                try { data = await res.json(); } catch(e) {}
+
+                log('Delete Plan Response:', {status: res.status, data: data});
+
+                if (res.ok) {
+                    showToast('已删除');
+                    await loadPlans(false);
+                } else {
+                    showToast('删除失败: ' + (data.message || ''));
+                }
+            } catch(e) { 
+                console.error(e);
+                log('Delete error:', e.message);
+                showToast('网络错误'); 
+            } finally { showLoading(false); }
+        }
+
+        async function togglePlan(id, enabled) {
+            const p = plans.find(x => x.id === id);
+            if (!p) return;
+            
+            p.enabled = enabled;
+            showLoading(true);
+            log('Toggling plan:', {id, enabled});
+
+            try {
+                const payload = { ...p, enabled: enabled };
+                const res = await fetch(`/api/cloudpets/plans/${id}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                
+                let data = {};
+                try { data = await res.json(); } catch(e) {}
+                
+                log('Toggle Plan Response:', {status: res.status, data: data});
+
+                if (res.ok && (data.code === 200 || data.code === 0 || !data.code)) {
+                    // Success
+                    await loadPlans(false);
+                } else {
+                    showToast('状态更新失败: ' + (data.message || ''));
+                    await loadPlans(false); // Revert
+                }
+            } catch(e) { 
+                console.error(e);
+                log('Toggle error:', e.message);
+                showToast('网络错误');
+                await loadPlans(false);
+            } finally { showLoading(false); }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('hidden', !show);
+        }
+
+        function showToast(msg) {
+            const el = document.getElementById('toast');
+            el.innerText = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 3000);
+        }
+    </script>
+</body>
+</html>

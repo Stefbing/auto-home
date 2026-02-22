@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>云宠智能喂食机</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #FF9800; /* Orange for feeder */
+            --primary-dark: #F57C00;
+            --bg: #f2f4f8;
+            --card-bg: #ffffff;
+            --text-main: #333333;
+            --text-sub: #888888;
+            --success: #52c41a;
+            --warning: #faad14;
+            --danger: #ff4d4f;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text-main); }
+        
+        .app-container { max-width: 480px; margin: 0 auto; padding: 20px 16px; min-height: 100vh; }
+        
+        header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .back-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
+        h1 { font-size: 20px; margin: 0; font-weight: 700; flex: 1; text-align: center; margin-right: 34px; }
+        .refresh-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
+        
+        .device-card {
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.04);
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .device-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+        .device-name { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+        .device-type { font-size: 12px; color: var(--text-sub); background: #f0f2f5; padding: 2px 8px; border-radius: 6px; display: inline-block; }
+        
+        .status-tag {
+            font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 20px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .status-idle { background: #fff7e6; color: var(--primary); }
+        .status-working { background: #fffbe6; color: var(--warning); }
+        .status-error { background: #fff1f0; color: var(--danger); }
+
+        .main-stats { display: flex; justify-content: space-between; margin-bottom: 24px; }
+        .stat-block { text-align: center; flex: 1; }
+        .stat-icon { font-size: 24px; margin-bottom: 8px; color: var(--primary); opacity: 0.8; }
+        .stat-val { font-size: 20px; font-weight: 700; color: var(--text-main); }
+        .stat-label { font-size: 12px; color: var(--text-sub); margin-top: 4px; }
+
+        .detail-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+            background: #f8f9fa; border-radius: 16px; padding: 16px; margin-bottom: 24px;
+        }
+        .detail-item { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-sub); }
+        .detail-item i { width: 16px; text-align: center; }
+        .detail-item.alert { color: var(--danger); font-weight: 600; }
+
+        .action-area { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .btn {
+            border: none; padding: 14px; border-radius: 14px; font-size: 15px; font-weight: 600;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: transform 0.1s;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3); }
+        .btn-secondary { background: #fff7e6; color: var(--primary); }
+        
+        /* Loading & Toast */
+        .loading-mask {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.8); z-index: 99;
+            display: flex; justify-content: center; align-items: center;
+            backdrop-filter: blur(2px);
+        }
+        .hidden { display: none !important; }
+
+        .toast {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: rgba(0,0,0,0.8); color: white; padding: 12px 24px; border-radius: 30px;
+            font-size: 14px; opacity: 0; transition: all 0.3s; pointer-events: none; z-index: 100;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        /* Feed Modal Chips */
+        .center-modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); z-index: 300;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.3s;
+            backdrop-filter: blur(4px);
+        }
+        .center-modal-overlay.show { opacity: 1; pointer-events: auto; }
+        .center-modal {
+            background: white; width: 90%; max-width: 340px; border-radius: 24px; padding: 24px;
+            transform: scale(0.9); transition: transform 0.3s; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        .center-modal-overlay.show .center-modal { transform: scale(1); }
+
+        .feed-amount-selector { display: flex; gap: 10px; margin: 20px 0; justify-content: center; }
+        .amount-chip { 
+            width: 40px; height: 40px; border-radius: 50%; border: 1px solid #eee; 
+            display: flex; align-items: center; justify-content: center; 
+            font-weight: 700; color: var(--text-sub); cursor: pointer;
+        }
+        .amount-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <button class="back-btn" onclick="location.href='/'"><i class="fas fa-chevron-left"></i></button>
+            <h1>喂食机详情</h1>
+            <button class="refresh-btn" onclick="fetchData()"><i class="fas fa-sync-alt"></i></button>
+        </header>
+
+        <div class="device-card">
+            <div class="device-top">
+                <div>
+                    <div class="device-name">云宠智能喂食机</div>
+                    <div class="device-type">Feeder</div>
+                </div>
+                <div class="status-tag status-idle">
+                    <i class="fas fa-check-circle"></i> 在线
+                </div>
+            </div>
+
+            <div class="main-stats">
+                <div class="stat-block">
+                    <div class="stat-icon"><i class="fas fa-cookie-bite"></i></div>
+                    <div class="stat-val" id="servings-today">--</div>
+                    <div class="stat-label">今日投喂(次)</div>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-icon"><i class="fas fa-list-ol"></i></div>
+                    <div class="stat-val" id="plans-remaining">--</div>
+                    <div class="stat-label">计划剩余(次)</div>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-icon"><i class="fas fa-signal"></i></div>
+                    <div class="stat-val">良好</div>
+                    <div class="stat-label">网络状态</div>
+                </div>
+            </div>
+
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <i class="fas fa-clock"></i> 上次投喂: <span id="last-feed-time">--:--</span>
+                </div>
+                <div class="detail-item">
+                    <i class="fas fa-box"></i> 粮桶状态: 充足
+                </div>
+                <div class="detail-item">
+                    <i class="fas fa-battery-full"></i> 电池电量: 100%
+                </div>
+                <div class="detail-item">
+                    <i class="fas fa-wifi"></i> 连接信号: 强
+                </div>
+            </div>
+
+            <div class="action-area">
+                <button class="btn btn-secondary" onclick="location.href='/feeder/plans'">
+                    <i class="fas fa-list-ul"></i> 喂食计划
+                </button>
+                <button class="btn btn-primary" onclick="showFeedModal()">
+                    <i class="fas fa-utensils"></i> 立即投喂
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading" class="loading-mask hidden">
+        <div style="text-align:center; color: var(--primary);">
+            <i class="fas fa-circle-notch fa-spin fa-2x"></i>
+        </div>
+    </div>
+
+    <div id="toast" class="toast">操作成功</div>
+
+    <!-- Debug Log Area -->
+    <div id="debug-log" style="margin-top: 20px; padding: 10px; background: #eee; border-radius: 8px; font-family: monospace; font-size: 12px; color: #333; display: none;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+            <strong>Debug Log</strong>
+            <button onclick="document.getElementById('debug-log').style.display='none'" style="border:none; background:none; color:blue;">Hide</button>
+        </div>
+        <div id="log-content" style="max-height: 200px; overflow-y: auto;"></div>
+    </div>
+
+    <!-- Feed Modal -->
+    <div id="feed-modal" class="center-modal-overlay">
+        <div class="center-modal">
+            <h3 style="margin-top:0; text-align: center;">立即喂食</h3>
+            <p style="text-align:center; color:#666; font-size:14px;">选择投喂份数 (每份约 5-10g)</p>
+            <div class="feed-amount-selector">
+                <div class="amount-chip active" onclick="selectFeedAmount(1)">1</div>
+                <div class="amount-chip" onclick="selectFeedAmount(2)">2</div>
+                <div class="amount-chip" onclick="selectFeedAmount(3)">3</div>
+                <div class="amount-chip" onclick="selectFeedAmount(4)">4</div>
+                <div class="amount-chip" onclick="selectFeedAmount(5)">5</div>
+            </div>
+            <button class="btn btn-primary" onclick="doFeed()" style="width:100%; margin-bottom: 12px;">确定投喂</button>
+            <button class="btn btn-secondary" onclick="closeFeedModal()" style="width:100%; background: #f0f2f5; color: #666;">取消</button>
+        </div>
+    </div>
+
+    <script>
+        let plans = [];
+        let feedAmount = 1;
+
+        // Show debug log automatically
+        document.getElementById('debug-log').style.display = 'block';
+
+        function log(msg, data) {
+            console.log(msg, data);
+            const el = document.getElementById('log-content');
+            const entry = document.createElement('div');
+            entry.style.borderBottom = '1px solid #ccc';
+            entry.style.padding = '4px 0';
+            const time = new Date().toLocaleTimeString();
+            let dataStr = '';
+            try { dataStr = data ? JSON.stringify(data, null, 2) : ''; } catch(e) { dataStr = String(data); }
+            entry.innerText = `[${time}] ${msg}\n${dataStr}`;
+            el.prepend(entry);
+        }
+
+        fetchData();
+
+        async function fetchData() {
+            showLoading(true);
+            try {
+                // 1. Servings Today
+                log('Fetching servings today...');
+                const res = await fetch('/api/cloudpets/servings_today');
+                const data = await res.json();
+                log('Servings data:', data);
+                if (data.code === 200) {
+                    document.getElementById('servings-today').innerText = data.result || 0;
+                }
+            } catch(e) { log('Servings error:', e.message); }
+
+            // 2. Plans (Only for count)
+            try {
+                log('Fetching plans...');
+                const res = await fetch('/api/cloudpets/plans');
+                plans = await res.json();
+                log('Plans data:', plans);
+                updateRemaining();
+            } catch(e) { log('Plans error:', e.message); }
+            
+            showLoading(false);
+        }
+
+        function updateRemaining() {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            let remaining = 0;
+            if(Array.isArray(plans)) {
+                plans.forEach(p => {
+                    if (String(p.enabled) === 'true' && p.time) {
+                        const [h, m] = p.time.split(':').map(Number);
+                        if (h * 60 + m > currentMinutes) remaining++;
+                    }
+                });
+            }
+            document.getElementById('plans-remaining').innerText = remaining;
+        }
+
+        // --- Feed Actions ---
+        function showFeedModal() {
+            document.getElementById('feed-modal').classList.add('show');
+            selectFeedAmount(1);
+        }
+        function closeFeedModal() { document.getElementById('feed-modal').classList.remove('show'); }
+        function selectFeedAmount(n) {
+            feedAmount = n;
+            document.querySelectorAll('#feed-modal .amount-chip').forEach(el => {
+                el.classList.toggle('active', parseInt(el.innerText) === n);
+            });
+        }
+        async function doFeed() {
+            showLoading(true);
+            log('Sending feed request...', {amount: feedAmount});
+            try {
+                const res = await fetch(`/api/cloudpets/feed?amount=${feedAmount}`, { method: 'POST' });
+                
+                let data = {};
+                try { data = await res.json(); } catch(e) { console.error('JSON parse error', e); }
+                
+                log('Feed Response:', {status: res.status, data: data});
+
+                showLoading(false);
+                
+                // Looser check: code 200 OR 0 OR missing code but HTTP 200
+                if (res.ok && (data.code === 200 || data.code === 0 || !data.code)) {
+                    showToast('投喂指令已发送');
+                    closeFeedModal();
+                    document.getElementById('last-feed-time').innerText = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+                    setTimeout(fetchData, 2000);
+                } else {
+                    showToast('投喂失败: ' + (data.message || '未知错误'));
+                }
+            } catch(e) { 
+                console.error(e);
+                log('Feed error:', e.message);
+                showLoading(false);
+                showToast('网络错误'); 
+            }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('hidden', !show);
+        }
+
+        function showToast(msg) {
+            const el = document.getElementById('toast');
+            el.innerText = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 3000);
+        }
+    </script>
+</body>
+</html>

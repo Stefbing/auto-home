@@ -1,0 +1,34 @@
+<view class="container">
+  <view class="status-card">
+    <view class="weight-display">{{weight}} <text class="unit">kg</text></view>
+    <view class="status-text">{{isStabilized ? '已锁定' : '测量中...'}}</view>
+    <view class="device-name" wx:if="{{device}}">设备: {{device}}</view>
+  </view>
+
+  <view class="controls">
+    <button type="primary" bindtap="startScan" loading="{{scanning}}">
+      {{scanning ? '扫描中...' : '开始连接体脂秤'}}
+    </button>
+    
+    <button type="default" bindtap="stopScan" wx:if="{{scanning}}" style="margin-top:10px">停止扫描</button>
+    
+    <view class="user-select">
+      <picker mode="selector" range="{{users}}" range-key="name" bindchange="bindUserChange">
+        <view class="picker-text">{{selectedUserIndex>=0 ? users[selectedUserIndex].name : '选择归属用户'}}</view>
+      </picker>
+      <view class="new-user">
+        <input placeholder="新增用户姓名" value="{{newUserName}}" bindinput="bindNewUserInput" />
+        <button bindtap="createUser">新增</button>
+      </view>
+    </view>
+
+    <button type="warn" bindtap="uploadData" disabled="{{!isStabilized}}" style="margin-top:20px">
+      上传数据
+    </button>
+  </view>
+
+  <view class="logs">
+    <view class="log-title">日志:</view>
+    <view wx:for="{{logs}}" wx:key="index" class="log-item">{{item}}</view>
+  </view>
+</view>

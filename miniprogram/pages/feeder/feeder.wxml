@@ -1,0 +1,21 @@
+<view class="container">
+  <view class="card">
+    <view class="title">PetWant 喂食机</view>
+    <button type="primary" bindtap="feedOne">立即投喂 (1份)</button>
+    
+    <view class="switch-row">
+      <text>氛围灯</text>
+      <switch bindchange="toggleLight"/>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">喂食计划</view>
+    <view wx:for="{{plans}}" wx:key="index" class="plan-item">
+      <text>{{item.time}}</text>
+      <text>{{item.amount}}份</text>
+      <switch checked="{{item.enabled}}" data-index="{{index}}" bindchange="togglePlan"/>
+    </view>
+    <button type="primary" bindtap="savePlans" style="margin-top:10px">保存计划</button>
+  </view>
+</view>

@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pypetkitapi
+python-dotenv
+sqlmodel
+aiohttp

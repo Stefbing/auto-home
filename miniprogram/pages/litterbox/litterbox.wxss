@@ -1,0 +1,16 @@
+.container { padding: 20px; }
+.card {
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+.title { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+.value { font-weight: bold; color: #007aff; }

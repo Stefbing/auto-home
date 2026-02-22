@@ -1,0 +1,18 @@
+<view class="container">
+  <view class="card">
+    <view class="title">PetKit 猫厕所 MAX2</view>
+    <button type="warn" bindtap="cleanNow">立即清理</button>
+  </view>
+
+  <view class="card">
+    <view class="title">今日数据</view>
+    <view class="stat-row">
+      <text>如厕次数</text>
+      <text class="value">{{stats.today_visits}}次</text>
+    </view>
+    <view class="stat-row">
+      <text>最近一次</text>
+      <text class="value">{{stats.last_visit}}</text>
+    </view>
+  </view>
+</view>

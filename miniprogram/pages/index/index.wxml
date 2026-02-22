@@ -1,0 +1,17 @@
+<view class="container">
+  <view class="header">智能家居控制中心</view>
+  
+  <view class="menu-list">
+    <navigator url="/pages/feeder/feeder" class="menu-item">
+      <text>🐱 智能喂食机 (PetWant)</text>
+    </navigator>
+    
+    <navigator url="/pages/litterbox/litterbox" class="menu-item">
+      <text>🚽 智能猫厕所 (PetKit)</text>
+    </navigator>
+    
+    <navigator url="/pages/scale/scale" class="menu-item">
+      <text>⚖️ 小米体脂秤</text>
+    </navigator>
+  </view>
+</view>
