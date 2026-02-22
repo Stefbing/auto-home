@@ -14,7 +14,6 @@ from sqlmodel import Session, select
 
 # 导入你现有的模块
 from app.services.petkit_service import PetKitService
-from app.services.ble_service import ble_service
 from app.services.cloudpets_service import cloudpets_service, FeedingPlan as CloudPetsPlan
 from app.models.models import User, WeightRecord, FeedingPlan, KnownDevice
 from app.models.db import get_session, init_db
@@ -34,9 +33,6 @@ async def lifespan(app: FastAPI):
     """管理应用启动和关闭时的逻辑"""
     # 启动时：初始化数据库和长连接服务
     init_db()
-    
-    # 启动宿主机 BLE 扫描服务
-    asyncio.create_task(ble_service.start())
     
     # CloudPets 不需要启动，它是 HTTP 客户端
     
@@ -272,10 +268,6 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
     session.refresh(record)
     return {"status": "success", "id": record.id}
 
-@app.get("/api/scale/live")
-async def get_live_scale():
-    return ble_service.latest_data
-
 # --- Known Devices 路由 ---
 @app.get("/api/devices/known", response_model=List[KnownDevice])
 def get_known_devices(session: Session = Depends(get_session)):
@@ -299,8 +291,3 @@ def unbind_device(device_id: str, session: Session = Depends(get_session)):
         session.delete(device)
         session.commit()
     return {"status": "success"}
-
-if __name__ == "__main__":
-    # 使用 "app.main:app" 字符串而不是直接传 app 对象，能避免很多路径问题
-    # 并且在根目录下运行：python -m app.main
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)

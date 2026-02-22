@@ -4,3 +4,6 @@ pypetkitapi
 python-dotenv
 sqlmodel
 aiohttp
+httpx
+pydantic
+psycopg2-binary

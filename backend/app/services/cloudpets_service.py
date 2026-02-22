@@ -1,3 +1,4 @@
+import os
 import httpx
 import logging
 from typing import Dict, Any, List, Optional
@@ -8,23 +9,19 @@ logger = logging.getLogger(__name__)
 # Base URL from user provided endpoint
 BASE_URL = "https://cn.cloudpets.net"
 
-# Headers provided by user
-# authorization: nzEB8WppwujQqsYkrmxZRU1//JbOIbOx 
-# lang: zh_CN 
-# platform: Android
-# x-cp-familyid: 572807
-# x-cp-client: 1
+# Configuration from Environment Variables
+CLOUDPETS_TOKEN = os.getenv("CLOUDPETS_TOKEN", "nzEB8WppwujQqsYkrmxZRU1//JbOIbOx")
+CLOUDPETS_FAMILY_ID = os.getenv("CLOUDPETS_FAMILY_ID", "572807")
+DEVICE_ID = os.getenv("CLOUDPETS_DEVICE_ID", "336704")
+
 DEFAULT_HEADERS = {
-    "authorization": "nzEB8WppwujQqsYkrmxZRU1//JbOIbOx",
+    "authorization": CLOUDPETS_TOKEN,
     "lang": "zh_CN",
     "platform": "Android",
-    "x-cp-familyid": "572807",
+    "x-cp-familyid": CLOUDPETS_FAMILY_ID,
     "x-cp-client": "1",
     "Content-Type": "application/x-www-form-urlencoded"
 }
-
-# Body Device ID (User provided)
-DEVICE_ID = "336704"
 
 class FeedingPlan(BaseModel):
     id: Optional[str] = None
