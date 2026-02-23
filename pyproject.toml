@@ -3,7 +3,7 @@ name = "auto-home"
 version = "0.1.0"
 description = "Smart Home Controller Backend"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "fastapi",
     "uvicorn",
@@ -19,3 +19,6 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend/app"]
