@@ -67,7 +67,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 使用绝对路径定位 static 目录，适配 Vercel 环境
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# backend/app/main.py -> backend/static
+STATIC_DIR = os.path.join(os.path.dirname(BASE_DIR), "static")
+
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+else:
+    print(f"Warning: Static directory not found at {STATIC_DIR}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -91,23 +99,23 @@ def get_petkit():
 
 @app.get("/")
 async def root():
-    return FileResponse('static/index.html')
+    return FileResponse(os.path.join(STATIC_DIR, 'index.html'))
 
 @app.get("/litterbox")
 async def litterbox_page():
-    return FileResponse('static/litterbox.html')
+    return FileResponse(os.path.join(STATIC_DIR, 'litterbox.html'))
 
 @app.get("/feeder")
 async def feeder_page():
-    return FileResponse('static/feeder.html')
+    return FileResponse(os.path.join(STATIC_DIR, 'feeder.html'))
 
 @app.get("/feeder/plans")
 async def feeder_plans_page():
-    return FileResponse('static/feeder_plans.html')
+    return FileResponse(os.path.join(STATIC_DIR, 'feeder_plans.html'))
 
 @app.get("/scale")
 async def scale_page():
-    return FileResponse('static/scale.html')
+    return FileResponse(os.path.join(STATIC_DIR, 'scale.html'))
 
 # --- PetKit 路由 ---
 @app.get("/api/petkit/debug")
