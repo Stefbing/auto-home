@@ -5,8 +5,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Vercel Postgres 使用 "POSTGRES_URL"
-# 本地开发默认使用 SQLite
-database_url = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL") or "sqlite:///./auto_home.db"
+# Serverless 环境下如果未配置 Postgres，回退到内存数据库 (sqlite:///:memory:) 避免文件权限错误
+# 本地开发默认使用 SQLite 文件 (sqlite:///./auto_home.db)
+if os.getenv("VERCEL"):
+    database_url = os.getenv("POSTGRES_URL") or "sqlite:///:memory:"
+else:
+    database_url = os.getenv("DATABASE_URL") or "sqlite:///./auto_home.db"
 
 # SQLAlchemy 需要 postgresql:// 协议头，Vercel 默认给的是 postgres://
 if database_url and database_url.startswith("postgres://"):
