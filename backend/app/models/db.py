@@ -1,4 +1,5 @@
 from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy.pool import StaticPool
 import os
 from dotenv import load_dotenv
 
@@ -29,7 +30,13 @@ if database_url and database_url.startswith("postgres://"):
 # SQLite 需要特殊参数 check_same_thread=False
 connect_args = {"check_same_thread": False} if "sqlite" in database_url else {}
 
-engine = create_engine(database_url, echo=False, connect_args=connect_args)
+# 如果是 SQLite 内存数据库，必须使用 StaticPool 保持连接不关闭，否则数据会丢失
+poolclass = None
+if "sqlite" in database_url and ":memory:" in database_url:
+    poolclass = StaticPool
+    print("Using StaticPool for in-memory SQLite database.")
+
+engine = create_engine(database_url, echo=False, connect_args=connect_args, poolclass=poolclass)
 
 def init_db():
     SQLModel.metadata.create_all(engine)
