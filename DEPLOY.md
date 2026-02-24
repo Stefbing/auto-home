@@ -29,11 +29,11 @@ pip install -r requirements.txt
 ```
 
 ### 步骤 2: 配置环境变量
-复制 `.env.example` 为 `.env` 并填入您的凭证：
+如果需要自定义配置，可以在 `.env` 文件中设置。如果不设置，系统将使用默认集成的账号（17757577548）。
+
 ```ini
 PETKIT_USERNAME=your_username
 PETKIT_PASSWORD=your_password
-CLOUDPETS_TOKEN=your_token
 ```
 
 ### 步骤 3: 启动后端服务

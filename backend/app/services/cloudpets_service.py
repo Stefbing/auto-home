@@ -3,6 +3,10 @@ import httpx
 import logging
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+from sqlmodel import select, Session
+from app.models.db import engine
+from app.models.models import SystemConfig
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +17,9 @@ BASE_URL = "https://cn.cloudpets.net"
 CLOUDPETS_TOKEN = os.getenv("CLOUDPETS_TOKEN", "nzEB8WppwujQqsYkrmxZRU1//JbOIbOx")
 CLOUDPETS_FAMILY_ID = os.getenv("CLOUDPETS_FAMILY_ID", "572807")
 DEVICE_ID = os.getenv("CLOUDPETS_DEVICE_ID", "336704")
+# 默认集成账号密码，优先从环境变量读取
+CLOUDPETS_ACCOUNT = os.getenv("CLOUDPETS_ACCOUNT", "17757577548")
+CLOUDPETS_PASSWORD = os.getenv("CLOUDPETS_PASSWORD", "15050514533")
 
 DEFAULT_HEADERS = {
     "authorization": CLOUDPETS_TOKEN,
@@ -34,6 +41,116 @@ class FeedingPlan(BaseModel):
 class CloudPetsService:
     def __init__(self):
         self.client = httpx.AsyncClient(base_url=BASE_URL, headers=DEFAULT_HEADERS, timeout=10.0)
+        self._load_token_from_db()
+
+    def _load_token_from_db(self):
+        """Try to load the latest token from database"""
+        try:
+            with Session(engine) as session:
+                config = session.get(SystemConfig, "cloudpets_token")
+                if config:
+                    self.client.headers["authorization"] = config.value
+                    logger.info("Loaded CloudPets token from database")
+        except Exception as e:
+            logger.warning(f"Could not load token from DB (might be first run): {e}")
+
+    async def _save_token_to_db(self, token: str):
+        """Save new token to database"""
+        try:
+            with Session(engine) as session:
+                config = session.get(SystemConfig, "cloudpets_token")
+                if not config:
+                    config = SystemConfig(key="cloudpets_token", value=token)
+                    session.add(config)
+                else:
+                    config.value = token
+                    config.updated_at = int(time.time() * 1000)
+                    session.add(config)
+                session.commit()
+                logger.info("Saved new CloudPets token to database")
+        except Exception as e:
+            logger.error(f"Failed to save token to DB: {e}")
+
+    async def _login(self) -> bool:
+        """
+        Login to get new token
+        Path: /app/terminal/user/login
+        Method: POST
+        """
+        if not CLOUDPETS_ACCOUNT or not CLOUDPETS_PASSWORD:
+            logger.error("Missing CloudPets credentials (CLOUDPETS_ACCOUNT/PASSWORD)")
+            return False
+
+        try:
+            logger.info(f"Attempting to login to CloudPets with account {CLOUDPETS_ACCOUNT}")
+            payload = {
+                "account": CLOUDPETS_ACCOUNT,
+                "pwd": CLOUDPETS_PASSWORD,
+                "userType": "1"
+            }
+            # Login endpoint might need clean headers without old auth
+            login_headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "lang": "zh_CN",
+                "platform": "Android",
+                "x-cp-client": "1"
+            }
+            
+            resp = await self.client.post("/app/terminal/user/login", data=payload, headers=login_headers)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            # Assuming the token is in the response, e.g., data['authorization'] or data['token']
+            # Based on standard OAuth/API patterns. 
+            # User didn't specify response format, but typically it's in the body or headers.
+            # However, prompt says "根据返回更新token".
+            # Let's assume standard response like {"authorization": "..."} or {"result": {"authorization": "..."}}
+            # We will look for 'authorization' in the response.
+            
+            new_token = None
+            if "authorization" in data:
+                new_token = data["authorization"]
+            elif "result" in data and isinstance(data["result"], dict) and "authorization" in data["result"]:
+                new_token = data["result"]["authorization"]
+            # Sometimes it's just in the header of the response
+            elif "authorization" in resp.headers:
+                new_token = resp.headers["authorization"]
+            
+            if new_token:
+                self.client.headers["authorization"] = new_token
+                await self._save_token_to_db(new_token)
+                return True
+            else:
+                logger.error(f"Could not find token in login response: {data}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Login failed: {e}")
+            return False
+
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """
+        Wrapper for HTTP requests with auto-login on 401
+        """
+        try:
+            resp = await self.client.request(method, url, **kwargs)
+            
+            if resp.status_code == 401:
+                logger.warning("Received 401 from CloudPets, attempting to re-login...")
+                if await self._login():
+                    # Retry the request with new token
+                    # Update authorization header in kwargs if it was passed explicitly (rare)
+                    if "headers" in kwargs:
+                        kwargs["headers"]["authorization"] = self.client.headers["authorization"]
+                    
+                    logger.info("Retrying request with new token")
+                    resp = await self.client.request(method, url, **kwargs)
+                else:
+                    logger.error("Re-login failed, cannot retry request")
+            
+            return resp
+        except Exception as e:
+            raise e
 
     async def close(self):
         await self.client.aclose()
@@ -49,7 +166,7 @@ class CloudPetsService:
         """
         try:
             payload = {"deviceId": DEVICE_ID}
-            resp = await self.client.post("/app/terminal/feeder/servingsToday", data=payload)
+            resp = await self._request("POST", "/app/terminal/feeder/servingsToday", data=payload)
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
@@ -65,7 +182,7 @@ class CloudPetsService:
         """
         try:
             payload = {"deviceId": DEVICE_ID, "unit": str(amount)}
-            resp = await self.client.post("/app/terminal/feeder/manualFeed", data=payload)
+            resp = await self._request("POST", "/app/terminal/feeder/manualFeed", data=payload)
             
             if resp.status_code != 200:
                 logger.error(f"Manual feed failed with status {resp.status_code}: {resp.text}")
@@ -95,7 +212,7 @@ class CloudPetsService:
                 "pageSize": "1000"
             }
             
-            resp = await self.client.get(url, params=params, headers=headers)
+            resp = await self._request("GET", url, params=params, headers=headers)
             
             resp.raise_for_status()
             data = resp.json()
@@ -170,7 +287,7 @@ class CloudPetsService:
             headers = self.client.headers.copy()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
             
-            resp = await self.client.post("/app/terminal/feeder/feedPlan", data=payload, headers=headers)
+            resp = await self._request("POST", "/app/terminal/feeder/feedPlan", data=payload, headers=headers)
             logger.info(f"CloudPets ADD Plan Resp: {resp.status_code} {resp.text}")
             resp.raise_for_status()
             return resp.json()
@@ -216,7 +333,7 @@ class CloudPetsService:
             # Log payload for debugging
             logger.info(f"CloudPets UPDATE Payload: {payload}")
 
-            resp = await self.client.put("/app/terminal/feeder/feedPlan", data=payload, headers=headers)
+            resp = await self._request("PUT", "/app/terminal/feeder/feedPlan", data=payload, headers=headers)
             logger.info(f"CloudPets UPDATE Plan Resp: {resp.status_code} {resp.text}")
             
             # Allow 200 even if code!=200, caller handles logic
@@ -240,7 +357,7 @@ class CloudPetsService:
                 del headers["Content-Type"]
 
             url = f"/app/terminal/feeder/plan/{plan_id}"
-            resp = await self.client.delete(url, headers=headers)
+            resp = await self._request("DELETE", url, headers=headers)
             
             resp.raise_for_status()
             # DELETE response might be empty or json
