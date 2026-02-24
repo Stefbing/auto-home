@@ -35,3 +35,8 @@ class FeedingPlan(SQLModel, table=True):
     time: str
     amount: int
     enabled: bool = True
+
+class SystemConfig(SQLModel, table=True):
+    key: str = Field(primary_key=True)
+    value: str
+    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000))
