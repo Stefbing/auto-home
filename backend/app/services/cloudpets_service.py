@@ -18,8 +18,20 @@ CLOUDPETS_TOKEN = os.getenv("CLOUDPETS_TOKEN", "nzEB8WppwujQqsYkrmxZRU1//JbOIbOx
 CLOUDPETS_FAMILY_ID = os.getenv("CLOUDPETS_FAMILY_ID", "572807")
 DEVICE_ID = os.getenv("CLOUDPETS_DEVICE_ID", "336704")
 # 默认集成账号密码，优先从环境变量读取
-CLOUDPETS_ACCOUNT = os.getenv("CLOUDPETS_ACCOUNT", "17757577548")
-CLOUDPETS_PASSWORD = os.getenv("CLOUDPETS_PASSWORD", "15050514533")
+# 如果未配置 CLOUDPETS 账号，尝试复用 PETKIT 账号 (需去除 "86-" 或 "+86" 前缀)
+CLOUDPETS_ACCOUNT = os.getenv("CLOUDPETS_ACCOUNT")
+if not CLOUDPETS_ACCOUNT:
+    petkit_user = os.getenv("PETKIT_USERNAME", "86-17757577548")
+    if petkit_user.startswith("86-"):
+        CLOUDPETS_ACCOUNT = petkit_user[3:]
+    elif petkit_user.startswith("+86"):
+        CLOUDPETS_ACCOUNT = petkit_user[3:]
+    else:
+        CLOUDPETS_ACCOUNT = petkit_user
+
+CLOUDPETS_PASSWORD = os.getenv("CLOUDPETS_PASSWORD")
+if not CLOUDPETS_PASSWORD:
+    CLOUDPETS_PASSWORD = os.getenv("PETKIT_PASSWORD", "15050514533")
 
 DEFAULT_HEADERS = {
     "authorization": CLOUDPETS_TOKEN,
