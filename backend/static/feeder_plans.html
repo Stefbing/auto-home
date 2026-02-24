@@ -225,7 +225,7 @@
             if(manageLoading) showLoading(true);
             log('Loading plans...');
             try {
-                const res = await fetch('/api/cloudpets/plans');
+                const res = await fetch('/api/cloudpets/plans?_=' + new Date().getTime());
                 plans = await res.json();
                 log('Plans loaded:', plans);
                 renderPlans();
@@ -353,7 +353,11 @@
 
                 log('Save Plan Response:', {status: res.status, data: data});
 
-                if (res.ok && (data.code === 200 || data.code === 0 || !data.code)) {
+                // 后端现在返回的是计划对象(包含id)或标准API响应(包含code)
+                // 只要 HTTP 200 且没有明确的错误 code，即视为成功
+                const isSuccess = res.ok && (data.id || data.code === 200 || data.code === 0 || data.code === undefined);
+
+                if (isSuccess) {
                     showToast('保存成功');
                     closeEditPlan();
                     await loadPlans(false);
@@ -408,11 +412,16 @@
             const p = plans.find(x => x.id === id);
             if (!p) return;
             
+            // 乐观更新：先更新本地 UI
             p.enabled = enabled;
+            // 立即重新渲染以反映开关状态
+            renderPlans(); 
+            
             showLoading(true);
             log('Toggling plan:', {id, enabled});
 
             try {
+                // 注意：后端需要完整的 Plan 对象，而不仅仅是 enabled
                 const payload = { ...p, enabled: enabled };
                 const res = await fetch(`/api/cloudpets/plans/${id}`, {
                     method: 'PUT',
@@ -425,18 +434,26 @@
                 
                 log('Toggle Plan Response:', {status: res.status, data: data});
 
-                if (res.ok && (data.code === 200 || data.code === 0 || !data.code)) {
-                    // Success
+                // 后端返回对象包含 id，或标准成功响应
+                const isSuccess = res.ok && (data.id || data.code === 200 || data.code === 0 || data.code === undefined);
+
+                if (isSuccess) {
+                    // 成功后，强制从服务器重新拉取最新列表，确保数据一致性
                     await loadPlans(false);
+                    showToast(enabled ? '已启用' : '已禁用');
                 } else {
                     showToast('状态更新失败: ' + (data.message || ''));
-                    await loadPlans(false); // Revert
+                    // 失败时，回滚状态并重新渲染
+                    p.enabled = !enabled;
+                    renderPlans(); 
                 }
             } catch(e) { 
                 console.error(e);
                 log('Toggle error:', e.message);
                 showToast('网络错误');
-                await loadPlans(false);
+                // 失败时，回滚状态并重新渲染
+                p.enabled = !enabled;
+                renderPlans();
             } finally { showLoading(false); }
         }
 

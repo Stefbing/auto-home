@@ -35,7 +35,8 @@ async def lifespan(app: FastAPI):
     # 启动时：初始化数据库和长连接服务
     init_db()
     
-    # CloudPets 不需要启动，它是 HTTP 客户端
+    # 初始化 CloudPets 服务 (从数据库加载 Token 或自动登录)
+    await cloudpets_service.initialize()
     
     # 统一环境变量 ACCOUNT 和 PASSWORD
     # 注意：PetKit 通常需要带区号 (如 86-)，而 CloudPets 会自动去除

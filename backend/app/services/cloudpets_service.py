@@ -3,7 +3,7 @@ import httpx
 import logging
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from sqlmodel import select, Session
+from sqlmodel import Session
 from app.models.db import engine
 from app.models.models import SystemConfig
 import time
@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 # Base URL from user provided endpoint
 BASE_URL = "https://cn.cloudpets.net"
 
-# Configuration from Environment Variables
-CLOUDPETS_TOKEN = os.getenv("CLOUDPETS_TOKEN", "nzEB8WppwujQqsYkrmxZRU1//JbOIbOx")
-CLOUDPETS_FAMILY_ID = os.getenv("CLOUDPETS_FAMILY_ID", "572807")
-DEVICE_ID = os.getenv("CLOUDPETS_DEVICE_ID", "336704")
+# Configuration from Code (Default values, no longer from env)
+CLOUDPETS_FAMILY_ID = "572807"
+DEVICE_ID = "336704"
+
 # 统一账号密码配置 (ACCOUNT/PASSWORD)
 # CloudPets 需要去除 "86-" 或 "+86" 前缀
 ACCOUNT = os.getenv("ACCOUNT", "86-17757577548")
@@ -32,7 +32,7 @@ if CLOUDPETS_ACCOUNT:
 CLOUDPETS_PASSWORD = PASSWORD
 
 DEFAULT_HEADERS = {
-    "authorization": CLOUDPETS_TOKEN,
+    "authorization": "", # Will be filled from DB or Login
     "lang": "zh_CN",
     "platform": "Android",
     "x-cp-familyid": CLOUDPETS_FAMILY_ID,
@@ -51,9 +51,21 @@ class FeedingPlan(BaseModel):
 class CloudPetsService:
     def __init__(self):
         self.client = httpx.AsyncClient(base_url=BASE_URL, headers=DEFAULT_HEADERS, timeout=10.0)
-        self._load_token_from_db()
+        # 不再同步加载，改为在 initialize 中异步加载
 
-    def _load_token_from_db(self):
+    async def initialize(self):
+        """Initialize service: load token from DB, or login if missing"""
+        logger.info("Initializing CloudPets Service...")
+        if not await self._load_token_from_db():
+            logger.info("No token found in DB, attempting initial login...")
+            if await self._login():
+                logger.info("Initial login successful")
+            else:
+                logger.error("Initial login failed")
+        else:
+            logger.info("CloudPets token loaded from DB")
+
+    async def _load_token_from_db(self) -> bool:
         """Try to load the latest token from database"""
         try:
             with Session(engine) as session:
@@ -61,8 +73,10 @@ class CloudPetsService:
                 if config:
                     self.client.headers["authorization"] = config.value
                     logger.info("Loaded CloudPets token from database")
+                    return True
         except Exception as e:
             logger.warning(f"Could not load token from DB (might be first run): {e}")
+        return False
 
     async def _save_token_to_db(self, token: str):
         """Save new token to database"""
@@ -105,27 +119,32 @@ class CloudPetsService:
                 "platform": "Android",
                 "x-cp-client": "1"
             }
-            
+
             resp = await self.client.post("/app/terminal/user/login", data=payload, headers=login_headers)
             resp.raise_for_status()
             data = resp.json()
-            
+
             # Assuming the token is in the response, e.g., data['authorization'] or data['token']
-            # Based on standard OAuth/API patterns. 
+            # Based on standard OAuth/API patterns.
             # User didn't specify response format, but typically it's in the body or headers.
             # However, prompt says "根据返回更新token".
             # Let's assume standard response like {"authorization": "..."} or {"result": {"authorization": "..."}}
             # We will look for 'authorization' in the response.
-            
+
             new_token = None
             if "authorization" in data:
                 new_token = data["authorization"]
-            elif "result" in data and isinstance(data["result"], dict) and "authorization" in data["result"]:
-                new_token = data["result"]["authorization"]
+            elif "result" in data:
+                if isinstance(data["result"], dict) and "authorization" in data["result"]:
+                    new_token = data["result"]["authorization"]
+                elif isinstance(data["result"], str):
+                    # Sometimes result IS the token
+                    new_token = data["result"]
+
             # Sometimes it's just in the header of the response
-            elif "authorization" in resp.headers:
+            if not new_token and "authorization" in resp.headers:
                 new_token = resp.headers["authorization"]
-            
+
             if new_token:
                 self.client.headers["authorization"] = new_token
                 await self._save_token_to_db(new_token)
@@ -133,31 +152,45 @@ class CloudPetsService:
             else:
                 logger.error(f"Could not find token in login response: {data}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Login failed: {e}")
             return False
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """
-        Wrapper for HTTP requests with auto-login on 401
+        Wrapper for HTTP requests with auto-login on 401 or specific business errors
         """
         try:
             resp = await self.client.request(method, url, **kwargs)
-            
-            if resp.status_code == 401:
+
+            # Check for HTTP 401
+            should_retry = resp.status_code == 401
+
+            # Also check for business logic 401 (sometimes APIs return 200 OK but with error code in body)
+            if not should_retry and resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    # Example: {"code": 401, "message": "Unauthorized"}
+                    if isinstance(data, dict) and str(data.get("code")) == "401":
+                        should_retry = True
+                        logger.warning(f"Detected business logic 401: {data}")
+                except:
+                    pass
+
+            if should_retry:
                 logger.warning("Received 401 from CloudPets, attempting to re-login...")
                 if await self._login():
                     # Retry the request with new token
                     # Update authorization header in kwargs if it was passed explicitly (rare)
                     if "headers" in kwargs:
                         kwargs["headers"]["authorization"] = self.client.headers["authorization"]
-                    
+
                     logger.info("Retrying request with new token")
                     resp = await self.client.request(method, url, **kwargs)
                 else:
                     logger.error("Re-login failed, cannot retry request")
-            
+
             return resp
         except Exception as e:
             raise e
@@ -193,10 +226,10 @@ class CloudPetsService:
         try:
             payload = {"deviceId": DEVICE_ID, "unit": str(amount)}
             resp = await self._request("POST", "/app/terminal/feeder/manualFeed", data=payload)
-            
+
             if resp.status_code != 200:
                 logger.error(f"Manual feed failed with status {resp.status_code}: {resp.text}")
-            
+
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
@@ -214,19 +247,19 @@ class CloudPetsService:
             headers = self.client.headers.copy()
             if "Content-Type" in headers:
                 del headers["Content-Type"]
-            
+
             url = f"/app/terminal/feeder/planList/{DEVICE_ID}"
             params = {
                 "deviceType": "66",
                 "pageNum": "1",
                 "pageSize": "1000"
             }
-            
+
             resp = await self._request("GET", url, params=params, headers=headers)
-            
+
             resp.raise_for_status()
             data = resp.json()
-            
+
             raw_list = []
             if "rows" in data:
                 raw_list = data["rows"]
@@ -235,7 +268,7 @@ class CloudPetsService:
                     raw_list = data["result"]
                 elif isinstance(data["result"], dict) and "list" in data["result"]:
                     raw_list = data["result"]["list"]
-            
+
             # Transform to FeedingPlan model
             plans = []
             for item in raw_list:
@@ -244,7 +277,7 @@ class CloudPetsService:
                     hour = item.get("hour", 0)
                     minute = item.get("minute", 0)
                     time_str = f"{int(hour):02d}:{int(minute):02d}"
-                    
+
                     plan = {
                         "id": str(item.get("id")),
                         "time": time_str,
@@ -257,7 +290,7 @@ class CloudPetsService:
                 except Exception as e:
                     logger.error(f"Error parsing plan item: {e}")
                     continue
-            
+
             return plans
         except Exception as e:
             logger.error(f"Failed to get feeding plans: {e}")
@@ -267,19 +300,17 @@ class CloudPetsService:
         """
         新增喂食计划
         Path: /app/terminal/feeder/feedPlan
-        Method: POST (User says '新增如下：url: .../feedPlan')
-        Body: daysOfWeek=1,2,3,4,5,6,7&deviceId=336704&enable=true&hour=01&minute=03&serving=2&remark=
+        Method: POST
         """
         try:
             # Parse time HH:mm
             hour, minute = plan.time.split(':')
-            
+
             # Format weekdays: ensure "1,2,3" format
             weekdays_val = plan.weekdays
             if isinstance(weekdays_val, list):
                 weekdays_val = ",".join(map(str, weekdays_val))
             elif isinstance(weekdays_val, str):
-                # If it's already a string, use it (or validate it)
                 pass
             else:
                 weekdays_val = "1,2,3,4,5,6,7"
@@ -293,14 +324,30 @@ class CloudPetsService:
                 "serving": plan.amount,
                 "remark": plan.remark or ""
             }
-            
+
             headers = self.client.headers.copy()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-            
+
             resp = await self._request("POST", "/app/terminal/feeder/feedPlan", data=payload, headers=headers)
             logger.info(f"CloudPets ADD Plan Resp: {resp.status_code} {resp.text}")
             resp.raise_for_status()
-            return resp.json()
+
+            # CloudPets returns {"code": 200, "result": "id_string"} or just success message
+            # We need to return the plan object with ID to satisfy response_model=FeedingPlan
+            data = resp.json()
+            new_id = None
+            if "result" in data:
+                 new_id = str(data["result"])
+
+            # Return the plan object with the new ID (or original if failed to parse)
+            return {
+                "id": new_id,
+                "time": plan.time,
+                "amount": plan.amount,
+                "enabled": plan.enabled,
+                "weekdays": plan.weekdays,
+                "remark": plan.remark
+            }
         except Exception as e:
             logger.error(f"Failed to add feeding plan: {e}")
             raise e
@@ -313,7 +360,7 @@ class CloudPetsService:
         """
         try:
             hour, minute = plan.time.split(':')
-            
+
             # Format weekdays
             weekdays_val = plan.weekdays
             if isinstance(weekdays_val, list):
@@ -336,21 +383,28 @@ class CloudPetsService:
                 "serving": str(plan.amount), # Ensure string
                 "remark": plan.remark or ""
             }
-            
+
             headers = self.client.headers.copy()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-            
+
             # Log payload for debugging
             logger.info(f"CloudPets UPDATE Payload: {payload}")
 
             resp = await self._request("PUT", "/app/terminal/feeder/feedPlan", data=payload, headers=headers)
             logger.info(f"CloudPets UPDATE Plan Resp: {resp.status_code} {resp.text}")
-            
-            # Allow 200 even if code!=200, caller handles logic
-            if resp.status_code != 200:
-                logger.error(f"CloudPets UPDATE Failed Status: {resp.status_code}")
-            
-            return resp.json()
+
+            resp.raise_for_status()
+
+            # Return the updated plan object to satisfy response_model=FeedingPlan
+            # CloudPets API response is likely just {"code": 200, "message": "success"}
+            return {
+                "id": plan_id,
+                "time": plan.time,
+                "amount": plan.amount,
+                "enabled": plan.enabled,
+                "weekdays": plan.weekdays,
+                "remark": plan.remark
+            }
         except Exception as e:
             logger.error(f"Failed to update feeding plan: {e}")
             raise e
@@ -368,7 +422,7 @@ class CloudPetsService:
 
             url = f"/app/terminal/feeder/plan/{plan_id}"
             resp = await self._request("DELETE", url, headers=headers)
-            
+
             resp.raise_for_status()
             # DELETE response might be empty or json
             if resp.content:
