@@ -37,8 +37,10 @@ async def lifespan(app: FastAPI):
     
     # CloudPets 不需要启动，它是 HTTP 客户端
     
-    username = os.getenv("PETKIT_USERNAME")
-    password = os.getenv("PETKIT_PASSWORD")
+    # 统一环境变量 ACCOUNT 和 PASSWORD
+    # 注意：PetKit 通常需要带区号 (如 86-)，而 CloudPets 会自动去除
+    username = os.getenv("ACCOUNT")
+    password = os.getenv("PASSWORD")
     
     if username and password:
         print(f"正在初始化 PetKit 服务: {username}...")

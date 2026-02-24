@@ -30,14 +30,14 @@ pip install -r requirements.txt
 
 ### 步骤 2: 配置环境变量
 系统已集成 CloudPets 的默认账号。如果需要自定义配置，可以在 `.env` 文件中设置。
-**注意**: 如果未单独设置 CloudPets 账号，系统会自动复用 `PETKIT_USERNAME` (自动去除 `86-` 或 `+86` 前缀) 和 `PETKIT_PASSWORD`。
+**注意**: 系统使用统一的 `ACCOUNT` 和 `PASSWORD` 环境变量。CloudPets 服务会自动去除 `86-` 或 `+86` 前缀。
 
 ```ini
-# PetKit 账号 (必须配置)
-PETKIT_USERNAME=your_username
-PETKIT_PASSWORD=your_password
+# 统一账号配置 (必须配置)
+ACCOUNT=your_username (例如 86-17757577548)
+PASSWORD=your_password
 
-# CloudPets 账号 (可选，不填则复用 PetKit)
+# CloudPets 账号 (可选，不填则复用 ACCOUNT)
 # CLOUDPETS_ACCOUNT=...
 # CLOUDPETS_PASSWORD=...
 ```
