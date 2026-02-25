@@ -20,8 +20,8 @@ if is_serverless:
         print("No POSTGRES_URL found. Falling back to in-memory SQLite database.")
         database_url = "sqlite:///:memory:"
 else:
-    # 暂时使用内存数据库避免文件权限问题
-    database_url = os.getenv("DATABASE_URL") or "sqlite:///:memory:"
+    # 本地开发使用文件数据库以支持持久化测试
+    database_url = os.getenv("DATABASE_URL") or "sqlite:///./auto_home.db"
 
 print(f"Database URL: {database_url.split('://')[0]}://***") # Mask password if any
 

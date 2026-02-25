@@ -1,6 +1,7 @@
 import os
 import httpx
 import logging
+import asyncio
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -339,6 +340,9 @@ class CloudPetsService:
             if "result" in data:
                  new_id = str(data["result"])
 
+            # 等待设备处理指令后再返回
+            await asyncio.sleep(1)
+
             # Return the plan object with the new ID (or original if failed to parse)
             return {
                 "id": new_id,
@@ -426,8 +430,14 @@ class CloudPetsService:
             resp.raise_for_status()
             # DELETE response might be empty or json
             if resp.content:
-                return resp.json()
-            return {"code": 200, "message": "Deleted"}
+                result = resp.json()
+            else:
+                result = {"code": 200, "message": "Deleted"}
+
+            # 等待设备处理指令后再返回
+            await asyncio.sleep(1)
+
+            return result
         except Exception as e:
             logger.error(f"Failed to delete feeding plan: {e}")
             raise e

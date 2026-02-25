@@ -1,3 +1,5 @@
+# backend/app/services/petkit_service.py
+
 import asyncio
 import logging
 import aiohttp
@@ -6,6 +8,11 @@ from pypetkitapi.command import LitterCommand, DeviceAction, LBCommand, DeviceCo
 from pypetkitapi.exceptions import PetkitSessionExpiredError
 import logging
 import asyncio
+import json
+import time
+from sqlmodel import Session
+from app.models.db import engine
+from app.models.models import SystemConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,10 +25,113 @@ class PetKitService:
         self.timezone = timezone
         self.session = None
         self.client = None
+        self.token_key = "petkit_session_data"  # 数据库存储键名
 
-    async def start(self):
-        """Initialize the session and login"""
-        if not self.session:
+    async def initialize(self):
+        """Initialize service: load session from DB, or login if missing"""
+        logger.info("Initializing PetKit Service...")
+        if not await self._load_session_from_db():
+            logger.info("No session found in DB, attempting initial login...")
+            if await self._login():
+                logger.info("Initial login successful")
+            else:
+                logger.error("Initial login failed")
+        else:
+            logger.info("PetKit session loaded from DB")
+
+    async def _load_session_from_db(self) -> bool:
+        """Try to load the latest session data from database"""
+        try:
+            with Session(engine) as session_db:
+                config = session_db.get(SystemConfig, self.token_key)
+                if config:
+                    # 解析存储的会话数据
+                    session_data = json.loads(config.value)
+
+                    # 检查是否过期（30分钟有效期）
+                    saved_time = session_data.get('timestamp', 0)
+                    current_time = int(time.time() * 1000)
+                    if current_time - saved_time > 30 * 60 * 1000:  # 30分钟
+                        logger.info("PetKit session expired (30min), need re-login")
+                        return False
+
+                    # 恢复会话
+                    await self._restore_session(session_data)
+                    logger.info("Loaded PetKit session from database")
+                    return True
+        except Exception as e:
+            logger.warning(f"Could not load session from DB (might be first run): {e}")
+        return False
+
+    async def _save_session_to_db(self):
+        """Save current session data to database"""
+        try:
+            if not self.client or not self.session:
+                return
+
+            # 获取会话相关信息
+            session_data = {
+                'timestamp': int(time.time() * 1000),
+                'region': self.region,
+                'timezone': self.timezone
+            }
+
+            # 尝试获取客户端的认证信息
+            try:
+                if hasattr(self.client, 'req') and hasattr(self.client.req, 'session'):
+                    # 存储cookies或其他认证信息
+                    cookies = self.client.req.session.cookie_jar.filter_cookies()
+                    if cookies:
+                        session_data['cookies'] = str(cookies)
+            except Exception as e:
+                logger.debug(f"Could not extract session cookies: {e}")
+
+            with Session(engine) as session_db:
+                config = session_db.get(SystemConfig, self.token_key)
+                if not config:
+                    config = SystemConfig(key=self.token_key, value=json.dumps(session_data))
+                    session_db.add(config)
+                else:
+                    config.value = json.dumps(session_data)
+                    config.updated_at = int(time.time() * 1000)
+                    session_db.add(config)
+                session_db.commit()
+                logger.info("Saved PetKit session to database")
+        except Exception as e:
+            logger.error(f"Failed to save session to DB: {e}")
+
+    async def _restore_session(self, session_data: dict):
+        """Restore session from stored data"""
+        try:
+            # 创建新的会话
+            self.session = aiohttp.ClientSession()
+            self.client = PetKitClient(
+                username=self.username,
+                password=self.password,
+                region=session_data.get('region', self.region),
+                timezone=session_data.get('timezone', self.timezone),
+                session=self.session,
+            )
+
+            # 尝试恢复认证状态
+            # 注意：由于pypetkitapi的实现细节，这里可能需要重新登录
+            # 但我们至少建立了会话连接
+            logger.info("Session restored from database")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to restore session: {e}")
+            return False
+
+    async def _login(self) -> bool:
+        """
+        Login to get new session
+        """
+        try:
+            # 清理旧会话
+            if self.session:
+                await self.session.close()
+
+            # 创建新会话
             self.session = aiohttp.ClientSession()
             self.client = PetKitClient(
                 username=self.username,
@@ -30,15 +140,22 @@ class PetKitService:
                 timezone=self.timezone,
                 session=self.session,
             )
+
             # 登录并获取设备列表
-            try:
-                await self.client.get_devices_data()
-                logger.info(f"PetKit 登录成功。共发现 {len(self.client.petkit_entities)} 个设备/实体。")
-                for dev_id, entity in self.client.petkit_entities.items():
-                    logger.info(f"发现实体: ID={dev_id}, 类型={getattr(entity, 'device_type', '未知')}, 名称={getattr(entity, 'name', '未知')}")
-            except Exception as e:
-                logger.error(f"PetKit 登录失败: {e}")
-                raise e
+            await self.client.get_devices_data()
+            logger.info(f"PetKit 登录成功。共发现 {len(self.client.petkit_entities)} 个设备/实体。")
+
+            # 保存会话到数据库
+            await self._save_session_to_db()
+            return True
+
+        except Exception as e:
+            logger.error(f"PetKit 登录失败: {e}")
+            return False
+
+    async def start(self):
+        """Initialize the session and login - deprecated, use initialize() instead"""
+        await self.initialize()
 
     async def close(self):
         """Close the session"""
@@ -48,7 +165,7 @@ class PetKitService:
 
     async def get_client_methods(self):
         if not self.client:
-            await self.start()
+            await self.initialize()
         
         try:
             import pypetkitapi.command as cmd
@@ -61,18 +178,21 @@ class PetKitService:
     async def get_devices(self):
         """Get all devices"""
         if not self.client:
-            await self.start()
+            await self.initialize()
         
         try:
             # 刷新数据
             logger.info("正在刷新设备数据...")
             await self.client.get_devices_data()
+            # 更新会话时间戳
+            await self._save_session_to_db()
         except Exception as e:
             if "Session expired" in str(e) or "401" in str(e):
                 logger.warning("Session expired, attempting re-login...")
-                self.session = None # Reset session
-                await self.start()
-                await self.client.get_devices_data()
+                if await self._login():
+                    await self.client.get_devices_data()
+                else:
+                    raise Exception("Re-login failed")
             else:
                 raise e
         
@@ -118,98 +238,12 @@ class PetKitService:
                         state_summary[sattr] = getattr(state_obj, sattr)
                 
                 # 保留原始 string dump 作为 fallback
-                state_summary['raw_state'] = str(state_obj)
-            
-            # --- 增强数据提取 (MAX2 专用) ---
-            logger.info(f"--- Data Debug for {getattr(entity, 'name', 'Unknown')} ---")
-            
-            # 1. 除臭液
-            if hasattr(entity, 'deodorant_left_days'):
-                 state_summary['deodorant_left_days'] = entity.deodorant_left_days
-                 logger.info(f"Liquid(entity): {entity.deodorant_left_days}")
-            elif hasattr(entity, 'deodorant_tip') and hasattr(entity.deodorant_tip, 'days'):
-                 state_summary['deodorant_left_days'] = entity.deodorant_tip.days
-                 logger.info(f"Liquid(tip): {entity.deodorant_tip.days}")
-            
-            # 2. 猫砂余量
-            if hasattr(entity, 'sand_percent'):
-                 state_summary['sand_percent'] = entity.sand_percent
-                 logger.info(f"Sand(entity): {entity.sand_percent}")
-            elif hasattr(entity, 'device_stats') and hasattr(entity.device_stats, 'sand_percent'):
-                 state_summary['sand_percent'] = entity.device_stats.sand_percent
-                 logger.info(f"Sand(stats): {entity.device_stats.sand_percent}")
-            
-            # 3. 重量 (猫砂盆总重或猫砂重)
-            if hasattr(entity, 'sand_weight'):
-                 state_summary['sand_weight'] = entity.sand_weight
-                 # 如果没有通用 weight，用 sand_weight 填充
-                 if 'weight' not in state_summary:
-                     state_summary['weight'] = entity.sand_weight
-                 logger.info(f"SandWeight(entity): {entity.sand_weight}")
-            
-            # 4. 从 device_stats 提取健康数据
-            if hasattr(entity, 'device_stats') and entity.device_stats:
-                 stats = entity.device_stats
-                 # 平均如厕时长 (秒)
-                 if hasattr(stats, 'avg_time'):
-                     state_summary['avg_duration'] = stats.avg_time
-                     logger.info(f"AvgDuration(stats): {stats.avg_time}s")
-                 
-                 if hasattr(stats, 'statistic_info') and stats.statistic_info:
-                     # 找最近的一个有体重的记录
-                     last_info = stats.statistic_info[-1]
-                     if hasattr(last_info, 'pet_weight') and last_info.pet_weight:
-                         state_summary['last_pet_weight'] = last_info.pet_weight
-                         logger.info(f"LastPetWeight(stats): {last_info.pet_weight}")
-
-            # 5. 今日次数 (used_times) 和 频繁如厕
-            if hasattr(entity, 'state') and hasattr(entity.state, 'frequent_restroom'):
-                 state_summary['frequent_restroom'] = entity.state.frequent_restroom
-                 logger.info(f"FrequentRestroom(state): {entity.state.frequent_restroom}")
-
-            if hasattr(entity, 'device_stats') and hasattr(entity.device_stats, 'times'):
-                 state_summary['used_times'] = entity.device_stats.times
-            elif hasattr(entity, 'used_times'):
-                 state_summary['used_times'] = entity.used_times
-
-            # 6. 尝试打印 raw state 以发现更多线索
-            if hasattr(entity, 'state'):
-                # 再次确认 state 对象内部
-                s_obj = entity.state
-                # 针对 MAX2，某些字段可能在 state 对象的属性中
-                for key in ['sand_weight', 'weight', 'used_times', 'sand_percent', 'deodorant_left_days', 'frequent_restroom']:
-                    if hasattr(s_obj, key):
-                        val = getattr(s_obj, key)
-                        # 如果是从 stats 拿到的次数已经准了，就不要被 state.used_times 覆盖
-                        if key == 'used_times' and 'used_times' in state_summary and state_summary['used_times'] < 10:
-                            continue
-                        state_summary[key] = val
+                raw_state_str = str(state_obj)
+                state_summary['raw_state'] = raw_state_str
                 
-                logger.info(f"Raw State Obj: {vars(entity.state) if hasattr(entity.state, '__dict__') else entity.state}")
+                # 从 raw_state 字符串中提取关键信息
+                self._extract_info_from_raw_state(raw_state_str, state_summary)
             
-            # --------------------------------
-
-            # 修复设备类型识别：如果 device_type 未知，尝试从名称或 data_type 推断
-            if (not dev_data["type"] or dev_data["type"] == 'Unknown') and hasattr(entity, 'name'):
-                name = getattr(entity, 'name', '')
-                if 'MAX' in name or '猫厕所' in name:
-                        # 映射为前端可识别的类型 (T4 Pura MAX)
-                        dev_data["type"] = 'T4 Pura MAX'
-                        logger.info(f"已修正设备类型: {name} -> T4 Pura MAX")
-            
-            # 针对 Pura MAX (T4) / MAX 2 的特定状态
-            # Debug: 打印潜在的有用属性
-            try:
-                if 'MAX' in getattr(entity, 'name', ''):
-                    logger.info(f"--- Debug MAX2 Data ---")
-                    logger.info(f"device_stats: {getattr(entity, 'device_stats', 'N/A')}")
-                    logger.info(f"deodorant_tip: {getattr(entity, 'deodorant_tip', 'N/A')}")
-                    logger.info(f"settings: {getattr(entity, 'settings', 'N/A')}")
-                    if hasattr(entity, 'state'):
-                         logger.info(f"state object vars: {vars(entity.state)}")
-            except Exception as e:
-                logger.error(f"Debug log error: {e}")
-
             # 基于实际抓取到的属性
             interesting_attrs = [
                 'liquid', 'weight', 'times', 'battery', 'connection',
@@ -237,7 +271,7 @@ class PetKitService:
     async def clean_litterbox(self, device_id=None):
         """Trigger clean action for the first found or specified litterbox"""
         if not self.client:
-            await self.start()
+            await self.initialize()
         
         target_id = None
         # 如果未指定 ID，找第一个猫厕所 (T3/T4)
@@ -256,129 +290,30 @@ class PetKitService:
 
         if target_id:
             logger.info(f"Sending clean command to {target_id}")
-            
-            # 定义执行策略的内部函数，方便重试
-            async def _execute_strategies():
-                errors = []
-                # 策略 1: 标准 CONTROL_DEVICE (T3/T4) - 使用 DeviceCommand
-                try:
-                    await self.client.send_api_request(
-                        target_id, 
-                        DeviceCommand.CONTROL_DEVICE, 
-                        {DeviceAction.START: LBCommand.CLEANING}
-                    )
-                    return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 1)"}
-                except Exception as e1:
-                    errors.append(f"Strategy 1: {e1}")
-                    # 如果是 Session expired，直接抛出，让外层捕获重试
-                    if "Session expired" in str(e1) or "401" in str(e1):
-                        raise e1
-                    
-                    # 策略 2: 针对 MAX2 的 manager_device
-                    try:
-                        if hasattr(self.client, 'control_device'):
-                            await self.client.control_device(target_id, 'start', 'clean')
-                            return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 2)"}
-                    except Exception as e2:
-                        errors.append(f"Strategy 2: {e2}")
-                    
-                    # 策略 3: 尝试 manager_device 原生调用
-                    try:
-                        await self.client.send_api_request(target_id, 'manager_device', {'start': 'clean'})
-                        return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 3)"}
-                    except Exception as e3:
-                        errors.append(f"Strategy 3: {e3}")
-
-                    # 策略 4: 尝试 manager_device type=1 (Pura X/MAX 常见)
-                    try:
-                        await self.client.send_api_request(target_id, 'manager_device', {'type': 1})
-                        return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 4)"}
-                    except Exception as e4:
-                        errors.append(f"Strategy 4: {e4}")
-
-                    # 策略 5: 尝试 manager_device type='1'
-                    try:
-                        await self.client.send_api_request(target_id, 'manager_device', {'type': '1'})
-                        return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 5)"}
-                    except Exception as e5:
-                        errors.append(f"Strategy 5: {e5}")
-
-                    # 策略 6: 尝试 update_status (部分设备)
-                    try:
-                        await self.client.send_api_request(target_id, 'update_status', {'key': 'action', 'value': 'clean'})
-                        return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 6)"}
-                    except Exception as e6:
-                        errors.append(f"Strategy 6: {e6}")
-
-                    # 策略 7: 尝试 start_action (常见通用接口)
-                    try:
-                        await self.client.send_api_request(target_id, 'start_action', {'type': 'clean'})
-                        return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 7)"}
-                    except Exception as e7:
-                        errors.append(f"Strategy 7: {e7}")
-                    
-                    # 策略 8: 尝试 daily_clean
-                    try:
-                        await self.client.send_api_request(target_id, 'daily_clean', {})
-                        return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 8)"}
-                    except Exception as e8:
-                        errors.append(f"Strategy 8: {e8}")
-
-                    # 策略 9: 尝试 start_clean
-                    try:
-                        await self.client.send_api_request(target_id, 'start_clean', {})
-                        return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 9)"}
-                    except Exception as e9:
-                        errors.append(f"Strategy 9: {e9}")
-
-                    # 策略 10: 终极大招 - 绕过库验证，直接发送原始请求
-                    try:
-                        entity = self.client.petkit_entities.get(int(target_id))
-                        real_type = 'T4'
-                        if entity and hasattr(entity, 'device_nfo') and entity.device_nfo:
-                            real_type = entity.device_nfo.device_type
-                        
-                        logger.info(f"Strategy 10: Sending raw request to {real_type}/manager_device")
-                        
-                        # 尝试 Payload A: {'start': 'clean'}
-                        try:
-                            await self.client.req.request(
-                                'POST', 
-                                f"{real_type}/manager_device", 
-                                data={'start': 'clean'},
-                                headers=await self.client.get_session_id()
-                            )
-                            return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 10-A)"}
-                        except Exception as e10a:
-                            errors.append(f"Strategy 10-A: {e10a}")
-
-                        # 尝试 Payload B: {'type': 1} (MAX 常用)
-                        try:
-                            await self.client.req.request(
-                                'POST', 
-                                f"{real_type}/manager_device", 
-                                data={'type': 1},
-                                headers=await self.client.get_session_id()
-                            )
-                            return {"status": "success", "device_id": str(target_id), "action": "clean (strategy 10-B)"}
-                        except Exception as e10b:
-                            errors.append(f"Strategy 10-B: {e10b}")
-
-                    except Exception as e10:
-                        errors.append(f"Strategy 10 (General): {e10}")
-
-                    raise Exception(f"All strategies failed. Errors: {'; '.join(errors)}")
-
-            # 执行并处理 Session expired
             try:
-                return await _execute_strategies()
+                from pypetkitapi.command import DeviceCommand, DeviceAction, LBCommand
+                await self.client.send_api_request(
+                    target_id, 
+                    DeviceCommand.CONTROL_DEVICE, 
+                    {DeviceAction.START: LBCommand.CLEANING}
+                )
+                # 更新会话时间戳
+                await self._save_session_to_db()
+                return {"status": "success", "device_id": str(target_id), "action": "clean"}
             except Exception as e:
                 if "Session expired" in str(e) or "401" in str(e):
                     logger.warning("Session expired during clean, re-logging in...")
-                    self.session = None
-                    await self.start()
-                    # Retry once
-                    return await _execute_strategies()
+                    if await self._login():
+                        # Retry once
+                        await self.client.send_api_request(
+                            target_id, 
+                            DeviceCommand.CONTROL_DEVICE, 
+                            {DeviceAction.START: LBCommand.CLEANING}
+                        )
+                        await self._save_session_to_db()
+                        return {"status": "success", "device_id": str(target_id), "action": "clean"}
+                    else:
+                        raise Exception("Re-login failed")
                 raise e
         
         raise Exception("No litterbox found or invalid device ID")
@@ -386,7 +321,7 @@ class PetKitService:
     async def deodorize_litterbox(self, device_id=None):
         """Trigger deodorize (spray) for the first found or specified litterbox"""
         if not self.client:
-            await self.start()
+            await self.initialize()
         
         target_id = None
         
@@ -406,21 +341,75 @@ class PetKitService:
 
         if target_id:
             logger.info(f"Sending deodorize command to {target_id}")
-            # 发送除臭指令 (DESODORIZE / SPRAY)
-            # T4 MAX 通常支持这个
-            await self.client.send_api_request(
-                target_id, 
-                LitterCommand.CONTROL_DEVICE, 
-                {DeviceAction.START: LBCommand.DESODORIZE}
-            )
-            return {"status": "success", "device_id": str(target_id), "action": "deodorize"}
+            try:
+                from pypetkitapi.command import LitterCommand, DeviceAction, LBCommand
+                # 发送除臭指令 (DESODORIZE / SPRAY)
+                await self.client.send_api_request(
+                    target_id, 
+                    LitterCommand.CONTROL_DEVICE, 
+                    {DeviceAction.START: LBCommand.DESODORIZE}
+                )
+                # 更新会话时间戳
+                await self._save_session_to_db()
+                return {"status": "success", "device_id": str(target_id), "action": "deodorize"}
+            except Exception as e:
+                if "Session expired" in str(e) or "401" in str(e):
+                    logger.warning("Session expired during deodorize, re-logging in...")
+                    if await self._login():
+                        # Retry once
+                        await self.client.send_api_request(
+                            target_id, 
+                            LitterCommand.CONTROL_DEVICE, 
+                            {DeviceAction.START: LBCommand.DESODORIZE}
+                        )
+                        await self._save_session_to_db()
+                        return {"status": "success", "device_id": str(target_id), "action": "deodorize"}
+                    else:
+                        raise Exception("Re-login failed")
+                raise e
         
         raise Exception("No litterbox found or invalid device ID")
+
+    def _extract_info_from_raw_state(self, raw_state: str, state_summary: dict):
+        """从原始状态字符串中提取关键信息"""
+        # 定义要提取的关键字段
+        key_fields = [
+            'deodorant_left_days', 'sand_percent', 'sand_weight', 
+            'used_times', 'frequent_restroom', 'liquid_lack',
+            'box_full', 'sand_lack', 'power', 'ota'
+        ]
+        
+        # 使用正则表达式提取字段值
+        import re
+        for field in key_fields:
+            # 匹配 pattern: field=value 或 field=value,
+            pattern = rf'{field}=([\w\d\.-]+)'
+            match = re.search(pattern, raw_state)
+            if match:
+                value = match.group(1)
+                # 尝试转换为适当的类型
+                try:
+                    if value.lower() in ['true', 'false']:
+                        state_summary[field] = value.lower() == 'true'
+                    elif '.' in value:
+                        state_summary[field] = float(value)
+                    elif value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                        state_summary[field] = int(value)
+                    else:
+                        state_summary[field] = value
+                except:
+                    state_summary[field] = value
+        
+        # 特殊处理wifi信息
+        wifi_match = re.search(r'wifi=Wifi\(bssid=\'(.*?)\', rsq=(-?\d+)', raw_state)
+        if wifi_match:
+            state_summary['wifi_bssid'] = wifi_match.group(1)
+            state_summary['wifi_rsq'] = int(wifi_match.group(2))
 
     async def get_daily_stats(self, device_id=None):
         """获取今日数据（模拟或从设备属性提取）"""
         if not self.client:
-            await self.start()
+            await self.initialize()
             
         target = None
         if device_id:
@@ -438,14 +427,13 @@ class PetKitService:
             last_time = "N/A"
             
             # 从实际数据中提取 used_times (累计次数，可能不是今日)
-            # 或者从 data 里的 today_times
             if hasattr(target, 'used_times'):
                  visits = getattr(target, 'used_times')
             elif hasattr(target, 'data') and isinstance(target.data, dict):
                 visits = target.data.get('used_times', target.data.get('today_times', 0))
             
             return {
-                "today_visits": visits, # 注意：used_times 可能是累计
+                "today_visits": visits,
                 "last_visit": last_time,
                 "device_name": target.name,
                 "sand_percent": getattr(target, 'sand_percent', 0),

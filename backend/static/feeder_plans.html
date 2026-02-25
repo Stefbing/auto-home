@@ -18,7 +18,7 @@
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text-main); }
         .app-container { max-width: 480px; margin: 0 auto; padding: 20px 16px; min-height: 100vh; }
-        
+
         header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
         .back-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
         h1 { font-size: 20px; margin: 0; font-weight: 700; flex: 1; text-align: center; }
@@ -32,19 +32,19 @@
             transition: transform 0.2s; cursor: pointer;
         }
         .plan-item:active { transform: scale(0.99); background: #fafafa; }
-        
+
         .plan-info { flex: 1; }
         .plan-time { font-size: 24px; font-weight: 700; color: var(--text-main); line-height: 1.2; }
-        .plan-amount-tag { 
-            font-size: 13px; font-weight: 600; color: var(--primary); 
-            background: #fff7e6; padding: 2px 8px; border-radius: 6px; 
+        .plan-amount-tag {
+            font-size: 13px; font-weight: 600; color: var(--primary);
+            background: #fff7e6; padding: 2px 8px; border-radius: 6px;
             margin-left: 8px; vertical-align: middle;
         }
         .plan-detail { font-size: 14px; color: var(--text-sub); margin-top: 6px; }
-        
+
         .plan-actions-right { display: flex; align-items: center; gap: 16px; }
-        .plan-delete-icon { 
-            color: #ffccc7; font-size: 18px; padding: 8px; 
+        .plan-delete-icon {
+            color: #ffccc7; font-size: 18px; padding: 8px;
             transition: color 0.2s;
         }
         .plan-delete-icon:active { color: var(--danger); }
@@ -70,27 +70,27 @@
             transform: scale(0.9); transition: transform 0.3s; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
         }
         .center-modal-overlay.show .center-modal { transform: scale(1); }
-        
+
         .form-group { margin-bottom: 20px; }
         .form-label { display: block; font-size: 14px; color: var(--text-sub); margin-bottom: 8px; }
-        .form-input { 
-            width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 12px; 
+        .form-input {
+            width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 12px;
             font-size: 16px; outline: none; transition: border-color 0.2s; background: #f9f9f9;
         }
         .form-input:focus { border-color: var(--primary); background: white; }
-        
+
         .week-selector { display: flex; justify-content: space-between; margin-top: 10px; }
-        .week-day { 
-            width: 32px; height: 32px; border-radius: 50%; background: #f0f2f5; 
-            display: flex; align-items: center; justify-content: center; 
+        .week-day {
+            width: 32px; height: 32px; border-radius: 50%; background: #f0f2f5;
+            display: flex; align-items: center; justify-content: center;
             font-size: 12px; color: var(--text-sub); cursor: pointer; transition: all 0.2s;
         }
         .week-day.active { background: var(--primary); color: white; transform: scale(1.1); }
 
         .feed-amount-selector { display: flex; gap: 10px; margin: 20px 0; justify-content: center; }
-        .amount-chip { 
-            width: 40px; height: 40px; border-radius: 50%; border: 1px solid #eee; 
-            display: flex; align-items: center; justify-content: center; 
+        .amount-chip {
+            width: 40px; height: 40px; border-radius: 50%; border: 1px solid #eee;
+            display: flex; align-items: center; justify-content: center;
             font-weight: 700; color: var(--text-sub); cursor: pointer;
         }
         .amount-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
@@ -132,7 +132,7 @@
     <div id="edit-plan-modal" class="center-modal-overlay">
         <div class="center-modal">
             <h3 style="margin-top:0; margin-bottom:20px; text-align:center;" id="edit-modal-title">添加计划</h3>
-            
+
             <div class="form-group">
                 <label class="form-label">时间</label>
                 <input type="time" class="form-input" id="plan-time-input" required>
@@ -198,8 +198,8 @@
 
     <script>
         let plans = [];
-        let currentPlanId = null; 
-        let deletePlanId = null; 
+        let currentPlanId = null;
+        let deletePlanId = null;
         let planAmount = 1;
         let planWeekdays = [1,2,3,4,5,6,7];
 
@@ -221,20 +221,26 @@
 
         loadPlans();
 
-        async function loadPlans(manageLoading=true) {
-            if(manageLoading) showLoading(true);
+        async function loadPlans(manageLoading = true) {
+            if (manageLoading) showLoading(true);
             log('Loading plans...');
             try {
                 const res = await fetch('/api/cloudpets/plans?_=' + new Date().getTime());
-                plans = await res.json();
-                log('Plans loaded:', plans);
+                const data = await res.json();
+                // 标准化数据：确保 enabled 是 Boolean，amount 是 Number
+                plans = data.map(p => ({
+                    ...p,
+                    enabled: p.enabled === true || p.enabled === 'true' || p.enabled === 1 || p.enabled === '1',
+                    amount: parseInt(p.amount) || 1,
+                    weekdays: Array.isArray(p.weekdays) ? p.weekdays : []
+                }));
+                log('Plans normalized:', plans);
                 renderPlans();
-            } catch(e) {
-                console.error(e);
+            } catch (e) {
                 log('Load error:', e.message);
                 showToast('加载失败');
             } finally {
-                if(manageLoading) showLoading(false);
+                if (manageLoading) showLoading(false);
             }
         }
 
@@ -246,27 +252,24 @@
             }
 
             container.innerHTML = plans.map(p => {
-                const weekdaysStr = formatWeekdays(p.weekdays || [1,2,3,4,5,6,7]);
-                const timeStr = p.time;
-                const isEnabled = p.enabled === true || p.enabled === 'true' || p.enabled === 1 || p.enabled === '1';
-
+                const weekdaysStr = formatWeekdays(p.weekdays);
                 return `
-                <div class="plan-item" id="plan-${p.id}" onclick="openEditPlan('${p.id}')">
-                    <div class="plan-info">
-                        <div>
-                            <span class="plan-time">${timeStr}</span>
-                            <span class="plan-amount-tag">${p.amount} 份</span>
-                        </div>
-                        <div class="plan-detail">${weekdaysStr}</div>
-                    </div>
-                    <div class="plan-actions-right">
-                        <label class="plan-switch" onclick="event.stopPropagation(); togglePlanSwitch('${p.id}', event)">
-                            <input type="checkbox" ${isEnabled ? 'checked' : ''}>
-                            <span class="slider"></span>
-                        </label>
-                        <i class="fas fa-trash-alt plan-delete-icon" onclick="event.stopPropagation(); deletePlan('${p.id}')"></i>
-                    </div>
-                </div>`;
+        <div class="plan-item" onclick="openEditPlan('${p.id}')">
+            <div class="plan-info">
+                <div>
+                    <span class="plan-time">${p.time}</span>
+                    <span class="plan-amount-tag">${p.amount} 份</span>
+                </div>
+                <div class="plan-detail">${weekdaysStr}</div>
+            </div>
+            <div class="plan-actions-right">
+                <label class="plan-switch" onclick="togglePlanSwitch('${p.id}', event)">
+                    <input type="checkbox" ${p.enabled ? 'checked' : ''}>
+                    <span class="slider"></span>
+                </label>
+                <i class="fas fa-trash-alt plan-delete-icon" onclick="event.stopPropagation(); deletePlan('${p.id}')"></i>
+            </div>
+        </div>`;
             }).join('');
         }
 
@@ -280,7 +283,7 @@
         function openEditPlan(id = null) {
             currentPlanId = id;
             document.getElementById('edit-plan-modal').classList.add('show');
-            
+
             if (id) {
                 const p = plans.find(x => x.id === id);
                 document.getElementById('edit-modal-title').innerText = '修改计划';
@@ -360,14 +363,19 @@
                 if (isSuccess) {
                     showToast('保存成功');
                     closeEditPlan();
+                    // 立即刷新一次（乐观更新）
                     await loadPlans(false);
+                    // 延时二次刷新确保设备处理完指令
+                    setTimeout(async () => {
+                        await loadPlans(false);
+                    }, 3000);
                 } else {
                     showToast('保存失败: ' + (data.message || '未知错误'));
                 }
-            } catch(e) { 
+            } catch(e) {
                 console.error(e);
                 log('Save error:', e.message);
-                showToast('网络错误'); 
+                showToast('网络错误');
             } finally { showLoading(false); }
         }
 
@@ -397,44 +405,85 @@
 
                 if (res.ok) {
                     showToast('已删除');
+                    // 立即刷新一次（乐观更新）
                     await loadPlans(false);
+                    // 延时二次刷新确保设备处理完指令
+                    setTimeout(async () => {
+                        await loadPlans(false);
+                    }, 1000);
                 } else {
                     showToast('删除失败: ' + (data.message || ''));
                 }
-            } catch(e) { 
+            } catch(e) {
                 console.error(e);
                 log('Delete error:', e.message);
-                showToast('网络错误'); 
+                showToast('网络错误');
             } finally { showLoading(false); }
         }
 
         function togglePlanSwitch(id, event) {
-            // 阻止事件冒泡
+            // 1. 彻底切断冒泡，防止触发外层卡的 openEditPlan
             event.stopPropagation();
-            
-            const p = plans.find(x => x.id === id);
+
+            // 2. 找到对应数据
+            const p = plans.find(x => String(x.id) === String(id));
             if (!p) return;
-            
-            // 切换状态
-            const newEnabled = !(p.enabled === true || p.enabled === 'true' || p.enabled === 1 || p.enabled === '1');
-            
-            // 立即更新UI（乐观更新）
-            p.enabled = newEnabled;
-            renderPlans();
-            
-            // 异步更新后端
-            togglePlan(id, newEnabled);
+
+            // 3. 获取 Checkbox 当前的真实勾选状态
+            // 如果点的是 label，event.target 可能是 input 或 slider，这里做兼容处理
+            const checkbox = event.currentTarget.querySelector('input');
+            const newStatus = checkbox.checked;
+
+            log(`UI Clicked: Plan ${id} -> ${newStatus}`);
+
+            // 4. 更新内存状态 (乐观更新)
+            p.enabled = newStatus;
+
+            // 5. 调用后端接口
+            updatePlanStatusOnServer(id, newStatus);
+        }
+
+        async function updatePlanStatusOnServer(id, enabled) {
+            // 这里不使用全屏 Loading，提升交互流畅感
+            try {
+                const p = plans.find(x => String(x.id) === String(id));
+                const res = await fetch(`/api/cloudpets/plans/${id}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ...p, enabled: enabled })
+                });
+
+                const data = await res.json();
+                const isSuccess = res.ok && (data.id || data.code === 200 || data.code === 0);
+
+                if (isSuccess) {
+                    showToast(enabled ? '计划已开启' : '计划已关闭');
+                    // 立即刷新一次（乐观更新）
+                    await loadPlans(false);
+                    // 延时二次刷新确保设备处理完指令
+                    setTimeout(async () => {
+                        await loadPlans(false);
+                    }, 1000);
+                } else {
+                    throw new Error(data.message || '服务器返回错误');
+                }
+            } catch (e) {
+                log('Toggle error:', e.message);
+                showToast('操作失败，已还原');
+                // 失败回滚：从服务器重新加载列表，将 UI 状态拨回去
+                await loadPlans(false);
+            }
         }
 
         async function togglePlan(id, enabled) {
             const p = plans.find(x => x.id === id);
             if (!p) return;
-            
+
             // 乐观更新：先更新本地 UI
             p.enabled = enabled;
             // 立即重新渲染以反映开关状态
-            renderPlans(); 
-            
+            renderPlans();
+
             showLoading(true);
             log('Toggling plan:', {id, enabled});
 
@@ -446,26 +495,30 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
-                
+
                 let data = {};
                 try { data = await res.json(); } catch(e) {}
-                
+
                 log('Toggle Plan Response:', {status: res.status, data: data});
 
                 // 后端返回对象包含 id，或标准成功响应
                 const isSuccess = res.ok && (data.id || data.code === 200 || data.code === 0 || data.code === undefined);
 
                 if (isSuccess) {
-                    // 成功后，强制从服务器重新拉取最新列表，确保数据一致性
-                    await loadPlans(false);
                     showToast(enabled ? '已启用' : '已禁用');
+                    // 立即刷新一次（乐观更新）
+                    await loadPlans(false);
+                    // 延时二次刷新确保设备处理完指令
+                    setTimeout(async () => {
+                        await loadPlans(false);
+                    }, 1000);
                 } else {
                     showToast('状态更新失败: ' + (data.message || ''));
                     // 失败时，回滚状态并重新渲染
                     p.enabled = !enabled;
-                    renderPlans(); 
+                    renderPlans();
                 }
-            } catch(e) { 
+            } catch(e) {
                 console.error(e);
                 log('Toggle error:', e.message);
                 showToast('网络错误');

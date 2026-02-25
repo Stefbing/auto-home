@@ -34,20 +34,20 @@ async def lifespan(app: FastAPI):
     """管理应用启动和关闭时的逻辑"""
     # 启动时：初始化数据库和长连接服务
     init_db()
-    
+
     # 初始化 CloudPets 服务 (从数据库加载 Token 或自动登录)
     await cloudpets_service.initialize()
-    
+
     # 统一环境变量 ACCOUNT 和 PASSWORD
     # 注意：PetKit 通常需要带区号 (如 86-)，而 CloudPets 会自动去除
     username = os.getenv("ACCOUNT")
     password = os.getenv("PASSWORD")
-    
+
     if username and password:
         print(f"正在初始化 PetKit 服务: {username}...")
         state.petkit = PetKitService(username, password)
         try:
-            await state.petkit.start()
+            await state.petkit.initialize()
             print("PetKit 服务连接成功")
         except Exception as e:
             print(f"PetKit 连接失败: {e}")
@@ -60,12 +60,12 @@ async def lifespan(app: FastAPI):
     if state.petkit:
         print("正在关闭 PetKit 服务...")
         await state.petkit.close()
-    
+
     await cloudpets_service.close()
 
 # --- 2. 应用配置 ---
 app = FastAPI(
-    title="Smart Home Controller", 
+    title="Smart Home Controller",
     version="0.2.1",
     lifespan=lifespan
 )
@@ -223,7 +223,7 @@ def calculate_body_metrics(weight: float, impedance: int, user: User):
         body_fat = 0.8 * bmi + 0.1 * age - 5.4
     else:
         body_fat = 0.8 * bmi + 0.1 * age + 4.1
-    
+
     # 如果有阻抗值，进行修正 (这里使用阻抗比例修正)
     if impedance > 0:
         # 阻抗越高，体脂越高 (这是一个非常简化的线性比例)
@@ -236,10 +236,10 @@ def calculate_body_metrics(weight: float, impedance: int, user: User):
 
     # 2. 肌肉量
     muscle = weight * (1 - body_fat / 100.0) * 0.75
-    
+
     # 3. 水分
     water = (100 - body_fat) * 0.7
-    
+
     # 4. 内脏脂肪 (基于 BMI 估算)
     visceral_fat = bmi - 13.0
     visceral_fat = max(1.0, min(visceral_fat, 20.0))
@@ -274,7 +274,7 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
             record.visceral_fat = metrics["visceral_fat"]
             record.bone_mass = metrics["bone_mass"]
             record.bmr = metrics["bmr"]
-    
+
     session.add(record)
     session.commit()
     session.refresh(record)
