@@ -2,6 +2,7 @@ from sqlmodel import SQLModel, create_engine, Session
 from sqlalchemy.pool import StaticPool
 import os
 from dotenv import load_dotenv
+import tempfile
 
 load_dotenv()
 
@@ -19,7 +20,8 @@ if is_serverless:
         print("No POSTGRES_URL found. Falling back to in-memory SQLite database.")
         database_url = "sqlite:///:memory:"
 else:
-    database_url = os.getenv("DATABASE_URL") or "sqlite:///./auto_home.db"
+    # 暂时使用内存数据库避免文件权限问题
+    database_url = os.getenv("DATABASE_URL") or "sqlite:///:memory:"
 
 print(f"Database URL: {database_url.split('://')[0]}://***") # Mask password if any
 

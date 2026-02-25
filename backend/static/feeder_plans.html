@@ -248,7 +248,7 @@
             container.innerHTML = plans.map(p => {
                 const weekdaysStr = formatWeekdays(p.weekdays || [1,2,3,4,5,6,7]);
                 const timeStr = p.time;
-                const isEnabled = String(p.enabled) === 'true';
+                const isEnabled = p.enabled === true || p.enabled === 'true' || p.enabled === 1 || p.enabled === '1';
 
                 return `
                 <div class="plan-item" id="plan-${p.id}" onclick="openEditPlan('${p.id}')">
@@ -260,8 +260,8 @@
                         <div class="plan-detail">${weekdaysStr}</div>
                     </div>
                     <div class="plan-actions-right">
-                        <label class="plan-switch" onclick="event.stopPropagation()">
-                            <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="togglePlan('${p.id}', this.checked)">
+                        <label class="plan-switch" onclick="event.stopPropagation(); togglePlanSwitch('${p.id}', event)">
+                            <input type="checkbox" ${isEnabled ? 'checked' : ''}>
                             <span class="slider"></span>
                         </label>
                         <i class="fas fa-trash-alt plan-delete-icon" onclick="event.stopPropagation(); deletePlan('${p.id}')"></i>
@@ -406,6 +406,24 @@
                 log('Delete error:', e.message);
                 showToast('网络错误'); 
             } finally { showLoading(false); }
+        }
+
+        function togglePlanSwitch(id, event) {
+            // 阻止事件冒泡
+            event.stopPropagation();
+            
+            const p = plans.find(x => x.id === id);
+            if (!p) return;
+            
+            // 切换状态
+            const newEnabled = !(p.enabled === true || p.enabled === 'true' || p.enabled === 1 || p.enabled === '1');
+            
+            // 立即更新UI（乐观更新）
+            p.enabled = newEnabled;
+            renderPlans();
+            
+            // 异步更新后端
+            togglePlan(id, newEnabled);
         }
 
         async function togglePlan(id, enabled) {

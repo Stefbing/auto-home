@@ -1,6 +1,6 @@
 <view class="container">
   <view class="card">
-    <view class="title">PetWant 喂食机</view>
+    <view class="title">CloudPets 喂食机</view>
     <button type="primary" bindtap="feedOne">立即投喂 (1份)</button>
     
     <view class="switch-row">
