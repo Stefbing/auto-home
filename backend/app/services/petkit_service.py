@@ -1,7 +1,5 @@
 # backend/app/services/petkit_service.py
 
-import asyncio
-import logging
 import aiohttp
 from pypetkitapi.client import PetKitClient
 from pypetkitapi.command import LitterCommand, DeviceAction, LBCommand, DeviceCommand
@@ -166,20 +164,20 @@ class PetKitService:
     async def get_client_methods(self):
         if not self.client:
             await self.initialize()
-        
+
         try:
             import pypetkitapi.command as cmd
             constants = {k: v for k, v in vars(cmd).items() if not k.startswith('_')}
         except ImportError:
             constants = {"error": "Could not import pypetkitapi.command"}
-            
+
         return {"methods": [m for m in dir(self.client) if not m.startswith('_')], "constants": constants}
 
     async def get_devices(self):
         """Get all devices"""
         if not self.client:
             await self.initialize()
-        
+
         try:
             # 刷新数据
             logger.info("正在刷新设备数据...")
@@ -195,17 +193,35 @@ class PetKitService:
                     raise Exception("Re-login failed")
             else:
                 raise e
-        
+
         devices = []
         for dev_id, entity in self.client.petkit_entities.items():
-            # 宽松检查：如果有 device_type 或者是硬件设备 (有 sn/hardware)
-            # 排除纯宠物档案 (通常有 pet_id)
+            # 更准确的设备识别逻辑
+            # 1. 排除宠物档案 (有 pet_id)
             if hasattr(entity, 'pet_id'):
                 continue
-
-            dev_type = getattr(entity, 'device_type', 'Unknown')
-            # 只要不是明确的非设备，都尝试处理
             
+            # 2. 通过 device_nfo 获取准确的设备类型
+            dev_type = 'Unknown'
+            if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
+                dev_type = entity.device_nfo.device_type
+            else:
+                # 回退到原来的 device_type
+                dev_type = getattr(entity, 'device_type', 'Unknown')
+            
+            # 3. 标准化设备类型名称
+            if dev_type.lower() == 't4':
+                dev_type = 'T4'
+            elif dev_type.lower() == 't3':
+                dev_type = 'T3'
+            elif dev_type.lower() == 't5':
+                dev_type = 'T5'
+            
+            # 4. 只处理已知的设备类型
+            if dev_type not in ['T3', 'T4', 'T5']:
+                logger.info(f"跳过未知设备类型: {dev_type}")
+                continue
+
             logger.info(f"处理实体: {getattr(entity, 'name', 'Unknown')} (类型: {dev_type}, ID: {entity.id})")
             dev_data = {
                 "id": str(entity.id),
@@ -213,7 +229,7 @@ class PetKitService:
                 "type": dev_type,
                 "data": {}
             }
-            
+
             # 尝试提取更多状态数据
             if hasattr(entity, 'data') and entity.data:
                 # 确保 data 是字典，且值是基本类型
@@ -226,7 +242,7 @@ class PetKitService:
                         dev_data["data"] = str(raw_data)
                 except:
                     dev_data["data"] = {}
-                
+
             # 尝试提取具体属性作为扁平化状态，方便前端展示
             state_summary = {}
             if hasattr(entity, 'state'):
@@ -236,14 +252,14 @@ class PetKitService:
                 for sattr in known_state_attrs:
                     if hasattr(state_obj, sattr):
                         state_summary[sattr] = getattr(state_obj, sattr)
-                
+
                 # 保留原始 string dump 作为 fallback
                 raw_state_str = str(state_obj)
                 state_summary['raw_state'] = raw_state_str
-                
+
                 # 从 raw_state 字符串中提取关键信息
                 self._extract_info_from_raw_state(raw_state_str, state_summary)
-            
+
             # 基于实际抓取到的属性
             interesting_attrs = [
                 'liquid', 'weight', 'times', 'battery', 'connection',
@@ -257,13 +273,32 @@ class PetKitService:
                 # 其次从 data 字典获取
                 elif hasattr(entity, 'data') and isinstance(entity.data, dict) and attr in entity.data:
                         val = entity.data[attr]
-                
+
                 # 确保值是基本类型
                 if val is not None and isinstance(val, (str, int, float, bool)):
                     state_summary[attr] = val
                 elif val is not None:
                     state_summary[attr] = str(val)
             
+            # 添加准确的统计信息（从 device_stats 获取）
+            if hasattr(entity, 'device_stats'):
+                device_stats = entity.device_stats
+                # 今日如厕次数
+                state_summary['today_visits'] = getattr(device_stats, 'times', 0)
+                # 平均时长
+                state_summary['avg_duration'] = getattr(device_stats, 'avg_time', 0)
+                # 总时长
+                state_summary['total_duration'] = getattr(device_stats, 'total_time', 0)
+                
+                # 获取最新的猫咪体重
+                if hasattr(device_stats, 'statistic_info') and device_stats.statistic_info:
+                    stat_info = device_stats.statistic_info
+                    if stat_info and len(stat_info) > 0:
+                        latest_record = stat_info[-1]
+                        latest_weight = getattr(latest_record, 'pet_weight', 0)
+                        if latest_weight > 0:
+                            state_summary['last_pet_weight'] = latest_weight / 1000.0  # 转换为kg
+
             dev_data["state_summary"] = state_summary
             devices.append(dev_data)
         return devices
@@ -272,17 +307,23 @@ class PetKitService:
         """Trigger clean action for the first found or specified litterbox"""
         if not self.client:
             await self.initialize()
-        
+
         target_id = None
         # 如果未指定 ID，找第一个猫厕所 (T3/T4)
         if not device_id:
             for dev_id, entity in self.client.petkit_entities.items():
-                target_type = getattr(entity, 'device_type', '')
-                # 兼容之前的逻辑
-                if not target_type and hasattr(entity, 'name') and ('MAX' in entity.name or '猫厕所' in entity.name):
-                    target_type = 'T4 Pura MAX'
+                # 使用改进的设备类型识别
+                target_type = 'Unknown'
+                if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
+                    target_type = entity.device_nfo.device_type.upper()
+                else:
+                    target_type = getattr(entity, 'device_type', '').upper()
                 
-                if target_type in ['T3', 'T4', 'T4 Pura MAX', 'T5']:
+                # 兼容之前的逻辑
+                if target_type == 'UNKNOWN' and hasattr(entity, 'name') and ('MAX' in entity.name or '猫厕所' in entity.name):
+                    target_type = 'T4'
+
+                if target_type in ['T3', 'T4', 'T5']:
                     target_id = dev_id
                     break
         else:
@@ -293,8 +334,8 @@ class PetKitService:
             try:
                 from pypetkitapi.command import DeviceCommand, DeviceAction, LBCommand
                 await self.client.send_api_request(
-                    target_id, 
-                    DeviceCommand.CONTROL_DEVICE, 
+                    target_id,
+                    DeviceCommand.CONTROL_DEVICE,
                     {DeviceAction.START: LBCommand.CLEANING}
                 )
                 # 更新会话时间戳
@@ -306,8 +347,8 @@ class PetKitService:
                     if await self._login():
                         # Retry once
                         await self.client.send_api_request(
-                            target_id, 
-                            DeviceCommand.CONTROL_DEVICE, 
+                            target_id,
+                            DeviceCommand.CONTROL_DEVICE,
                             {DeviceAction.START: LBCommand.CLEANING}
                         )
                         await self._save_session_to_db()
@@ -315,25 +356,31 @@ class PetKitService:
                     else:
                         raise Exception("Re-login failed")
                 raise e
-        
+
         raise Exception("No litterbox found or invalid device ID")
 
     async def deodorize_litterbox(self, device_id=None):
         """Trigger deodorize (spray) for the first found or specified litterbox"""
         if not self.client:
             await self.initialize()
-        
+
         target_id = None
-        
+
         # 如果未指定 ID，找第一个猫厕所 (T3/T4)
         if not device_id:
             for dev_id, entity in self.client.petkit_entities.items():
-                # 注意：T4 Pura MAX 是我们自己修正的类型
-                target_type = getattr(entity, 'device_type', '')
-                if not target_type and hasattr(entity, 'name') and ('MAX' in entity.name or '猫厕所' in entity.name):
-                    target_type = 'T4 Pura MAX'
+                # 使用改进的设备类型识别
+                target_type = 'Unknown'
+                if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
+                    target_type = entity.device_nfo.device_type.upper()
+                else:
+                    target_type = getattr(entity, 'device_type', '').upper()
                 
-                if target_type in ['T3', 'T4', 'T4 Pura MAX', 'T5']:
+                # 兼容之前的逻辑
+                if target_type == 'UNKNOWN' and hasattr(entity, 'name') and ('MAX' in entity.name or '猫厕所' in entity.name):
+                    target_type = 'T4'
+
+                if target_type in ['T3', 'T4', 'T5']:
                     target_id = dev_id
                     break
         else:
@@ -345,8 +392,8 @@ class PetKitService:
                 from pypetkitapi.command import LitterCommand, DeviceAction, LBCommand
                 # 发送除臭指令 (DESODORIZE / SPRAY)
                 await self.client.send_api_request(
-                    target_id, 
-                    LitterCommand.CONTROL_DEVICE, 
+                    target_id,
+                    LitterCommand.CONTROL_DEVICE,
                     {DeviceAction.START: LBCommand.DESODORIZE}
                 )
                 # 更新会话时间戳
@@ -358,8 +405,8 @@ class PetKitService:
                     if await self._login():
                         # Retry once
                         await self.client.send_api_request(
-                            target_id, 
-                            LitterCommand.CONTROL_DEVICE, 
+                            target_id,
+                            LitterCommand.CONTROL_DEVICE,
                             {DeviceAction.START: LBCommand.DESODORIZE}
                         )
                         await self._save_session_to_db()
@@ -367,18 +414,18 @@ class PetKitService:
                     else:
                         raise Exception("Re-login failed")
                 raise e
-        
+
         raise Exception("No litterbox found or invalid device ID")
 
     def _extract_info_from_raw_state(self, raw_state: str, state_summary: dict):
         """从原始状态字符串中提取关键信息"""
         # 定义要提取的关键字段
         key_fields = [
-            'deodorant_left_days', 'sand_percent', 'sand_weight', 
+            'deodorant_left_days', 'sand_percent', 'sand_weight',
             'used_times', 'frequent_restroom', 'liquid_lack',
             'box_full', 'sand_lack', 'power', 'ota'
         ]
-        
+
         # 使用正则表达式提取字段值
         import re
         for field in key_fields:
@@ -399,45 +446,165 @@ class PetKitService:
                         state_summary[field] = value
                 except:
                     state_summary[field] = value
-        
+
         # 特殊处理wifi信息
         wifi_match = re.search(r'wifi=Wifi\(bssid=\'(.*?)\', rsq=(-?\d+)', raw_state)
         if wifi_match:
             state_summary['wifi_bssid'] = wifi_match.group(1)
             state_summary['wifi_rsq'] = int(wifi_match.group(2))
 
-    async def get_daily_stats(self, device_id=None):
-        """获取今日数据（模拟或从设备属性提取）"""
+    async def get_device_stats(self, device_id=None, days=7):
+        """获取设备历史统计数据（使用 pypetkitapi 原生方法）"""
         if not self.client:
             await self.initialize()
-            
-        target = None
-        if device_id:
-             target = self.client.petkit_entities.get(int(device_id))
-        else:
-             # 找第一个猫厕所
-             for dev_id, entity in self.client.petkit_entities.items():
-                if hasattr(entity, 'device_type') and entity.device_type in ['T3', 'T4', 'T4 Pura MAX', 'T5']:
-                    target = entity
-                    break
+
+        # 刷新设备数据，这会自动调用统计任务
+        await self.client.get_devices_data()
         
-        if target:
-            # 尝试从 data 中提取今日次数等
-            visits = 0
-            last_time = "N/A"
+        target_entity = None
+        
+        if device_id:
+            target_entity = self.client.petkit_entities.get(int(device_id))
+        else:
+            # 找第一个猫厕所
+            for entity in self.client.petkit_entities.values():
+                # 使用改进的设备类型识别
+                dev_type = 'Unknown'
+                if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
+                    dev_type = entity.device_nfo.device_type.upper()
+                else:
+                    dev_type = getattr(entity, 'device_type', '').upper()
+                
+                if dev_type in ['T3', 'T4', 'T5']:
+                    target_entity = entity
+                    break
+
+        if not target_entity:
+            return {"error": "未找到设备"}
+
+        try:
+            # 使用原生的统计属性
+            stats_data = {}
             
-            # 从实际数据中提取 used_times (累计次数，可能不是今日)
-            if hasattr(target, 'used_times'):
-                 visits = getattr(target, 'used_times')
-            elif hasattr(target, 'data') and isinstance(target.data, dict):
-                visits = target.data.get('used_times', target.data.get('today_times', 0))
+            # 从 LitterStats 获取统计信息
+            if hasattr(target_entity, 'stats') and target_entity.stats:
+                stats = target_entity.stats
+                stats_data.update({
+                    'today_visits': getattr(stats, 'times', 0),
+                    'avg_duration': getattr(stats, 'avg_time', 0),
+                    'total_duration': getattr(stats, 'total_time', 0),
+                    'statistic_time': getattr(stats, 'statistic_time', None),
+                    'pet_ids': getattr(stats, 'pet_ids', [])
+                })
             
-            return {
-                "today_visits": visits,
-                "last_visit": last_time,
-                "device_name": target.name,
-                "sand_percent": getattr(target, 'sand_percent', 0),
-                "deodorant_days": getattr(target, 'deodorant_left_days', 0)
-            }
+            # 从设备基本属性获取其他信息
+            stats_data.update({
+                'device_name': getattr(target_entity, 'name', 'Unknown'),
+                'sand_percent': getattr(target_entity, 'sand_percent', 0),
+                'deodorant_days': getattr(target_entity, 'deodorant_left_days', 0),
+                'used_times': getattr(target_entity, 'used_times', 0),
+                'last_pet_weight': getattr(target_entity, 'last_pet_weight', 0)
+            })
             
-        return {"today_visits": 0, "last_visit": "N/A"}
+            return stats_data
+            
+        except Exception as e:
+            logger.warning(f"获取统计信息失败: {e}")
+            return {"error": f"无法获取统计数据: {str(e)}"}
+
+    async def get_daily_stats(self, device_id=None):
+        """获取今日数据（使用 pypetkitapi 原生统计方法）"""
+        if not self.client:
+            await self.initialize()
+
+        # 刷新设备数据，确保统计信息是最新的
+        await self.client.get_devices_data()
+        
+        target_entity = None
+        
+        if device_id:
+            target_entity = self.client.petkit_entities.get(int(device_id))
+        else:
+            # 找第一个猫厕所
+            for entity in self.client.petkit_entities.values():
+                # 使用改进的设备类型识别
+                dev_type = 'Unknown'
+                if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
+                    dev_type = entity.device_nfo.device_type.upper()
+                else:
+                    dev_type = getattr(entity, 'device_type', '').upper()
+                
+                if dev_type in ['T3', 'T4', 'T5']:
+                    target_entity = entity
+                    break
+
+        if target_entity:
+            try:
+                # 使用 pypetkitapi 原生的统计信息
+                result = {
+                    "device_name": getattr(target_entity, 'name', 'Unknown'),
+                    "sand_percent": getattr(target_entity, 'sand_percent', 0),
+                    "deodorant_days": getattr(target_entity, 'deodorant_left_days', 0)
+                }
+                
+                # 优先从 device_stats 获取今日统计（更准确）
+                if hasattr(target_entity, 'device_stats'):
+                    device_stats = target_entity.device_stats
+                    result.update({
+                        "today_visits": getattr(device_stats, 'times', 0),
+                        "avg_duration": getattr(device_stats, 'avg_time', 0),
+                        "total_duration": getattr(device_stats, 'total_time', 0),
+                        "statistic_time": getattr(device_stats, 'statistic_time', None)
+                    })
+                    
+                    # 获取详细的宠物统计信息
+                    if hasattr(device_stats, 'statistic_info'):
+                        stat_info = device_stats.statistic_info
+                        if stat_info and len(stat_info) > 0:
+                            # 获取最新的记录
+                            latest_record = stat_info[-1]
+                            result["last_visit"] = str(getattr(latest_record, 'statistic_date', 'N/A'))
+                            # 获取最新的猫咪体重
+                            latest_weight = getattr(latest_record, 'pet_weight', 0)
+                            if latest_weight > 0:
+                                result["last_pet_weight"] = latest_weight / 1000.0  # 转换为kg
+                        else:
+                            result["last_visit"] = "N/A"
+                    else:
+                        result["last_visit"] = "N/A"
+                
+                # 回退到 LitterStats
+                elif hasattr(target_entity, 'stats') and target_entity.stats:
+                    stats = target_entity.stats
+                    result.update({
+                        "today_visits": getattr(stats, 'times', 0),
+                        "avg_duration": getattr(stats, 'avg_time', 0),
+                        "total_duration": getattr(stats, 'total_time', 0),
+                        "statistic_time": getattr(stats, 'statistic_time', None)
+                    })
+                    
+                    # 尝试获取最后一次使用时间
+                    if hasattr(stats, 'statistic_info') and stats.statistic_info:
+                        result["last_visit"] = "从统计信息获取"
+                    else:
+                        result["last_visit"] = "N/A"
+                else:
+                    # 如果没有统计信息，使用基本属性作为回退
+                    result.update({
+                        "today_visits": getattr(target_entity, 'used_times', 0),
+                        "last_visit": "N/A",
+                        "warning": "使用累计数据，可能非今日实际次数"
+                    })
+                    logger.warning(f"设备 {target_entity.name} 缺少详细统计信息，使用累计数据")
+                
+                return result
+                
+            except Exception as e:
+                logger.error(f"处理统计信息时出错: {e}")
+                return {
+                    "today_visits": 0, 
+                    "last_visit": "N/A", 
+                    "error": f"处理统计信息失败: {str(e)}"
+                }
+
+        return {"today_visits": 0, "last_visit": "N/A", "error": "未找到设备"}

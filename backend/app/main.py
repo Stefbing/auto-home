@@ -148,6 +148,22 @@ async def petkit_deodorize(device_id: Optional[str] = None, service: PetKitServi
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/petkit/stats")
+async def petkit_daily_stats(device_id: Optional[str] = None, service: PetKitService = Depends(get_petkit)):
+    """获取今日统计数据（修复后的准确数据）"""
+    try:
+        return await service.get_daily_stats(device_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取统计数据失败: {str(e)}")
+
+@app.get("/api/petkit/history")
+async def petkit_history_stats(device_id: Optional[str] = None, days: int = 7, service: PetKitService = Depends(get_petkit)):
+    """获取历史统计数据"""
+    try:
+        return await service.get_device_stats(device_id, days)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取历史统计失败: {str(e)}")
+
 # --- CloudPets (云宠智能) 路由 ---
 @app.get("/api/cloudpets/servings_today")
 async def cloudpets_servings_today():

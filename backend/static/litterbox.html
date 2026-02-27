@@ -159,9 +159,15 @@
         async function fetchDevices() {
             showLoading(true);
             try {
-                const response = await fetch(`${API_BASE}/api/petkit/devices`);
-                const devices = await response.json();
-                renderDevices(devices);
+                // 首先获取设备列表
+                const devicesResponse = await fetch(`${API_BASE}/api/petkit/devices`);
+                const devices = await devicesResponse.json();
+                
+                // 然后获取准确的今日统计数据
+                const statsResponse = await fetch(`${API_BASE}/api/petkit/stats`);
+                const dailyStats = await statsResponse.json();
+                
+                renderDevices(devices, dailyStats);
             } catch (error) {
                 showToast('加载失败: ' + error.message);
             } finally {
@@ -169,7 +175,7 @@
             }
         }
 
-        function renderDevices(devices) {
+        function renderDevices(devices, dailyStats) {
             const container = document.getElementById('device-list');
             container.innerHTML = '';
 
@@ -208,13 +214,21 @@
                     statusIcon = 'fa-cog fa-spin';
                 }
 
-                // Data Formatting
+                // 使用准确的今日统计数据（优先使用dailyStats）
+                const accurateTodayVisits = dailyStats.today_visits || 0;
+                const accurateAvgDuration = dailyStats.avg_duration || 0;
+                const accurateLastPetWeight = dailyStats.last_pet_weight ? dailyStats.last_pet_weight.toFixed(2) : '0.00';
+                
+                // Data Formatting (优先使用准确的统计数据，回退到原有数据)
                 const sand = stats.sand_percent || 0;
                 const liquid = stats.deodorant_left_days || 0; 
                 const sandWeight = ((stats.sand_weight || stats.weight || 0) / 1000).toFixed(2);
-                const petWeight = stats.last_pet_weight ? (stats.last_pet_weight / 1000).toFixed(2) : '0.00';
-                const times = stats.used_times || 0; 
-                const avgDuration = stats.avg_duration || 0;
+                
+                // 优先使用 state_summary 中的准确数据（我们现在添加了）
+                const petWeight = stats.last_pet_weight ? stats.last_pet_weight.toFixed(2) : accurateLastPetWeight;
+                const times = stats.today_visits || accurateTodayVisits;
+                const avgDuration = stats.avg_duration || accurateAvgDuration;
+                
                 const isFrequent = stats.frequent_restroom === 1;
 
                 const html = `

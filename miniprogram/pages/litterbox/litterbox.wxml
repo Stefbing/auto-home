@@ -1,18 +1,74 @@
 <view class="container">
-  <view class="card">
-    <view class="title">PetKit 猫厕所 MAX2</view>
-    <button type="warn" bindtap="cleanNow">立即清理</button>
+  <!-- 顶部导航栏 -->
+  <view class="header">
+    <view class="title">PetKit 猫厕所</view>
+    <button 
+      class="refresh-btn" 
+      bindtap="refreshData" 
+      loading="{{loading}}"
+    >
+      {{loading ? '刷新中...' : '刷新'}}
+    </button>
   </view>
 
+  <!-- 设备控制 -->
   <view class="card">
-    <view class="title">今日数据</view>
+    <view class="section-title">设备控制</view>
+    <button 
+      type="warn" 
+      bindtap="cleanNow" 
+      disabled="{{loading}}"
+      loading="{{loading}}"
+    >
+      {{loading ? '操作中...' : '立即清理'}}
+    </button>
+  </view>
+
+  <!-- 今日数据 -->
+  <view class="card">
+    <view class="section-title">今日数据</view>
     <view class="stat-row">
-      <text>如厕次数</text>
+      <text class="label">如厕次数</text>
       <text class="value">{{stats.today_visits}}次</text>
     </view>
     <view class="stat-row">
-      <text>最近一次</text>
+      <text class="label">最近一次</text>
       <text class="value">{{stats.last_visit}}</text>
     </view>
+    <block wx:if="{{stats.avg_duration}}">
+      <view class="stat-row">
+        <text class="label">平均时长</text>
+        <text class="value">{{stats.avg_duration}}秒</text>
+      </view>
+    </block>
+    <block wx:if="{{stats.total_duration}}">
+      <view class="stat-row">
+        <text class="label">总时长</text>
+        <text class="value">{{stats.total_duration}}秒</text>
+      </view>
+    </block>
+  </view>
+
+  <!-- 状态信息 -->
+  <view class="card" wx:if="{{stats.sand_percent !== undefined}}">
+    <view class="section-title">设备状态</view>
+    <view class="stat-row">
+      <text class="label">猫砂余量</text>
+      <text class="value">{{stats.sand_percent}}%</text>
+    </view>
+    <view class="stat-row">
+      <text class="label">除臭液</text>
+      <text class="value">{{stats.deodorant_days}}天</text>
+    </view>
+  </view>
+
+  <!-- 数据说明 -->
+  <view class="info-card" wx:if="{{stats.warning}}">
+    <text class="info-text">⚠️ {{stats.warning}}</text>
+  </view>
+
+  <!-- 错误提示 -->
+  <view class="error-card" wx:if="{{stats.error}}">
+    <text class="error-text">❌ {{stats.error}}</text>
   </view>
 </view>
