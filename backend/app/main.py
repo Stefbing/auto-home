@@ -120,7 +120,6 @@ async def feeder_plans_page():
 async def scale_page():
     return FileResponse(os.path.join(STATIC_DIR, 'scale.html'))
 
-# --- PetKit 路由 ---
 @app.get("/api/petkit/debug")
 async def petkit_debug(service: PetKitService = Depends(get_petkit)):
     if not service:
@@ -129,6 +128,8 @@ async def petkit_debug(service: PetKitService = Depends(get_petkit)):
 
 @app.get("/api/petkit/devices")
 async def petkit_devices(service: PetKitService = Depends(get_petkit)):
+    if not service or not service.username or not service.password:
+        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
         return await service.get_devices()
     except Exception as e:
@@ -136,6 +137,8 @@ async def petkit_devices(service: PetKitService = Depends(get_petkit)):
 
 @app.post("/api/petkit/clean")
 async def petkit_clean(device_id: Optional[str] = None, service: PetKitService = Depends(get_petkit)):
+    if not service or not service.username or not service.password:
+        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
         return await service.clean_litterbox(device_id)
     except Exception as e:
@@ -143,6 +146,8 @@ async def petkit_clean(device_id: Optional[str] = None, service: PetKitService =
 
 @app.post("/api/petkit/deodorize")
 async def petkit_deodorize(device_id: Optional[str] = None, service: PetKitService = Depends(get_petkit)):
+    if not service or not service.username or not service.password:
+        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
         return await service.deodorize_litterbox(device_id)
     except Exception as e:
@@ -151,6 +156,8 @@ async def petkit_deodorize(device_id: Optional[str] = None, service: PetKitServi
 @app.get("/api/petkit/stats")
 async def petkit_daily_stats(device_id: Optional[str] = None, service: PetKitService = Depends(get_petkit)):
     """获取今日统计数据（修复后的准确数据）"""
+    if not service or not service.username or not service.password:
+        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
         return await service.get_daily_stats(device_id)
     except Exception as e:
@@ -159,6 +166,8 @@ async def petkit_daily_stats(device_id: Optional[str] = None, service: PetKitSer
 @app.get("/api/petkit/history")
 async def petkit_history_stats(device_id: Optional[str] = None, days: int = 7, service: PetKitService = Depends(get_petkit)):
     """获取历史统计数据"""
+    if not service or not service.username or not service.password:
+        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
         return await service.get_device_stats(device_id, days)
     except Exception as e:
