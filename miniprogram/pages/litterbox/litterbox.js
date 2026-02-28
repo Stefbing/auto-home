@@ -90,7 +90,6 @@ Page({
         device_id: this.data.deviceId
       },
       success: res => {
-        console.log('获取到的统计数据:', res.data);
         this.setData({ 
           stats: res.data,
           loading: false 

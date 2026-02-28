@@ -4,7 +4,18 @@ import os
 from dotenv import load_dotenv
 import tempfile
 
-load_dotenv()
+# 尝试从项目根目录加载环境变量
+import pathlib
+root_dir = pathlib.Path(__file__).parent.parent.parent
+env_path = root_dir / '.env'
+
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"Loaded .env from: {env_path}")
+else:
+    # 如果根目录没有.env，则尝试当前目录
+    load_dotenv()
+    print("Loaded .env from current directory")
 
 # Vercel Postgres 使用 "POSTGRES_URL"
 # Serverless 环境下如果未配置 Postgres，回退到内存数据库 (sqlite:///:memory:) 避免文件权限错误

@@ -5,8 +5,8 @@ import asyncio
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from sqlmodel import Session
-from app.models.db import engine
-from app.models.models import SystemConfig
+from ..models.db import engine
+from ..models.models import SystemConfig
 import time
 
 logger = logging.getLogger(__name__)

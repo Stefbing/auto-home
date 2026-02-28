@@ -9,8 +9,8 @@ import asyncio
 import json
 import time
 from sqlmodel import Session
-from app.models.db import engine
-from app.models.models import SystemConfig
+from ..models.db import engine
+from ..models.models import SystemConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

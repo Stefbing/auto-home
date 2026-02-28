@@ -130,7 +130,6 @@ Page({
   },
 
   log(msg) {
-    console.log(msg);
     const logs = this.data.logs;
     logs.unshift(new Date().toLocaleTimeString() + " " + msg);
     this.setData({ logs });

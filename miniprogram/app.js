@@ -5,6 +5,6 @@ App({
     apiBaseUrl: "http://localhost:8000" 
   },
   onLaunch() {
-    console.log("App Launched");
+    // 应用启动初始化
   }
 })

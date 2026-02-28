@@ -296,10 +296,30 @@
 
     <script>
         // Init
-        fetchDevices();
-        setInterval(fetchDevices, 10000); // Auto refresh every 10s
+        fetchDashboardData();
+        // 每30秒自动刷新一次（使用缓存，减轻服务器压力）
+        setInterval(fetchDashboardData, 30000);
+        
+        // 每5分钟强制刷新一次第三方接口数据
+        setInterval(forceRefreshData, 300000);
 
-        async function fetchDevices() {
+        async function fetchDashboardData() {
+            try {
+                const response = await fetch('/api/dashboard/data');
+                const data = await response.json();
+                
+                const petkitDevices = data.petkit_devices || [];
+                const knownDevices = await fetch('/api/devices/known').then(r => r.json()).catch(() => []);
+                
+                renderAllDevices(petkitDevices, knownDevices, data);
+            } catch (error) {
+                console.error('获取仪表板数据失败:', error);
+                // 降级到旧方法
+                await fallbackFetchDevices();
+            }
+        }
+        
+        async function fallbackFetchDevices() {
             try {
                 // Parallel fetch
                 const [petkitRes, scanRes] = await Promise.all([
@@ -312,11 +332,25 @@
 
                 renderAllDevices(Array.isArray(petkit) ? petkit : [], Array.isArray(known) ? known : []);
             } catch (error) {
-                console.error('Fetch error:', error);
+                console.error('Fallback fetch error:', error);
+            }
+        }
+        
+        async function forceRefreshData() {
+            try {
+                const response = await fetch('/api/cache/refresh', { method: 'POST' });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showToast('数据已强制刷新');
+                    // 刷新显示数据
+                    await fetchDashboardData();
+                }
+            } catch (error) {
+                console.error('强制刷新失败:', error);
             }
         }
 
-        function renderAllDevices(petkit, known) {
+        function renderAllDevices(petkit, known, dashboardData = {}) {
             const container = document.getElementById('device-sections');
             container.innerHTML = '';
 
@@ -353,7 +387,13 @@
             });
             
             if (litterbox) {
-                const stats = litterbox.state_summary || {};
+                // 优先使用缓存的统计数据
+                let stats = {};
+                if (dashboardData.litterbox_stats && dashboardData.litterbox_stats[litterbox.id]) {
+                    stats = dashboardData.litterbox_stats[litterbox.id];
+                } else if (litterbox.state_summary) {
+                    stats = litterbox.state_summary;
+                }
                 petHtml += `
                     <div class="device-card" onclick="location.href='/litterbox?device_id=${litterbox.id}'">
                         <div class="device-icon" style="background: #e6f7ff; color: #1890ff;"><i class="fas fa-cat"></i></div>
@@ -422,23 +462,41 @@
                 scalesKnown.forEach(d => updateLastWeight(d.id));
             }
             
-            updateFeederStats();
+            // 更新喂食机统计数据
+            updateFeederStats(dashboardData);
         }
 
-        async function updateFeederStats() {
+        async function updateFeederStats(dashboardData = {}) {
             try {
-                // 1. 获取今日投喂
-                const servingsRes = await fetch('/api/cloudpets/servings_today');
-                const servingsData = await servingsRes.json();
+                let servings = 0;
+                let plans = [];
+                
+                // 优先使用缓存数据
+                if (dashboardData.cloudpets_servings) {
+                    servings = dashboardData.cloudpets_servings.result || 0;
+                } else {
+                    // 降级到实时获取
+                    const servingsRes = await fetch('/api/cloudpets/servings_today');
+                    const servingsData = await servingsRes.json();
+                    if (servingsData.code === 200) {
+                        servings = servingsData.result || 0;
+                    }
+                }
+                
+                if (dashboardData.cloudpets_plans) {
+                    plans = dashboardData.cloudpets_plans;
+                } else {
+                    // 降级到实时获取
+                    const plansRes = await fetch('/api/cloudpets/plans');
+                    plans = await plansRes.json();
+                }
+                
+                // 更新界面显示
                 const servingsEl = document.getElementById('feeder-servings');
-                if (servingsEl && servingsData.code === 200) {
-                    servingsEl.innerText = `${servingsData.result || 0} 次`;
+                if (servingsEl) {
+                    servingsEl.innerText = `${servings} 次`;
                 }
 
-                // 2. 获取计划并计算剩余
-                const plansRes = await fetch('/api/cloudpets/plans');
-                const plans = await plansRes.json();
-                
                 if (Array.isArray(plans)) {
                     // 获取当前时间 HH:mm
                     const now = new Date();
@@ -447,8 +505,6 @@
                     let remaining = 0;
                     plans.forEach(p => {
                         // 确保 plan 结构中有 time 且 enabled
-                        // 假设 p.time 是 "HH:mm"
-                        // 假设 p.enabled 默认 true (如果 undefined)
                         if (p.time && p.enabled !== false && p.enabled !== 0 && p.enabled !== '0') {
                             const [h, m] = p.time.split(':').map(Number);
                             const planMinutes = h * 60 + m;

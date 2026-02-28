@@ -119,7 +119,7 @@
         <header>
             <button class="back-btn" onclick="location.href='/'"><i class="fas fa-chevron-left"></i></button>
             <h1>猫厕所详情</h1>
-            <button class="refresh-btn" onclick="fetchDevices()"><i class="fas fa-sync-alt"></i></button>
+            <button class="refresh-btn" onclick="forceRefreshData()"><i class="fas fa-sync-alt"></i></button>
         </header>
 
         <div id="device-list">
@@ -159,13 +159,22 @@
         async function fetchDevices() {
             showLoading(true);
             try {
-                // 首先获取设备列表
-                const devicesResponse = await fetch(`${API_BASE}/api/petkit/devices`);
-                const devices = await devicesResponse.json();
+                // 使用合并接口一次性获取设备和统计数据
+                const response = await fetch(`${API_BASE}/api/petkit/devices-stats`);
+                const devicesWithStats = await response.json();
                 
-                // 然后获取准确的今日统计数据
-                const statsResponse = await fetch(`${API_BASE}/api/petkit/stats`);
-                const dailyStats = await statsResponse.json();
+                // 分离设备列表和统计数据
+                const devices = devicesWithStats.map(d => ({
+                    id: d.id,
+                    name: d.name,
+                    type: d.type,
+                    data: d.data,
+                    state_summary: d.state_summary  // 保留state_summary用于渲染
+                }));
+                
+                // 从第一个设备的state_summary中获取统计信息
+                const dailyStats = devicesWithStats.length > 0 ? 
+                    devicesWithStats[0].state_summary || {} : {};
                 
                 renderDevices(devices, dailyStats);
             } catch (error) {
@@ -196,7 +205,8 @@
             }
 
             litterboxes.forEach(device => {
-                const stats = device.state_summary || {};
+                // 优先使用设备自身的state_summary，如果没有则使用全局的dailyStats
+                const stats = device.state_summary || dailyStats || {};
                 
                 // Parse Status
                 let statusText = '空闲中';
@@ -229,7 +239,23 @@
                 const times = stats.today_visits || accurateTodayVisits;
                 const avgDuration = stats.avg_duration || accurateAvgDuration;
                 
-                const isFrequent = stats.frequent_restroom === 1;
+                // 频繁如厕val值映射：有频繁如厕显示"有"，无频繁如厕显示"无"
+                let frequentRestroomText = '无';
+                if (stats.frequent_restroom !== undefined) {
+                    frequentRestroomText = stats.frequent_restroom ? '有' : '无';
+                } else if (dailyStats.frequent_restroom !== undefined) {
+                    frequentRestroomText = dailyStats.frequent_restroom ? '有' : '无';
+                } else if (stats.frequent_restroom_val !== undefined) {
+                    // 处理不同的val值格式
+                    const val = stats.frequent_restroom_val;
+                    if (typeof val === 'boolean') {
+                        frequentRestroomText = val ? '有' : '无';
+                    } else if (typeof val === 'number') {
+                        frequentRestroomText = val > 0 ? '有' : '无';
+                    } else if (typeof val === 'string') {
+                        frequentRestroomText = val.toLowerCase() === 'true' || val === '1' ? '有' : '无';
+                    }
+                }
 
                 const html = `
                     <div class="device-card">
@@ -262,8 +288,8 @@
                         </div>
 
                         <div class="detail-grid">
-                            <div class="detail-item ${isFrequent ? 'alert' : ''}">
-                                <i class="fas fa-bell"></i> 频繁如厕: ${isFrequent ? '是 (预警!)' : '正常'}
+                            <div class="detail-item ${frequentRestroomText === '有' ? 'alert' : ''}">
+                                <i class="fas fa-bell"></i> 频繁如厕: ${frequentRestroomText}${frequentRestroomText === '有' ? ' (预警!)' : ''}
                             </div>
                             <div class="detail-item">
                                 <i class="fas fa-layer-group"></i> 猫砂余量: ${sand}%
@@ -286,7 +312,7 @@
                             <button class="btn btn-primary" onclick="showConfirm('${device.id}', 'clean')">
                                 <i class="fas fa-broom"></i> 立即清理
                             </button>
-                            <button class="btn btn-secondary btn-small" style="font-size: 13px; padding: 10px; opacity: 0.7;" onclick="showConfirm('${device.id}', 'deodorize')">
+                            <button class="btn btn-secondary" onclick="showConfirm('${device.id}', 'deodorize')">
                                 <i class="fas fa-wind"></i> 立即除臭 (付费)
                             </button>
                         </div>
@@ -368,9 +394,44 @@
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 3000);
         }
+        
+        async function forceRefreshData() {
+            try {
+                showToast('正在强制刷新数据...');
+                const response = await fetch(`${API_BASE}/api/cache/refresh`, { method: 'POST' });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showToast('数据已强制刷新');
+                    // 立即重新获取数据
+                    await fetchDevices();
+                } else {
+                    showToast('刷新失败: ' + (result.message || '未知错误'));
+                }
+            } catch (error) {
+                showToast('刷新失败: ' + error.message);
+            }
+        }
 
         fetchDevices();
+        // 每30秒自动刷新（使用缓存）
         setInterval(fetchDevices, 30000);
+        
+        // 每5分钟强制刷新第三方接口数据
+        setInterval(forceRefreshThirdPartyData, 300000);
+        
+        async function forceRefreshThirdPartyData() {
+            try {
+                const response = await fetch(`${API_BASE}/api/cache/refresh`, { method: 'POST' });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    console.log('第三方接口数据已强制刷新');
+                    // 刷新显示数据
+                    await fetchDevices();
+                }
+            } catch (error) {
+                console.error('强制刷新失败:', error);
+            }
+        }
     </script>
 </body>
 </html>

@@ -14,10 +14,12 @@ from dotenv import load_dotenv
 from sqlmodel import Session, select
 
 # 导入你现有的模块
-from app.services.petkit_service import PetKitService
-from app.services.cloudpets_service import cloudpets_service, FeedingPlan as CloudPetsPlan
-from app.models.models import User, WeightRecord, FeedingPlan, KnownDevice
-from app.models.db import get_session, init_db
+from .services.petkit_service import PetKitService
+from .services.cloudpets_service import cloudpets_service, FeedingPlan as CloudPetsPlan
+from .models.models import User, WeightRecord, FeedingPlan, KnownDevice
+from .models.db import get_session, init_db
+from .utils.cache_manager import async_cache_manager
+from .scheduler.task_scheduler import scheduler, create_data_refresh_task
 
 load_dotenv()
 
@@ -26,6 +28,7 @@ load_dotenv()
 class AppState:
     def __init__(self):
         self.petkit: Optional[PetKitService] = None
+        self.data_refresh_task = None
 
 state = AppState()
 
@@ -53,10 +56,45 @@ async def lifespan(app: FastAPI):
             print(f"PetKit 连接失败: {e}")
     else:
         print("警告: 未检测到 PETKIT 环境变量，相关 API 将不可用")
+    
+    # 初始化数据刷新任务
+    state.data_refresh_task = create_data_refresh_task(
+        state.petkit, 
+        cloudpets_service, 
+        async_cache_manager
+    )
+    
+    # 添加定时任务
+    await scheduler.add_task(
+        'dashboard_refresh', 
+        state.data_refresh_task.refresh_combined_dashboard_data,
+        interval=60,  # 每分钟刷新一次
+        immediate=True
+    )
+    
+    await scheduler.add_task(
+        'petkit_refresh',
+        state.data_refresh_task.refresh_petkit_data,
+        interval=180,  # 每3分钟刷新PetKit数据
+        immediate=False
+    )
+    
+    await scheduler.add_task(
+        'cloudpets_refresh',
+        state.data_refresh_task.refresh_cloudpets_data,
+        interval=120,  # 每2分钟刷新CloudPets数据
+        immediate=False
+    )
+    
+    # 启动调度器
+    await scheduler.start()
 
     yield  # 分隔符，上方是启动逻辑，下方是关闭逻辑
 
     # 关闭时：清理资源
+    print("正在关闭调度器...")
+    await scheduler.stop()
+    
     if state.petkit:
         print("正在关闭 PetKit 服务...")
         await state.petkit.close()
@@ -120,6 +158,83 @@ async def feeder_plans_page():
 async def scale_page():
     return FileResponse(os.path.join(STATIC_DIR, 'scale.html'))
 
+@app.get("/api/cache/status")
+async def cache_status():
+    """获取缓存状态"""
+    return {
+        "size": await async_cache_manager.size(),
+        "last_refresh": await async_cache_manager.get('dashboard_last_refresh')
+    }
+
+@app.post("/api/cache/refresh")
+async def force_refresh_cache():
+    """强制刷新所有缓存数据"""
+    try:
+        if state.data_refresh_task:
+            await state.data_refresh_task.refresh_combined_dashboard_data()
+            return {"status": "success", "message": "数据已强制刷新"}
+        else:
+            return {"status": "error", "message": "刷新任务未初始化"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"刷新失败: {str(e)}")
+
+@app.get("/api/dashboard/data")
+async def get_dashboard_data():
+    """获取首页聚合数据（优先从缓存获取）"""
+    try:
+        # 尝试从缓存获取数据
+        cached_data = await async_cache_manager.get('dashboard_combined_data')
+        if cached_data:
+            return cached_data
+        
+        # 缓存未命中，实时获取数据
+        dashboard_data = {}
+        
+        # 获取PetKit设备数据
+        petkit_devices = await async_cache_manager.get('petkit_devices')
+        if not petkit_devices and state.petkit:
+            petkit_devices = await state.petkit.get_devices()
+            await async_cache_manager.set('petkit_devices', petkit_devices, ttl=300)
+        
+        dashboard_data['petkit_devices'] = petkit_devices or []
+        
+        # 获取猫厕所统计数据
+        litterbox_stats = {}
+        if petkit_devices:
+            for device in petkit_devices:
+                if hasattr(device, 'id'):
+                    cache_key = f'petkit_stats_{device.id}'
+                    stats = await async_cache_manager.get(cache_key)
+                    if not stats and state.petkit:
+                        stats = await state.petkit.get_daily_stats(device.id)
+                        await async_cache_manager.set(cache_key, stats, ttl=180)
+                    litterbox_stats[device.id] = stats or {}
+        
+        dashboard_data['litterbox_stats'] = litterbox_stats
+        
+        # 获取CloudPets数据
+        cloudpets_servings = await async_cache_manager.get('cloudpets_servings')
+        if not cloudpets_servings:
+            cloudpets_servings = await cloudpets_service.get_servings_today()
+            await async_cache_manager.set('cloudpets_servings', cloudpets_servings, ttl=120)
+        
+        dashboard_data['cloudpets_servings'] = cloudpets_servings
+        
+        cloudpets_plans = await async_cache_manager.get('cloudpets_plans')
+        if not cloudpets_plans:
+            cloudpets_plans = await cloudpets_service.get_feeding_plans()
+            await async_cache_manager.set('cloudpets_plans', cloudpets_plans, ttl=300)
+        
+        dashboard_data['cloudpets_plans'] = cloudpets_plans or []
+        
+        # 缓存聚合数据
+        await async_cache_manager.set('dashboard_combined_data', dashboard_data, ttl=60)
+        
+        return dashboard_data
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取仪表板数据失败: {str(e)}")
+
 @app.get("/api/petkit/debug")
 async def petkit_debug(service: PetKitService = Depends(get_petkit)):
     if not service:
@@ -131,7 +246,16 @@ async def petkit_devices(service: PetKitService = Depends(get_petkit)):
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
-        return await service.get_devices()
+        # 优先从缓存获取
+        cached_devices = await async_cache_manager.get('petkit_devices')
+        if cached_devices:
+            return cached_devices
+        
+        # 缓存未命中，从服务获取
+        devices = await service.get_devices()
+        # 缓存5分钟
+        await async_cache_manager.set('petkit_devices', devices, ttl=300)
+        return devices
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch devices: {str(e)}")
 
@@ -159,7 +283,19 @@ async def petkit_daily_stats(device_id: Optional[str] = None, service: PetKitSer
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
-        return await service.get_daily_stats(device_id)
+        # 构建缓存键
+        cache_key = f'petkit_stats_{device_id or "default"}'
+        
+        # 优先从缓存获取
+        cached_stats = await async_cache_manager.get(cache_key)
+        if cached_stats:
+            return cached_stats
+        
+        # 缓存未命中，从服务获取
+        stats = await service.get_daily_stats(device_id)
+        # 缓存3分钟
+        await async_cache_manager.set(cache_key, stats, ttl=180)
+        return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取统计数据失败: {str(e)}")
 
@@ -172,6 +308,51 @@ async def petkit_history_stats(device_id: Optional[str] = None, days: int = 7, s
         return await service.get_device_stats(device_id, days)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取历史统计失败: {str(e)}")
+
+@app.get("/api/petkit/devices-stats")
+async def petkit_devices_with_stats(service: PetKitService = Depends(get_petkit)):
+    """合并获取设备列表和统计数据的接口（带缓存）"""
+    if not service or not service.username or not service.password:
+        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
+    
+    try:
+        # 优先从缓存获取完整数据
+        cached_data = await async_cache_manager.get('petkit_devices_with_stats')
+        if cached_data:
+            return cached_data
+        
+        # 缓存未命中，获取设备列表
+        devices = await service.get_devices()
+        
+        # 为每个设备获取统计信息
+        result = []
+        for device in devices:
+            device_id = getattr(device, 'id', '') if hasattr(device, 'id') else ''
+            if device_id:
+                # 优先从缓存获取统计信息
+                stats_cache_key = f'petkit_stats_{device_id}'
+                stats = await async_cache_manager.get(stats_cache_key)
+                if not stats:
+                    stats = await service.get_daily_stats(device_id)
+                    # 缓存统计信息3分钟
+                    await async_cache_manager.set(stats_cache_key, stats, ttl=180)
+                
+                device_dict = device if isinstance(device, dict) else {
+                    "id": device_id,
+                    "name": getattr(device, 'name', 'Unknown'),
+                    "type": getattr(device, 'type', 'Unknown'),
+                    "data": getattr(device, 'data', {})
+                }
+                device_dict['stats'] = stats
+                result.append(device_dict)
+            else:
+                result.append(device)
+        
+        # 缓存完整结果2分钟
+        await async_cache_manager.set('petkit_devices_with_stats', result, ttl=120)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取设备和统计数据失败: {str(e)}")
 
 # --- CloudPets (云宠智能) 路由 ---
 @app.get("/api/cloudpets/servings_today")
