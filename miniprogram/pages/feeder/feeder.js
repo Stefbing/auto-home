@@ -10,12 +10,35 @@ Page({
   },
 
   feedOne() {
+    wx.showLoading({
+      title: '正在投喂...'
+    });
+    
     wx.request({
       url: `${app.globalData.apiBaseUrl}/api/cloudpets/feed`,
       method: 'POST',
       data: { amount: 1 },
       success: res => {
-        wx.showToast({ title: '已投喂 1 份' });
+        wx.hideLoading();
+        if (res.statusCode === 200) {
+          wx.showToast({ 
+            title: '已投喂 1 份',
+            icon: 'success'
+          });
+        } else {
+          wx.showToast({ 
+            title: '投喂失败',
+            icon: 'error'
+          });
+        }
+      },
+      fail: err => {
+        wx.hideLoading();
+        console.error('投喂请求失败:', err);
+        wx.showToast({ 
+          title: '网络错误',
+          icon: 'error'
+        });
       }
     });
   },

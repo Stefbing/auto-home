@@ -49,6 +49,10 @@ Page({
       success: (res) => {
         if (res.confirm) {
           this.setData({ loading: true });
+          wx.showLoading({
+            title: '发送指令中...'
+          });
+          
           wx.request({
             url: `${app.globalData.apiBaseUrl}/api/petkit/clean`,
             method: 'POST',
@@ -56,7 +60,8 @@ Page({
               device_id: this.data.deviceId
             },
             success: r => {
-              if(r.data.status === 'success') {
+              wx.hideLoading();
+              if(r.data && r.data.status === 'success') {
                 wx.showToast({ 
                   title: '清理指令已发送',
                   icon: 'success'
@@ -65,11 +70,18 @@ Page({
                 setTimeout(() => {
                   this.fetchStats();
                 }, 3000);
+              } else {
+                wx.showToast({
+                  title: '操作失败',
+                  icon: 'error'
+                });
               }
             },
             fail: err => {
+              wx.hideLoading();
+              console.error('清理请求失败:', err);
               wx.showToast({
-                title: '操作失败',
+                title: '网络错误',
                 icon: 'error'
               });
             },
