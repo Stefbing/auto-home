@@ -70,8 +70,6 @@ PASSWORD=your_password
 # 如果遇到 SSL 证书验证错误，可设置为 true（仅限开发环境）
 PETKIT_DISABLE_SSL_VERIFY=false
 
-# ========== CloudPets 设备配置（必须配置）==========
-CLOUDPETS_DEVICE_ID=your_device_id
 
 # ========== 数据库配置（PostgreSQL）==========
 # 本地开发可使用 SQLite

@@ -31,7 +31,6 @@ CREATE TABLE user_credentials (
     -- CloudPets 凭证
     cloudpets_account_encrypted BYTEA,
     cloudpets_password_encrypted BYTEA,
-    cloudpets_device_id VARCHAR(50),
 
     -- 小米账号（用于推送健康数据）
     xiaomi_account_encrypted BYTEA,
