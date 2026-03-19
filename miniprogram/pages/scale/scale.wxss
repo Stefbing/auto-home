@@ -1,0 +1,22 @@
+.container { padding: 20px; }
+.status-card {
+  background: #fff;
+  padding: 30px;
+  border-radius: 10px;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  margin-bottom: 30px;
+}
+.weight-display {
+  font-size: 48px;
+  font-weight: bold;
+  color: #333;
+}
+.unit { font-size: 18px; color: #999; }
+.status-text { margin-top: 10px; color: #666; }
+.logs { margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px; }
+.log-item { font-size: 12px; color: #999; margin-bottom: 5px; }
+.user-select { margin-top: 20px; }
+.picker-text { padding: 10px; background: #f5f5f5; border-radius: 6px; }
+.new-user { display: flex; gap: 10px; margin-top: 10px; }
+.new-user input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }

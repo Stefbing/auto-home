@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+env/
+.env
+*.db
+*.log
+uv.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# System
+.DS_Store
+Thumbs.db
+
+# WeChat Miniprogram
+node_modules/
+miniprogram_npm/
+
+# Vercel
+.vercel/

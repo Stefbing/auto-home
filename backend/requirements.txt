@@ -1,0 +1,10 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pypetkitapi>=1.7.0
+python-dotenv>=1.0.0
+sqlmodel>=0.0.14
+aiohttp>=3.9.0
+httpx>=0.26.0
+pydantic>=2.5.0
+psycopg2-binary>=2.9.9
+cryptography>=42.0.0

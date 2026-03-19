@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>体脂秤详情</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.2/echarts.min.js"></script>
+    <style>
+        :root {
+            --primary: #4e8cff;
+            --bg: #f2f4f8;
+            --card-bg: #ffffff;
+            --text-main: #333333;
+            --text-sub: #888888;
+            --success: #52c41a;
+            --warning: #faad14;
+            --danger: #ff4d4f;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text-main); }
+        .app-container { max-width: 480px; margin: 0 auto; padding: 20px 16px; min-height: 100vh; }
+        header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .back-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
+        h1 { font-size: 20px; margin: 0; font-weight: 700; flex: 1; text-align: center; margin-right: 34px; }
+        
+        .scale-card { background: white; border-radius: 24px; padding: 24px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.04); margin-bottom: 20px; }
+        .weight-display { font-size: 48px; font-weight: 800; color: var(--primary); margin: 10px 0; }
+        .weight-unit { font-size: 16px; color: var(--text-sub); font-weight: 400; }
+        .bt-status { font-size: 14px; color: var(--text-sub); display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .bt-status.active { color: var(--success); }
+
+        .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+        .metric-item { background: #f8f9fa; padding: 12px; border-radius: 16px; text-align: center; }
+        .metric-val { font-size: 16px; font-weight: 700; display: block; }
+        .metric-label { font-size: 11px; color: var(--text-sub); }
+
+        .chart-container { background: white; border-radius: 24px; padding: 20px; height: 300px; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.04); }
+        
+        /* Debug Console */
+        .debug-console {
+            background: #1e1e1e; color: #00ff00; border-radius: 16px; padding: 15px;
+            font-family: 'Courier New', Courier, monospace; font-size: 11px;
+            height: 150px; overflow-y: auto; margin-bottom: 20px; border: 4px solid #333;
+        }
+        .debug-line { margin-bottom: 4px; border-bottom: 1px solid #333; padding-bottom: 2px; }
+        .debug-ts { color: #888; margin-right: 8px; }
+        .debug-err { color: #ff4d4f; }
+        
+        .btn-connect { 
+            width: 100%; background: var(--primary); color: white; border: none; 
+            padding: 18px; border-radius: 20px; font-size: 16px; font-weight: 700; 
+            cursor: pointer; margin-top: 10px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 20px rgba(78, 140, 255, 0.2);
+        }
+        .btn-connect:active { transform: scale(0.98); }
+        .btn-connect.connected { background: var(--danger); box-shadow: 0 10px 20px rgba(255, 77, 79, 0.2); }
+        .user-selector { margin-bottom: 20px; display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px; }
+        .user-chip { padding: 8px 16px; background: white; border-radius: 20px; font-size: 14px; white-space: nowrap; cursor: pointer; border: 1px solid #eee; }
+        .user-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 200; opacity: 0; pointer-events: none; transition: all 0.3s; backdrop-filter: blur(4px); }
+        .modal-overlay.show { opacity: 1; pointer-events: auto; }
+        .modal-content { background: white; width: 85%; max-width: 320px; border-radius: 24px; padding: 24px; transform: translateY(20px); transition: all 0.3s; }
+        .modal-overlay.show .modal-content { transform: translateY(0); }
+
+        .member-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
+        .member-item { 
+            padding: 16px; background: #f8f9fa; border-radius: 16px; text-align: center; 
+            cursor: pointer; border: 2px solid transparent; transition: all 0.2s;
+        }
+        .member-item.active { border-color: var(--primary); background: #e8f2ff; }
+        .member-item i { font-size: 24px; color: var(--primary); margin-bottom: 8px; display: block; }
+        .member-item span { font-weight: 600; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <button class="back-btn" onclick="location.href='/'"><i class="fas fa-chevron-left"></i></button>
+            <h1>小米体脂秤 2</h1>
+            <button class="refresh-btn" onclick="showMemberModal()"><i class="fas fa-users"></i></button>
+        </header>
+
+        <div class="scale-card">
+            <div class="bt-status" id="bt-status"><i class="fab fa-bluetooth"></i> <span>等待连接...</span></div>
+            <div class="weight-display" id="current-weight">0.00 <span class="weight-unit">kg</span></div>
+            <div id="impedance-status" style="font-size: 12px; color: var(--text-sub);">站在秤上开始测量体脂</div>
+            <button class="btn-connect" id="btn-scan">开始测量</button>
+        </div>
+
+        <div id="active-user-info" style="margin-bottom: 15px; text-align: center; font-weight: 600; color: var(--primary);">
+            <!-- Current user name will show here -->
+        </div>
+
+        <div class="debug-console" id="debug-console">
+            <div class="debug-line"><span class="debug-ts">[00:00:00]</span> 调试控制台已就绪...</div>
+        </div>
+
+        <div class="metrics-grid" id="metrics-grid">
+            <div class="metric-item"><span class="metric-val" id="val-bmi">--</span><span class="metric-label">BMI</span></div>
+            <div class="metric-item"><span class="metric-val" id="val-fat">--%</span><span class="metric-label">体脂率</span></div>
+            <div class="metric-item"><span class="metric-val" id="val-muscle">--kg</span><span class="metric-label">肌肉量</span></div>
+            <div class="metric-item"><span class="metric-val" id="val-water">--%</span><span class="metric-label">水分</span></div>
+            <div class="metric-item"><span class="metric-val" id="val-bone">--kg</span><span class="metric-label">骨量</span></div>
+            <div class="metric-item"><span class="metric-val" id="val-visceral">--</span><span class="metric-label">内脏脂肪</span></div>
+        </div>
+
+        <div class="chart-container" id="weight-chart"></div>
+    </div>
+
+    <!-- Member Management Modal -->
+    <div id="member-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 360px; width: 90%;">
+            <h3 style="margin-top:0; text-align: center;">选择成员</h3>
+            <div class="member-list" id="member-options">
+                <!-- Members here -->
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px">
+                <button onclick="showAddUser()" style="padding:12px; border:none; border-radius:12px; background:#f0f2f5;">添加成员</button>
+                <button onclick="closeMemberModal()" style="padding:12px; border:none; border-radius:12px; background:var(--primary); color:white">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for adding user -->
+    <div id="user-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 style="margin-top:0">添加新成员</h3>
+            <input type="text" id="new-user-name" placeholder="姓名" style="width:100%; padding:12px; margin-bottom:12px; border:1px solid #eee; border-radius:12px">
+            <div style="display:flex; gap:10px; margin-bottom:12px">
+                <select id="new-user-gender" style="flex:1; padding:12px; border:1px solid #eee; border-radius:12px">
+                    <option value="male">男</option>
+                    <option value="female">女</option>
+                </select>
+                <input type="number" id="new-user-age" placeholder="年龄" style="flex:1; padding:12px; border:1px solid #eee; border-radius:12px">
+            </div>
+            <input type="number" id="new-user-height" placeholder="身高 (cm)" style="width:100%; padding:12px; margin-bottom:20px; border:1px solid #eee; border-radius:12px">
+            <div style="display:flex; gap:10px">
+                <button onclick="closeAddUserModal()" style="flex:1; padding:12px; border:none; border-radius:12px">取消</button>
+                <button onclick="addUser()" style="flex:1; padding:12px; border:none; border-radius:12px; background:var(--primary); color:white">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let users = [];
+        let chart = null;
+
+        // Mi Scale 2 BLE Constants
+        const SERVICES = [0x181B, 0x181D]; // Body Composition, Weight Scale
+        const CHARACTERISTICS = [0x2A9C, 0x2A9D]; // Body Comp Measurement, Weight Measurement
+
+        function logDebug(msg, isError = false) {
+            const consoleEl = document.getElementById('debug-console');
+            if (!consoleEl) return;
+            const time = new Date().toLocaleTimeString();
+            const line = document.createElement('div');
+            line.className = `debug-line ${isError ? 'debug-err' : ''}`;
+            line.innerHTML = `<span class="debug-ts">[${time}]</span> ${msg}`;
+            consoleEl.appendChild(line);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+            console.log(`[BLE DEBUG] ${msg}`);
+        }
+
+        async function init() {
+            initChart();
+            await fetchUsers();
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            const uid = urlParams.get('user_id');
+            if (uid) {
+                selectUser(parseInt(uid));
+            } else if (users.length > 0) {
+                showMemberModal();
+            } else {
+                showAddUser();
+            }
+
+            document.getElementById('btn-scan').onclick = startScan;
+            
+            // 开启宿主机实时数据轮询
+            startLivePolling();
+        }
+
+        let livePollingInterval = null;
+        let lastLiveTimestamp = 0;
+
+        function startLivePolling() {
+            if (livePollingInterval) clearInterval(livePollingInterval);
+            logDebug('正在连接宿主机蓝牙网关...');
+            livePollingInterval = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/scale/live');
+                    const data = await res.json();
+                    
+                    if (data.timestamp > lastLiveTimestamp && data.weight > 0) {
+                        lastLiveTimestamp = data.timestamp;
+                        logDebug(`[Host] 实时体重: ${data.weight}kg, 锁定: ${data.is_stabilized}`);
+                        
+                        document.getElementById('current-weight').innerHTML = `${data.weight.toFixed(2)} <span class="weight-unit">kg</span>`;
+                        
+                        if (data.impedance) {
+                            document.getElementById('impedance-status').innerText = data.is_stabilized ? '测量完成' : '正在分析体脂...';
+                            document.getElementById('impedance-status').style.color = 'var(--primary)';
+                        }
+
+                        if (data.is_stabilized) {
+                            logDebug('[Host] 数据已锁定，正在保存...');
+                            saveRecord(data.weight, data.impedance);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Live polling failed:', e);
+                }
+            }, 1000);
+        }
+
+        async function fetchUsers() {
+            const res = await fetch('/api/users');
+            users = await res.json();
+            renderMembers();
+        }
+
+        function renderMembers() {
+            const container = document.getElementById('member-options');
+            container.innerHTML = users.map(u => `
+                <div class="member-item ${currentUser?.id === u.id ? 'active' : ''}" onclick="selectUser(${u.id})">
+                    <i class="fas fa-user-circle"></i>
+                    <span>${u.name}</span>
+                </div>
+            `).join('');
+        }
+
+        function selectUser(id) {
+            currentUser = users.find(u => u.id === id);
+            document.getElementById('active-user-info').innerText = `当前成员: ${currentUser.name}`;
+            renderMembers();
+            loadHistory();
+        }
+
+        function showMemberModal() {
+            document.getElementById('member-modal').classList.add('show');
+        }
+        function closeMemberModal() {
+            document.getElementById('member-modal').classList.remove('show');
+        }
+
+        function showAddUser() {
+            document.getElementById('user-modal').classList.add('show');
+        }
+        function closeAddUserModal() {
+            document.getElementById('user-modal').classList.remove('show');
+        }
+
+        async function addUser() {
+            const name = document.getElementById('new-user-name').value;
+            const gender = document.getElementById('new-user-gender').value;
+            const age = parseInt(document.getElementById('new-user-age').value);
+            const height = parseInt(document.getElementById('new-user-height').value);
+            
+            const res = await fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, gender, age, height })
+            });
+            const newUser = await res.json();
+            closeAddUserModal();
+            await fetchUsers();
+            selectUser(newUser.id);
+        }
+
+        async function startScan() {
+            if (!navigator.bluetooth) {
+                logDebug('浏览器不支持蓝牙', true);
+                alert('您的浏览器不支持蓝牙，请使用 Chrome, Edge 或 Android 端的现代浏览器。');
+                return;
+            }
+
+            try {
+                logDebug('正在请求蓝牙设备 ( Mi Scale 2 / Mi Scale )...');
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { services: [0x181B] },
+                        { services: [0x181D] },
+                        { namePrefix: 'Mi Scale' },
+                        { namePrefix: 'XMTZC' }
+                    ],
+                    optionalServices: [0x181B, 0x181D, 'generic_access']
+                });
+
+                logDebug(`设备发现: ${device.name} (ID: ${device.id})`);
+                
+                const statusEl = document.getElementById('bt-status');
+                statusEl.innerHTML = `<i class="fab fa-bluetooth"></i> <span>正在连接...</span>`;
+                statusEl.classList.add('active');
+
+                logDebug('正在建立 GATT 连接...');
+                const server = await device.gatt.connect();
+                logDebug('GATT 连接成功');
+                
+                // Try to find any of the supported services
+                let service = null;
+                let characteristic = null;
+
+                for (const serviceId of SERVICES) {
+                    try {
+                        logDebug(`尝试发现服务: 0x${serviceId.toString(16)}...`);
+                        service = await server.getPrimaryService(serviceId);
+                        logDebug(`服务 0x${serviceId.toString(16)} 发现成功`);
+                        
+                        for (const charId of CHARACTERISTICS) {
+                            try {
+                                logDebug(`尝试发现特征值: 0x${charId.toString(16)}...`);
+                                characteristic = await service.getCharacteristic(charId);
+                                logDebug(`特征值 0x${charId.toString(16)} 发现成功`);
+                                break;
+                            } catch (e) {
+                                logDebug(`特征值 0x${charId.toString(16)} 不在此服务中`);
+                            }
+                        }
+                        if (characteristic) break;
+                    } catch (e) {
+                        logDebug(`服务 0x${serviceId.toString(16)} 未发现`);
+                    }
+                }
+
+                if (!characteristic) {
+                    throw new Error('未能在设备上找到兼容的测量特征值 (0x2A9C/0x2A9D)');
+                }
+
+                // --- 绑定逻辑：连接成功后通知后端 ---
+                logDebug('正在同步绑定信息至后端...');
+                await fetch('/api/devices/bind', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        device_id: device.id,
+                        name: device.name || '小米体脂秤 2',
+                        type: 'scale'
+                    })
+                });
+
+                logDebug('正在订阅数据通知...');
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleData);
+                logDebug('通知订阅成功，请开始称重 (赤脚站立以获取体脂数据)');
+                
+                statusEl.querySelector('span').innerText = '已连接，请站上体脂秤';
+                document.getElementById('btn-scan').innerText = '断开连接';
+                document.getElementById('btn-scan').classList.add('connected');
+                
+                document.getElementById('btn-scan').onclick = async () => {
+                    logDebug('正在断开连接...');
+                    await device.gatt.disconnect();
+                    statusEl.querySelector('span').innerText = '已断开';
+                    statusEl.classList.remove('active');
+                    document.getElementById('btn-scan').innerText = '开始测量';
+                    document.getElementById('btn-scan').classList.remove('connected');
+                    document.getElementById('btn-scan').onclick = startScan;
+                    logDebug('连接已断开');
+                };
+
+            } catch (error) {
+                logDebug(`BLE 错误: ${error.message}`, true);
+                console.error('BLE Error:', error);
+                if (error.name === 'NotFoundError') return;
+                alert('连接失败: ' + error.message);
+            }
+        }
+
+        function handleData(event) {
+            const value = event.target.value;
+            const data = new Uint8Array(value.buffer);
+            
+            const hex = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ');
+            logDebug(`收到数据包: ${hex}`);
+
+            // Mi Scale 2 (XMTZC05HM) Body Composition Measurement format (13 bytes)
+            if (data.length < 13) {
+                logDebug(`收到异常短包 (${data.length} bytes)`, true);
+                return;
+            }
+
+            const flags = data[0] | (data[1] << 8);
+            const isStabilized = (flags & (1 << 9)) !== 0;
+            const rawImpedance = (data[10] << 8) | data[9];
+            const hasRealImpedance = rawImpedance > 0 && rawImpedance < 3000;
+
+            const unitLbs = (flags & (1 << 0)) !== 0;
+            const unitJin = (flags & (1 << 4)) !== 0;
+            
+            let rawWeight = (data[12] << 8) | data[11];
+            let weight = 0;
+            
+            if (unitLbs || unitJin) {
+                weight = rawWeight / 100.0;
+                if (unitJin) weight = weight / 2.0;
+            } else {
+                weight = rawWeight / 200.0;
+            }
+
+            logDebug(`解析: 体重=${weight.toFixed(2)}kg, 阻抗=${rawImpedance}, 锁定=${isStabilized}`);
+
+            document.getElementById('current-weight').innerHTML = `${weight.toFixed(2)} <span class="weight-unit">kg</span>`;
+
+            if (hasRealImpedance) {
+                document.getElementById('impedance-status').innerText = isStabilized ? '测量完成' : '正在分析体脂...';
+                if (isStabilized) {
+                    logDebug('阻抗已锁定，正在保存数据...');
+                    saveRecord(weight, rawImpedance);
+                }
+            } else {
+                document.getElementById('impedance-status').innerText = '请赤脚站在秤上以测量体脂';
+                if (isStabilized) {
+                    logDebug('体重已锁定 (无阻抗)，正在保存数据...');
+                    saveRecord(weight, null);
+                }
+            }
+        }
+
+        async function saveRecord(weight, impedance) {
+            if (!currentUser) {
+                showToast('请先选择成员');
+                return;
+            }
+            
+            const record = {
+                user_id: currentUser.id,
+                weight: weight,
+                impedance: impedance,
+                timestamp: Date.now()
+            };
+            
+            try {
+                const res = await fetch('/api/scale/record', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(record)
+                });
+                if (res.ok) {
+                    showToast('数据已保存');
+                    loadHistory();
+                }
+            } catch (e) {
+                console.error('Save record failed:', e);
+            }
+        }
+
+        async function loadHistory() {
+            if (!currentUser) return;
+            const res = await fetch(`/api/scale/history/${currentUser.id}`);
+            const data = await res.json();
+            updateChart(data);
+            if (data.length > 0) {
+                updateUI(data[0]); // Show latest record metrics
+            }
+        }
+
+        function initChart() {
+            chart = echarts.init(document.getElementById('weight-chart'));
+            chart.setOption({
+                title: { text: '健康趋势', textStyle: { fontSize: 14 } },
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['体重', '体脂'], bottom: 0 },
+                xAxis: { type: 'category', data: [] },
+                yAxis: [
+                    { type: 'value', name: '体重(kg)', min: 'dataMin' },
+                    { type: 'value', name: '体脂(%)', max: 100, min: 0 }
+                ],
+                series: [
+                    { name: '体重', data: [], type: 'line', smooth: true, areaStyle: { opacity: 0.1 } },
+                    { name: '体脂', data: [], type: 'line', smooth: true, yAxisIndex: 1 }
+                ]
+            });
+        }
+
+        function updateChart(history) {
+            const dates = history.map(h => new Date(h.timestamp).toLocaleDateString()).reverse();
+            const weights = history.map(h => h.weight).reverse();
+            const bodyFats = history.map(h => h.body_fat).reverse();
+            chart.setOption({
+                xAxis: { data: dates },
+                series: [
+                    { name: '体重', data: weights },
+                    { name: '体脂', data: bodyFats }
+                ]
+            });
+        }
+
+        function updateUI(m) {
+            if (!m) return;
+            document.getElementById('val-bmi').innerText = m.bmi || '--';
+            document.getElementById('val-fat').innerText = m.body_fat ? m.body_fat + '%' : '--%';
+            document.getElementById('val-muscle').innerText = m.muscle ? m.muscle + 'kg' : '--kg';
+            document.getElementById('val-water').innerText = m.water ? m.water + '%' : '--%';
+            document.getElementById('val-bone').innerText = m.bone_mass ? m.bone_mass + 'kg' : '--kg';
+            document.getElementById('val-visceral').innerText = m.visceral_fat || '--';
+            
+            if (m.weight) {
+                document.getElementById('current-weight').innerHTML = `${m.weight.toFixed(2)} <span class="weight-unit">kg</span>`;
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

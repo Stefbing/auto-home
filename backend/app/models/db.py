@@ -1,0 +1,62 @@
+from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy.pool import StaticPool
+import os
+from dotenv import load_dotenv
+import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 尝试从项目根目录加载环境变量
+import pathlib
+root_dir = pathlib.Path(__file__).parent.parent.parent
+env_path = root_dir / '.env'
+
+if env_path.exists():
+    load_dotenv(env_path)
+    logger.info(f"Loaded .env from: {env_path}")
+else:
+    # 如果根目录没有.env，则尝试当前目录
+    load_dotenv()
+    logger.info("Loaded .env from current directory")
+
+# Vercel Postgres 使用 "POSTGRES_URL"
+# Serverless 环境下如果未配置 Postgres，回退到内存数据库 (sqlite:///:memory:) 避免文件权限错误
+# 本地开发默认使用 SQLite 文件 (sqlite:///./auto_home.db)
+
+# 增强的 Serverless 环境检测
+is_serverless = os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("R_LIBS_USER")
+
+if is_serverless:
+    logger.info("Detected Serverless Environment.")
+    database_url = os.getenv("POSTGRES_URL")
+    if not database_url:
+        logger.warning("No POSTGRES_URL found. Falling back to in-memory SQLite database.")
+        database_url = "sqlite:///:memory:"
+else:
+    # 本地开发使用文件数据库以支持持久化测试
+    database_url = os.getenv("DATABASE_URL") or "sqlite:///./auto_home.db"
+
+logger.info(f"Database URL: {database_url.split('://')[0]}://***")  # Mask password if any
+
+# SQLAlchemy 需要 postgresql:// 协议头，Vercel 默认给的是 postgres://
+if database_url and database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+# SQLite 需要特殊参数 check_same_thread=False
+connect_args = {"check_same_thread": False} if "sqlite" in database_url else {}
+
+# 如果是 SQLite 内存数据库，必须使用 StaticPool 保持连接不关闭，否则数据会丢失
+poolclass = None
+if "sqlite" in database_url and ":memory:" in database_url:
+    poolclass = StaticPool
+    logger.info("Using StaticPool for in-memory SQLite database.")
+
+engine = create_engine(database_url, echo=False, connect_args=connect_args, poolclass=poolclass)
+
+def init_db():
+    SQLModel.metadata.create_all(engine)
+
+def get_session():
+    with Session(engine) as session:
+        yield session
