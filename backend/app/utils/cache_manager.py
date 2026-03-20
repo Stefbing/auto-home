@@ -1,188 +1,137 @@
-import asyncio
 import time
-from typing import Any, Dict, Optional, Union
-from collections import OrderedDict
+import json
+from typing import Any, Optional
+from sqlmodel import Session
+from ..models.db import engine
+from ..models.models import DeviceCache
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CacheManager:
-    """简单的内存缓存管理器，支持过期时间和LRU淘汰"""
+    """混合缓存管理器：内存 + 数据库双写"""
     
-    def __init__(self, max_size: int = 1000):
-        self._cache: Dict[str, tuple] = {}  # key -> (value, expire_time, access_time)
-        self._max_size = max_size
-        self._access_order = OrderedDict()  # 用于LRU
+    def __init__(self):
+        self._cache = {}
+        self._expiry = {}
     
-    def _cleanup_expired(self):
-        """清理过期的缓存项"""
-        current_time = time.time()
-        expired_keys = []
+    async def get(self, key: str) -> Optional[Any]:
+        """获取缓存：优先内存，未命中查数据库"""
+        # 1. 尝试内存缓存
+        if key in self._expiry and time.time() < self._expiry[key]:
+            return self._cache[key]
         
-        for key, (value, expire_time, access_time) in self._cache.items():
-            if expire_time and current_time > expire_time:
-                expired_keys.append(key)
+        # 2. 内存未命中，查询数据库
+        try:
+            with Session(engine) as session:
+                # 假设 key 格式：device_type:device_id:cache_key
+                parts = key.split(':')
+                if len(parts) >= 3:
+                    device_type = parts[0]
+                    device_id = parts[1]
+                    cache_key = ':'.join(parts[2:])
+                    
+                    db_cache = session.get(DeviceCache, device_id)
+                    if db_cache and db_cache.cache_key == cache_key and db_cache.device_type == device_type:
+                        if time.time() * 1000 < db_cache.expires_at:
+                            # 加载到内存缓存
+                            ttl_seconds = (db_cache.expires_at - time.time() * 1000) / 1000
+                            # JSON 字符串转 dict
+                            value = json.loads(db_cache.cache_value)
+                            self.set(key, value, ttl=int(ttl_seconds))
+                            return value
+        except Exception as e:
+            logger.debug(f"Database cache lookup failed: {e}")
         
-        for key in expired_keys:
-            del self._cache[key]
-            if key in self._access_order:
-                del self._access_order[key]
-    
-    def _evict_lru(self):
-        """LRU淘汰策略"""
-        if len(self._cache) >= self._max_size:
-            # 移除最久未访问的项
-            lru_key = self._access_order.popitem(last=False)[0]
-            del self._cache[lru_key]
-    
-    def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        """设置缓存项
-        
-        Args:
-            key: 缓存键
-            value: 缓存值
-            ttl: 过期时间（秒），None表示永不过期
-        """
-        current_time = time.time()
-        expire_time = current_time + ttl if ttl else None
-        
-        # 如果已经存在，更新访问顺序
-        if key in self._cache:
-            del self._access_order[key]
-        
-        # LRU淘汰
-        self._evict_lru()
-        
-        self._cache[key] = (value, expire_time, current_time)
-        self._access_order[key] = current_time
-    
-    def get(self, key: str) -> Optional[Any]:
-        """获取缓存项"""
-        self._cleanup_expired()
-        
-        if key in self._cache:
-            value, expire_time, access_time = self._cache[key]
-            current_time = time.time()
-            
-            # 更新访问时间
-            self._access_order.move_to_end(key)
-            self._cache[key] = (value, expire_time, current_time)
-            
-            return value
+        # 过期或不存在，清理
+        self._cache.pop(key, None)
+        self._expiry.pop(key, None)
         return None
     
-    def delete(self, key: str):
-        """删除缓存项"""
-        if key in self._cache:
-            del self._cache[key]
-        if key in self._access_order:
-            del self._access_order[key]
+    async def set(self, key: str, value: Any, ttl: int = 300):
+        """设置缓存：双写到内存和数据库"""
+        # 1. 写入内存缓存
+        self._cache[key] = value
+        self._expiry[key] = time.time() + ttl
+        
+        # 2. 异步写入数据库（不阻塞）
+        try:
+            # 解析 key 获取设备信息
+            parts = key.split(':')
+            if len(parts) >= 3:
+                device_type = parts[0]
+                device_id = parts[1]
+                cache_key = ':'.join(parts[2:])
+                
+                with Session(engine) as session:
+                    db_cache = session.get(DeviceCache, device_id)
+                    expires_at_ms = int(time.time() * 1000) + ttl * 1000
+                    
+                    if not db_cache:
+                        db_cache = DeviceCache(
+                            device_id=device_id,
+                            device_type=device_type,
+                            cache_key=cache_key,
+                            cache_value=json.dumps(value),  # dict 转 JSON 字符串
+                            expires_at=expires_at_ms
+                        )
+                        session.add(db_cache)
+                    else:
+                        db_cache.cache_value = json.dumps(value)  # dict 转 JSON 字符串
+                        db_cache.expires_at = expires_at_ms
+                        db_cache.updated_at = int(time.time() * 1000)
+                        session.add(db_cache)
+                    
+                    session.commit()
+        except Exception as e:
+            logger.debug(f"Database cache write failed: {e}")
     
-    def clear(self):
+    async def delete(self, key: str):
+        """删除缓存：同时删除内存和数据库"""
+        # 1. 删除内存缓存
+        self._cache.pop(key, None)
+        self._expiry.pop(key, None)
+        
+        # 2. 删除数据库缓存
+        try:
+            parts = key.split(':')
+            if len(parts) >= 2:
+                device_id = parts[1]
+                
+                with Session(engine) as session:
+                    db_cache = session.get(DeviceCache, device_id)
+                    if db_cache:
+                        session.delete(db_cache)
+                        session.commit()
+        except Exception as e:
+            logger.debug(f"Database cache delete failed: {e}")
+    
+    async def clear(self):
         """清空所有缓存"""
         self._cache.clear()
-        self._access_order.clear()
+        self._expiry.clear()
+        
+        # 清空数据库缓存表
+        try:
+            with Session(engine) as session:
+                session.query(DeviceCache).delete()
+                session.commit()
+        except Exception as e:
+            logger.debug(f"Database cache clear failed: {e}")
     
-    def exists(self, key: str) -> bool:
+    async def exists(self, key: str) -> bool:
         """检查键是否存在且未过期"""
-        self._cleanup_expired()
-        return key in self._cache
+        return await self.get(key) is not None
     
-    def size(self) -> int:
-        """返回当前缓存大小"""
-        self._cleanup_expired()
-        return len(self._cache)
+    async def size(self) -> int:
+        """返回当前缓存大小（仅统计未过期）"""
+        count = 0
+        for key in list(self._cache.keys()):
+            if await self.get(key) is not None:
+                count += 1
+        return count
 
 
 # 全局缓存实例
-cache_manager = CacheManager(max_size=1000)
-
-
-class AsyncCacheManager:
-    """异步版本的缓存管理器"""
-    
-    def __init__(self, max_size: int = 1000):
-        self._cache: Dict[str, tuple] = {}
-        self._max_size = max_size
-        self._access_order = OrderedDict()
-        self._lock = asyncio.Lock()
-    
-    async def _cleanup_expired(self):
-        """异步清理过期项（不在锁内执行）"""
-        current_time = time.time()
-        expired_keys = []
-        
-        # 先收集过期的键（不需要锁）
-        for key, (value, expire_time, access_time) in self._cache.items():
-            if expire_time and current_time > expire_time:
-                expired_keys.append(key)
-        
-        # 然后在锁内删除
-        if expired_keys:
-            async with self._lock:
-                for key in expired_keys:
-                    if key in self._cache:
-                        del self._cache[key]
-                    if key in self._access_order:
-                        del self._access_order[key]
-    
-    async def _evict_lru(self):
-        """异步LRU淘汰（不在锁内判断）"""
-        if len(self._cache) >= self._max_size:
-            async with self._lock:
-                # 再次检查，因为可能在等待锁期间已经有变化
-                if len(self._cache) >= self._max_size and self._access_order:
-                    lru_key = self._access_order.popitem(last=False)[0]
-                    if lru_key in self._cache:
-                        del self._cache[lru_key]
-    
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        """异步设置缓存"""
-        await self._cleanup_expired()
-        async with self._lock:
-            current_time = time.time()
-            expire_time = current_time + ttl if ttl else None
-            
-            if key in self._cache:
-                del self._access_order[key]
-            
-            await self._evict_lru()
-            
-            self._cache[key] = (value, expire_time, current_time)
-            self._access_order[key] = current_time
-    
-    async def get(self, key: str) -> Optional[Any]:
-        """异步获取缓存"""
-        await self._cleanup_expired()
-        async with self._lock:
-            if key in self._cache:
-                value, expire_time, access_time = self._cache[key]
-                current_time = time.time()
-                
-                self._access_order.move_to_end(key)
-                self._cache[key] = (value, expire_time, current_time)
-                
-                return value
-            return None
-    
-    async def delete(self, key: str):
-        """异步删除缓存"""
-        async with self._lock:
-            if key in self._cache:
-                del self._cache[key]
-            if key in self._access_order:
-                del self._access_order[key]
-    
-    async def clear(self):
-        """异步清空缓存"""
-        async with self._lock:
-            self._cache.clear()
-            self._access_order.clear()
-    
-    async def exists(self, key: str) -> bool:
-        """异步检查键是否存在"""
-        await self._cleanup_expired()
-        async with self._lock:
-            return key in self._cache
-
-
-# 异步缓存实例
-async_cache_manager = AsyncCacheManager(max_size=1000)
+cache_manager = CacheManager()

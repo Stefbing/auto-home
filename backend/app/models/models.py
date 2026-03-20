@@ -39,4 +39,17 @@ class FeedingPlan(SQLModel, table=True):
 class SystemConfig(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value: str
-    updated_at: int = Field(default_factory=lambda: int(time.time()))
+    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000))  # 毫秒时间戳
+
+class DeviceCache(SQLModel, table=True):
+    """设备缓存表 - 存储高频查询的设备统计数据"""
+    
+    __tablename__ = "device_cache"
+    
+    device_id: str = Field(primary_key=True, max_length=100)
+    device_type: str = Field(max_length=20)
+    cache_key: str = Field(max_length=100)
+    cache_value: str = Field(default="{}")  # JSON 字符串
+    expires_at: int  # 过期时间戳（毫秒）
+    created_at: int = Field(default_factory=lambda: int(time.time() * 1000))
+    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000))

@@ -116,6 +116,15 @@ CREATE INDEX idx_weight_records_timestamp ON weight_records(timestamp DESC);
 CREATE INDEX idx_feeding_logs_user_id ON feeding_logs(user_id);
 CREATE INDEX idx_litterbox_logs_user_id ON litterbox_logs(user_id);
 
+-- 7. 系统配置表（用于存储 Token、缓存等）
+CREATE TABLE systemconfig (
+    key VARCHAR(100) PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at BIGINT NOT NULL
+);
+
+CREATE INDEX idx_systemconfig_key ON systemconfig(key);
+
 -- 触发器：自动更新 updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -132,4 +141,22 @@ CREATE TRIGGER update_user_credentials_updated_at BEFORE UPDATE ON user_credenti
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_devices_updated_at BEFORE UPDATE ON devices
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- 8. 设备缓存表（存储高频查询的统计数据）
+CREATE TABLE device_cache (
+    device_id VARCHAR(100) PRIMARY KEY,
+    device_type VARCHAR(20) NOT NULL,
+    cache_key VARCHAR(100) NOT NULL,
+    cache_value JSONB NOT NULL,
+    expires_at BIGINT NOT NULL, -- 过期时间戳（毫秒）
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_device_cache_type ON device_cache(device_type);
+CREATE INDEX idx_device_cache_key ON device_cache(cache_key);
+CREATE INDEX idx_device_cache_expires ON device_cache(expires_at);
+
+CREATE TRIGGER update_device_cache_updated_at BEFORE UPDATE ON device_cache
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
