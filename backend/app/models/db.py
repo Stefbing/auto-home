@@ -1,6 +1,7 @@
 from sqlmodel import SQLModel, create_engine, Session
 from sqlalchemy.pool import StaticPool
 import os
+import time
 from dotenv import load_dotenv
 import tempfile
 import logging
@@ -20,11 +21,8 @@ else:
     load_dotenv()
     logger.info("Loaded .env from current directory")
 
-# Vercel Postgres 使用 "POSTGRES_URL"
-# Serverless 环境下如果未配置 Postgres，回退到内存数据库 (sqlite:///:memory:) 避免文件权限错误
-# 本地开发默认使用 SQLite 文件 (sqlite:///./auto_home.db)
-
-# 增强的 Serverless 环境检测
+# 优先使用 SQLite，除非明确配置了 PostgreSQL
+# 检测逻辑：如果没有 DATABASE_URL 或 VERCEL 环境，默认使用 SQLite
 is_serverless = os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("R_LIBS_USER")
 
 if is_serverless:
@@ -34,8 +32,9 @@ if is_serverless:
         logger.warning("No POSTGRES_URL found. Falling back to in-memory SQLite database.")
         database_url = "sqlite:///:memory:"
 else:
-    # 本地开发使用文件数据库以支持持久化测试
+    # 本地开发默认使用 SQLite 文件数据库
     database_url = os.getenv("DATABASE_URL") or "sqlite:///./auto_home.db"
+    logger.info(f"Using SQLite database: {database_url}")
 
 logger.info(f"Database URL: {database_url.split('://')[0]}://***")  # Mask password if any
 
@@ -52,10 +51,44 @@ if "sqlite" in database_url and ":memory:" in database_url:
     poolclass = StaticPool
     logger.info("Using StaticPool for in-memory SQLite database.")
 
+logger.info("正在创建数据库引擎...")
+engine_start = time.time()
 engine = create_engine(database_url, echo=False, connect_args=connect_args, poolclass=poolclass)
+logger.info(f"✓ 数据库引擎创建完成，耗时：{time.time() - engine_start:.2f}秒")
 
 def init_db():
-    SQLModel.metadata.create_all(engine)
+    """初始化数据库表结构，检测无表时自动创建"""
+    logger.info("正在检查数据库表结构...")
+    
+    # 检查是否已有表
+    from sqlmodel import SQLModel
+    from sqlalchemy import inspect
+    
+    inspector = inspect(engine)
+    existing_tables = inspector.get_table_names()
+    expected_tables = list(SQLModel.metadata.tables.keys())
+    
+    if not existing_tables:
+        logger.info("📊 检测到空数据库，开始自动创建表结构...")
+        logger.info(f"📋 计划创建的表：{', '.join(expected_tables)}")
+        table_start = time.time()
+        SQLModel.metadata.create_all(engine)
+        elapsed = time.time() - table_start
+        logger.info(f"✅ 数据库表结构创建完成！耗时：{elapsed:.2f}秒")
+        logger.info(f"📝 已创建的表：{', '.join(existing_tables + expected_tables)}")
+    else:
+        missing_tables = [t for t in expected_tables if t not in existing_tables]
+        if missing_tables:
+            logger.info(f"⚠️  检测到部分表缺失：{', '.join(missing_tables)}")
+            logger.info(f"🔧 开始补建缺失的表...")
+            table_start = time.time()
+            SQLModel.metadata.create_all(engine)
+            elapsed = time.time() - table_start
+            logger.info(f"✅ 缺失表补建完成！耗时：{elapsed:.2f}秒")
+            logger.info(f"📝 当前所有表：{', '.join(existing_tables + missing_tables)}")
+        else:
+            logger.info(f"✅ 数据库表结构完整，共发现 {len(existing_tables)} 个表")
+            logger.info(f"📝 表列表：{', '.join(existing_tables)}")
 
 def get_session():
     with Session(engine) as session:

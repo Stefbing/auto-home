@@ -1,6 +1,7 @@
 from sqlmodel import SQLModel, Field
 from typing import Optional
 import time
+from sqlalchemy import BIGINT
 
 class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -21,14 +22,14 @@ class WeightRecord(SQLModel, table=True):
     visceral_fat: Optional[float] = None
     bone_mass: Optional[float] = None
     bmr: Optional[float] = None
-    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
+    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})
 
 class KnownDevice(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     device_id: str = Field(unique=True) # BLE MAC or UUID
     name: str
     type: str # 'scale', 'camera', etc.
-    last_seen: int = Field(default_factory=lambda: int(time.time() * 1000))
+    last_seen: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})
 
 class FeedingPlan(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -39,7 +40,7 @@ class FeedingPlan(SQLModel, table=True):
 class SystemConfig(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value: str
-    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000))  # 毫秒时间戳
+    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})  # 毫秒时间戳
 
 class DeviceCache(SQLModel, table=True):
     """设备缓存表 - 存储高频查询的设备统计数据"""
@@ -50,6 +51,6 @@ class DeviceCache(SQLModel, table=True):
     device_type: str = Field(max_length=20)
     cache_key: str = Field(max_length=100)
     cache_value: str = Field(default="{}")  # JSON 字符串
-    expires_at: int  # 过期时间戳（毫秒）
-    created_at: int = Field(default_factory=lambda: int(time.time() * 1000))
-    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000))
+    expires_at: int = Field(sa_column={'type': BIGINT})  # 过期时间戳（毫秒）
+    created_at: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})
+    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})

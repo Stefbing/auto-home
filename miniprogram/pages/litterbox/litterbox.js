@@ -2,18 +2,13 @@ const app = getApp();
 
 Page({
   data: {
-    stats: { today_visits: 0, last_visit: '--:--' },
-    loading: false,
-    deviceId: null
+    stats: { today_visits: 0, last_visit: '--:--', device_name: '', sand_percent: 0, deodorant_days: 0 },
+    loading: false
   },
 
   onLoad(options) {
-    // 从参数获取设备ID（如果有的话）
-    if (options.device_id) {
-      this.setData({ deviceId: options.device_id });
-    }
     this.fetchStats();
-    
+      
     // 设置定时刷新
     this.startAutoRefresh();
   },
@@ -56,9 +51,6 @@ Page({
           wx.request({
             url: `${app.globalData.apiBaseUrl}/api/petkit/clean`,
             method: 'POST',
-            data: {
-              device_id: this.data.deviceId
-            },
             success: r => {
               wx.hideLoading();
               if(r.data && r.data.status === 'success') {
@@ -96,22 +88,42 @@ Page({
 
   fetchStats() {
     this.setData({ loading: true });
+    
     wx.request({
-      url: `${app.globalData.apiBaseUrl}/api/petkit/stats`,
-      data: {
-        device_id: this.data.deviceId
-      },
+      url: `${app.globalData.apiBaseUrl}/api/petkit/devices-stats`,
       success: res => {
+        const devicesWithStats = res.data || [];
+        
+        // 从第一个猫厕所设备获取统计数据
+        let stats = {};
+        if (devicesWithStats.length > 0) {
+          const firstDevice = devicesWithStats[0];
+          // 统计数据在 state_summary 字段中（与 Web 端一致）
+          const stateSummary = firstDevice.state_summary || {};
+          stats = {
+            device_name: firstDevice.name || '猫厕所',
+            today_visits: stateSummary.today_visits || 0,
+            avg_duration: stateSummary.avg_duration || 0,
+            last_pet_weight: stateSummary.last_pet_weight || 0,
+            sand_percent: stateSummary.sand_percent || 0,
+            deodorant_days: stateSummary.deodorant_left_days || 0,
+            frequent_restroom: stateSummary.frequent_restroom || false,
+            box_full: stateSummary.box_full || false,
+            sand_weight: stateSummary.sand_weight || 0,
+            work_state: stateSummary.work_state || 0
+          };
+        }
+        
         this.setData({ 
-          stats: res.data,
+          stats: stats,
           loading: false 
         });
         
         // 如果有警告信息，显示给用户
-        if (res.data.warning) {
+        if (stats.warning) {
           wx.showModal({
             title: '数据提示',
-            content: res.data.warning,
+            content: stats.warning,
             showCancel: false
           });
         }

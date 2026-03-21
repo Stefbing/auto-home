@@ -38,11 +38,20 @@ state = AppState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """管理应用启动和关闭时的逻辑"""
+    import time
+    start_time = time.time()
+    
     # 启动时：初始化数据库和长连接服务
+    logger.info("=== 开始初始化应用 ===")
+    db_start = time.time()
     init_db()
+    logger.info(f"✓ 数据库初始化完成，耗时：{time.time() - db_start:.2f}秒")
 
     # 初始化 CloudPets 服务 (从数据库加载 Token 或自动登录)
+    logger.info("正在初始化 CloudPets 服务...")
+    cloudpets_start = time.time()
     await cloudpets_service.initialize()
+    logger.info(f"✓ CloudPets 服务初始化完成，耗时：{time.time() - cloudpets_start:.2f}秒")
 
     # 统一环境变量 ACCOUNT 和 PASSWORD
     # 注意：PetKit 通常需要带区号 (如 86-)，而 CloudPets 会自动去除
@@ -51,46 +60,59 @@ async def lifespan(app: FastAPI):
 
     if username and password:
         logger.info(f"正在初始化 PetKit 服务：{username}...")
+        petkit_start = time.time()
         state.petkit = PetKitService(username, password)
         try:
             await state.petkit.initialize()
-            logger.info("PetKit 服务连接成功")
+            logger.info(f"✓ PetKit 服务连接成功，耗时：{time.time() - petkit_start:.2f}秒")
         except Exception as e:
             logger.error(f"PetKit 连接失败：{e}")
+            logger.error(f"✗ PetKit 初始化失败，耗时：{time.time() - petkit_start:.2f}秒")
     else:
         logger.warning("警告：未检测到 PETKIT 环境变量，相关 API 将不可用")
     
     # 初始化数据刷新任务
+    logger.info("正在初始化数据刷新任务...")
+    task_start = time.time()
     state.data_refresh_task = create_data_refresh_task(
         state.petkit, 
         cloudpets_service, 
         cache_manager
     )
+    logger.info(f"✓ 数据刷新任务初始化完成，耗时：{time.time() - task_start:.2f}秒")
     
     # 添加定时任务
+    logger.info("正在添加定时任务...")
+    scheduler_start = time.time()
     await scheduler.add_task(
         'dashboard_refresh', 
         state.data_refresh_task.refresh_combined_dashboard_data,
         interval=60,  # 每分钟刷新一次
         immediate=True
     )
-    
+        
     await scheduler.add_task(
         'petkit_refresh',
         state.data_refresh_task.refresh_petkit_data,
-        interval=180,  # 每3分钟刷新PetKit数据
+        interval=180,  # 每 3 分钟刷新 PetKit 数据
         immediate=False
     )
-    
+        
     await scheduler.add_task(
         'cloudpets_refresh',
         state.data_refresh_task.refresh_cloudpets_data,
-        interval=120,  # 每2分钟刷新CloudPets数据
+        interval=120,  # 每 2 分钟刷新 CloudPets 数据
         immediate=False
     )
-    
+    logger.info(f"✓ 定时任务添加完成，耗时：{time.time() - scheduler_start:.2f}秒")
+        
     # 启动调度器
+    logger.info("正在启动调度器...")
     await scheduler.start()
+    logger.info(f"✓ 调度器启动完成")
+        
+    total_time = time.time() - start_time
+    logger.info(f"=== 应用初始化完成，总耗时：{total_time:.2f}秒 ===")
 
     yield  # 分隔符，上方是启动逻辑，下方是关闭逻辑
 
@@ -259,20 +281,22 @@ async def petkit_devices(service: PetKitService = Depends(get_petkit)):
         raise HTTPException(status_code=500, detail=f"Failed to fetch devices: {str(e)}")
 
 @app.post("/api/petkit/clean")
-async def petkit_clean(device_id: Optional[str] = None, service: PetKitService = Depends(get_petkit)):
+async def petkit_clean(service: PetKitService = Depends(get_petkit)):
+    """清理猫厕所（自动选择第一个设备）"""
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
-        return await service.clean_litterbox(device_id)
+        return await service.clean_litterbox(None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Action failed: {str(e)}")
 
 @app.post("/api/petkit/deodorize")
-async def petkit_deodorize(device_id: Optional[str] = None, service: PetKitService = Depends(get_petkit)):
+async def petkit_deodorize(service: PetKitService = Depends(get_petkit)):
+    """除臭猫厕所（自动选择第一个设备）"""
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
-        return await service.deodorize_litterbox(device_id)
+        return await service.deodorize_litterbox(None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -282,6 +306,10 @@ async def petkit_daily_stats(device_id: Optional[str] = None, service: PetKitSer
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
+        # 处理 device_id 为字符串 "null" 的情况
+        if device_id == "null" or device_id == "":
+            device_id = None
+        
         # 构建缓存键
         cache_key = f'petkit_stats_{device_id or "default"}'
         
@@ -310,7 +338,7 @@ async def petkit_history_stats(device_id: Optional[str] = None, days: int = 7, s
 
 @app.get("/api/petkit/devices-stats")
 async def petkit_devices_with_stats(service: PetKitService = Depends(get_petkit)):
-    """合并获取设备列表和统计数据的接口（带缓存）"""
+    """合并获取设备列表和统计数据的接口（带缓存）- 与 Web端一致"""
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     
@@ -342,7 +370,10 @@ async def petkit_devices_with_stats(service: PetKitService = Depends(get_petkit)
                     "type": getattr(device, 'type', 'Unknown'),
                     "data": getattr(device, 'data', {})
                 }
-                device_dict['stats'] = stats
+                
+                # 将统计数据放入 state_summary 字段（与 Web端一致）
+                device_dict['state_summary'] = stats if isinstance(stats, dict) else {}
+                
                 result.append(device_dict)
             else:
                 result.append(device)

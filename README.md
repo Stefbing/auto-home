@@ -78,9 +78,6 @@ DATABASE_URL=sqlite:///./auto_home.db
 # 生产环境使用 PostgreSQL
 # DATABASE_URL=postgresql://user:password@host:port/dbname
 
-# ========== 加密密钥（用于加密存储用户凭证）==========
-# 生成方式：openssl rand -hex 32
-ENCRYPTION_KEY=your_random_32_byte_hex_key
 ```
 
 **注意**：

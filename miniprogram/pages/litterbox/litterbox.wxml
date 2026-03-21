@@ -32,43 +32,38 @@
       <text class="value">{{stats.today_visits}}次</text>
     </view>
     <view class="stat-row">
-      <text class="label">最近一次</text>
-      <text class="value">{{stats.last_visit}}</text>
+      <text class="label">平均时长</text>
+      <text class="value">{{stats.avg_duration || 0}}秒</text>
     </view>
-    <block wx:if="{{stats.avg_duration}}">
-      <view class="stat-row">
-        <text class="label">平均时长</text>
-        <text class="value">{{stats.avg_duration}}秒</text>
-      </view>
-    </block>
-    <block wx:if="{{stats.total_duration}}">
-      <view class="stat-row">
-        <text class="label">总时长</text>
-        <text class="value">{{stats.total_duration}}秒</text>
-      </view>
-    </block>
+    <view class="stat-row" wx:if="{{stats.last_pet_weight}}">
+      <text class="label">最近猫重</text>
+      <text class="value">{{stats.last_pet_weight}}kg</text>
+    </view>
   </view>
 
   <!-- 状态信息 -->
-  <view class="card" wx:if="{{stats.sand_percent !== undefined}}">
+  <view class="card">
     <view class="section-title">设备状态</view>
     <view class="stat-row">
       <text class="label">猫砂余量</text>
-      <text class="value">{{stats.sand_percent}}%</text>
+      <text class="value">{{stats.sand_percent || 0}}%</text>
     </view>
     <view class="stat-row">
-      <text class="label">除臭液</text>
-      <text class="value">{{stats.deodorant_days}}天</text>
+      <text class="label">除臭液剩余</text>
+      <text class="value">{{stats.deodorant_days || 0}}天</text>
+    </view>
+    <view class="stat-row" wx:if="{{stats.frequent_restroom !== undefined}}">
+      <text class="label">频繁如厕</text>
+      <text class="value" style="color: {{stats.frequent_restroom ? '#ff4d4f' : '#52c41a'}}">{{stats.frequent_restroom ? '有 ⚠️' : '无'}}</text>
+    </view>
+    <view class="stat-row" wx:if="{{stats.box_full !== undefined}}">
+      <text class="label">集便盒</text>
+      <text class="value" style="color: {{stats.box_full ? '#ff4d4f' : '#52c41a'}}">{{stats.box_full ? '已满 ⚠️' : '正常'}}</text>
     </view>
   </view>
 
   <!-- 数据说明 -->
   <view class="info-card" wx:if="{{stats.warning}}">
     <text class="info-text">⚠️ {{stats.warning}}</text>
-  </view>
-
-  <!-- 错误提示 -->
-  <view class="error-card" wx:if="{{stats.error}}">
-    <text class="error-text">❌ {{stats.error}}</text>
   </view>
 </view>
