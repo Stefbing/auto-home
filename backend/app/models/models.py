@@ -24,13 +24,6 @@ class WeightRecord(SQLModel, table=True):
     bmr: Optional[float] = None
     timestamp: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})
 
-class KnownDevice(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    device_id: str = Field(unique=True) # BLE MAC or UUID
-    name: str
-    type: str # 'scale', 'camera', etc.
-    last_seen: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})
-
 class FeedingPlan(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     time: str

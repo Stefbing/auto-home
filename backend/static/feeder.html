@@ -257,7 +257,7 @@
         async function fetchData() {
             showLoading(true);
             try {
-                // 1. Servings Today
+                // 1. 今日投喂次数
                 log('Fetching servings today...');
                 const res = await fetch('/api/cloudpets/servings_today');
                 const data = await res.json();
@@ -265,26 +265,38 @@
                 if (data.code === 200) {
                     document.getElementById('servings-today').innerText = data.result || 0;
                 }
-            } catch(e) { log('Servings error:', e.message); }
-
-            // 2. Plans (Only for count)
-            try {
+                        
+                // 2. 喂食计划（仅用于计算剩余次数）
                 log('Fetching plans...');
-                const res = await fetch('/api/cloudpets/plans');
-                plans = await res.json();
+                const resPlans = await fetch('/api/cloudpets/plans');
+                plans = await resPlans.json();
                 log('Plans data:', plans);
                 updateRemaining();
-            } catch(e) { log('Plans error:', e.message); }
-            
-            // 3. 获取设备详细状态信息
-            try {
-                log('Fetching device status...');
-                // 这里可以添加获取设备详细状态的API调用
-                // 暂时使用模拟数据
-                updateDeviceStatus();
-            } catch(e) { log('Device status error:', e.message); }
-            
-            showLoading(false);
+                        
+                // 3. 设备实时状态（使用 CloudPets 真实数据）
+                log('Fetching feeder status from CloudPets...');
+                try {
+                    const statusRes = await fetch('/api/cloudpets/feeder/status');
+                    const statusData = await statusRes.json();
+                    log('Feeder status:', statusData);
+                    
+                    if (statusData.code === 200 && statusData.result) {
+                        updateDeviceStatus(statusData.result);
+                    } else {
+                        // 如果接口失败，使用默认值
+                        updateDeviceStatus({});
+                    }
+                } catch (e) {
+                    log('Feeder status fetch error:', e.message);
+                    // 使用默认值
+                    updateDeviceStatus({});
+                }
+                        
+            } catch(e) { 
+                log('Fetch error:', e.message); 
+            } finally {
+                showLoading(false);
+            }
         }
 
         function updateRemaining() {
@@ -302,12 +314,41 @@
             document.getElementById('plans-remaining').innerText = remaining;
         }
         
-        function updateDeviceStatus() {
-            // 更新设备状态信息
-            // 这里可以从API获取真实数据，暂时使用合理的默认值
-            document.getElementById('food-status').innerText = '充足';
-            document.getElementById('battery-level').innerText = '100%';
-            document.getElementById('connection-status').innerText = '强';
+        function updateDeviceStatus(statusData) {
+            // 更新设备状态信息 - 使用 CloudPets 真实数据
+            if (statusData && Object.keys(statusData).length > 0) {
+                // 电池电量
+                const battery = statusData.batteryPercentage || '100';
+                document.getElementById('battery-level').innerText = battery + '%';
+                
+                // 工作状态
+                const feedState = statusData.feedState || 'standby';
+                const stateMap = {
+                    'standby': '待机',
+                    'feeding': '投喂中',
+                    'fault': '故障'
+                };
+                document.getElementById('connection-status').innerText = stateMap[feedState] || '正常';
+                
+                // 充电状态
+                const chargeState = statusData.chargeState === 'true';
+                if (chargeState) {
+                    document.getElementById('food-status').innerText = '充电中';
+                } else {
+                    document.getElementById('food-status').innerText = '充足';
+                }
+                
+                // 故障提示
+                if (statusData.fault && statusData.fault !== '0.0' && statusData.fault !== '0') {
+                    document.getElementById('food-status').innerText = '故障 ' + statusData.fault;
+                    document.getElementById('food-status').classList.add('alert');
+                }
+            } else {
+                // 无真实数据时使用合理的默认值
+                document.getElementById('food-status').innerText = '充足';
+                document.getElementById('battery-level').innerText = '100%';
+                document.getElementById('connection-status').innerText = '强';
+            }
         }
 
         // --- Feed Actions ---

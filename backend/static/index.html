@@ -309,9 +309,8 @@
                 const data = await response.json();
                 
                 const petkitDevices = data.petkit_devices || [];
-                const knownDevices = await fetch('/api/devices/known').then(r => r.json()).catch(() => []);
                 
-                renderAllDevices(petkitDevices, knownDevices, data);
+                renderAllDevices(petkitDevices, data);
             } catch (error) {
                 console.error('获取仪表板数据失败:', error);
                 // 降级到旧方法
@@ -322,15 +321,10 @@
         async function fallbackFetchDevices() {
             try {
                 // Parallel fetch
-                const [petkitRes, scanRes] = await Promise.all([
-                    fetch('/api/petkit/devices').catch(() => ({ json: () => [] })),
-                    fetch('/api/devices/known').catch(() => ({ json: () => [] }))
-                ]);
-
+                const petkitRes = await fetch('/api/petkit/devices').catch(() => ({ json: () => [] }));
                 const petkit = await petkitRes.json();
-                const known = await scanRes.json();
 
-                renderAllDevices(Array.isArray(petkit) ? petkit : [], Array.isArray(known) ? known : []);
+                renderAllDevices(Array.isArray(petkit) ? petkit : []);
             } catch (error) {
                 console.error('Fallback fetch error:', error);
             }
@@ -350,7 +344,7 @@
             }
         }
 
-        function renderAllDevices(petkit, known, dashboardData = {}) {
+        function renderAllDevices(petkit, dashboardData = {}) {
             const container = document.getElementById('device-sections');
             container.innerHTML = '';
 
@@ -434,33 +428,8 @@
             petHtml += '</div>';
             container.innerHTML += petHtml;
 
-            // --- 2. 健康与体质 ---
-            const scalesKnown = known.filter(d => d && d.type === 'scale');
-            if (scalesKnown.length > 0) {
-                container.innerHTML += `<div class="section-title"><i class="fas fa-weight"></i> 健康与体质</div>`;
-                let html = '<div class="device-grid">';
-                scalesKnown.forEach(d => {
-                    html += `
-                        <div class="device-card" onclick="location.href='/scale'">
-                            <div class="device-icon" style="background: #fff0f6; color: #eb2f96;"><i class="fas fa-weight"></i></div>
-                            <div class="device-info">
-                                <div class="device-name">${d.name || '体脂秤'}</div>
-                                <div class="device-status"><span class="status-dot dot-online"></span>点击称重</div>
-                            </div>
-                            <div class="device-data">
-                                <div class="data-item">
-                                    <div class="data-val" id="last-weight-${d.id}">--kg</div>
-                                    <div class="data-label">最近称重</div>
-                                </div>
-                            </div>
-                            <div class="arrow-icon"><i class="fas fa-chevron-right"></i></div>
-                        </div>`;
-                });
-                html += '</div>';
-                container.innerHTML += html;
-                
-                scalesKnown.forEach(d => updateLastWeight(d.id));
-            }
+            // --- 2. 健康与体质 (体重秤 - 已移除)
+            // Deleted: 体重秤功能已移除，因为已知设备列表为空
             
             // 更新喂食机统计数据
             updateFeederStats(dashboardData);

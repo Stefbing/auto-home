@@ -243,8 +243,16 @@ class PetKitService:
             # 更新会话时间戳
             await self._save_session_to_db()
         except Exception as e:
-            if "Session expired" in str(e) or "401" in str(e):
-                logger.warning("Session expired, attempting re-login...")
+            error_msg = str(e)
+            # 检查是否是 SSL 错误
+            is_ssl_error = "SSL" in error_msg or "certificate" in error_msg.lower() or "CERTIFICATE_VERIFY_FAILED" in error_msg
+            
+            if "Session expired" in error_msg or "401" in error_msg or is_ssl_error:
+                if is_ssl_error:
+                    logger.warning(f"检测到 SSL 错误，尝试重新登录：{e}")
+                else:
+                    logger.warning("Session expired, attempting re-login...")
+                    
                 if await self._login():
                     await self.client.get_devices_data()
                 else:

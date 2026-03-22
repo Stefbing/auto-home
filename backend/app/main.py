@@ -19,7 +19,7 @@ from sqlmodel import Session, select
 # 导入你现有的模块
 from .services.petkit_service import PetKitService
 from .services.cloudpets_service import cloudpets_service, FeedingPlan as CloudPetsPlan
-from .models.models import User, WeightRecord, FeedingPlan, KnownDevice
+from .models.models import User, WeightRecord, FeedingPlan
 from .models.db import get_session, init_db
 from .utils.cache_manager import cache_manager
 from .scheduler.task_scheduler import scheduler, create_data_refresh_task
@@ -415,6 +415,11 @@ async def cloudpets_delete_plan(plan_id: str):
     """删除喂食计划"""
     return await cloudpets_service.delete_feeding_plan(plan_id)
 
+@app.get("/api/cloudpets/feeder/status")
+async def cloudpets_feeder_status():
+    """获取喂食器实时状态"""
+    return await cloudpets_service.get_feeder_status()
+
 # --- PetWant (Placeholder - Deprecated) ---
 @app.post("/api/petwant/feed")
 async def petwant_feed():
@@ -516,26 +521,26 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
     session.refresh(record)
     return {"status": "success", "id": record.id}
 
-# --- Known Devices 路由 ---
-@app.get("/api/devices/known", response_model=List[KnownDevice])
-def get_known_devices(session: Session = Depends(get_session)):
-    return session.exec(select(KnownDevice)).all()
+# Deleted: # --- Known Devices 路由 ---
+# Deleted: @app.get("/api/devices/known", response_model=List[KnownDevice])
+# Deleted: def get_known_devices(session: Session = Depends(get_session)):
+# Deleted:     return session.exec(select(KnownDevice)).all()
 
-@app.post("/api/devices/bind")
-def bind_device(device: KnownDevice, session: Session = Depends(get_session)):
-    existing = session.exec(select(KnownDevice).where(KnownDevice.device_id == device.device_id)).first()
-    if existing:
-        existing.last_seen = int(time.time() * 1000)
-        session.add(existing)
-    else:
-        session.add(device)
-    session.commit()
-    return {"status": "success"}
+# Deleted: @app.post("/api/devices/bind")
+# Deleted: def bind_device(device: KnownDevice, session: Session = Depends(get_session)):
+# Deleted:     existing = session.exec(select(KnownDevice).where(KnownDevice.device_id == device.device_id)).first()
+# Deleted:     if existing:
+# Deleted:         existing.last_seen = int(time.time() * 1000)
+# Deleted:         session.add(existing)
+# Deleted:     else:
+# Deleted:         session.add(device)
+# Deleted:     session.commit()
+# Deleted:     return {"status": "success"}
 
-@app.delete("/api/devices/unbind/{device_id}")
-def unbind_device(device_id: str, session: Session = Depends(get_session)):
-    device = session.exec(select(KnownDevice).where(KnownDevice.device_id == device_id)).first()
-    if device:
-        session.delete(device)
-        session.commit()
-    return {"status": "success"}
+# Deleted: @app.delete("/api/devices/unbind/{device_id}")
+# Deleted: def unbind_device(device_id: str, session: Session = Depends(get_session)):
+# Deleted:     device = session.exec(select(KnownDevice).where(KnownDevice.device_id == device_id)).first()
+# Deleted:     if device:
+# Deleted:         session.delete(device)
+# Deleted:         session.commit()
+# Deleted:     return {"status": "success"}

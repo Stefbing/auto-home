@@ -439,4 +439,22 @@ class CloudPetsService:
             logger.error(f"Failed to delete feeding plan: {e}")
             raise e
 
+    async def get_feeder_status(self) -> Dict[str, Any]:
+        """
+        获取喂食器实时状态
+        Path: /app/terminal/feeder/status
+        Method: POST
+        Payload: deviceId=336704
+        """
+        try:
+            payload = {"deviceId": DEVICE_ID}
+            resp = await self._request("POST", "/app/terminal/feeder/status", data=payload)
+            if resp.status_code == 200:
+                return resp.json()
+            else:
+                return {"error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            logger.error(f"Failed to get feeder status: {e}")
+            return {"error": str(e)}
+
 cloudpets_service = CloudPetsService()
