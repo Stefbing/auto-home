@@ -12,8 +12,14 @@ dependencies = [
     "sqlmodel",
     "aiohttp",
     "httpx",
+    "requests",
     "pydantic",
-    "psycopg2-binary"
+    "psycopg2-binary",
+    "cryptography",
+    "pycryptodome",
+    "pillow",
+    "charset-normalizer",
+    "colorama"
 ]
 
 [build-system]
