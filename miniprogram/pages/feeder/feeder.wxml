@@ -1,21 +1,53 @@
-<view class="container">
-  <view class="card">
-    <view class="title">CloudPets 喂食机</view>
-    <button type="primary" bindtap="feedOne">立即投喂 (1份)</button>
-    
-    <view class="switch-row">
-      <text>氛围灯</text>
-      <switch bindchange="toggleLight"/>
+<view class="page">
+  <view class="hero-card">
+    <view class="hero-label">Feeder Control</view>
+    <view class="hero-title">智能喂食器</view>
+    <view class="hero-desc">把最常用的投喂动作放在前面，计划状态单独展示，页面更清爽也更聚焦。</view>
+  </view>
+
+  <view class="card highlight-card">
+    <view class="card-head">
+      <view>
+        <view class="card-title">快速投喂</view>
+        <view class="card-subtitle">一键执行单次投喂</view>
+      </view>
+      <view class="pill-tag">1 份</view>
     </view>
+    <button class="primary-action" bindtap="feedOne" loading="{{actionLoading}}" disabled="{{actionLoading}}">
+      {{actionLoading ? '投喂中' : '立即投喂'}}
+    </button>
   </view>
 
   <view class="card">
-    <view class="title">喂食计划</view>
-    <view wx:for="{{plans}}" wx:key="index" class="plan-item">
-      <text>{{item.time}}</text>
-      <text>{{item.amount}}份</text>
-      <switch checked="{{item.enabled}}" data-index="{{index}}" bindchange="togglePlan"/>
+    <view class="card-head">
+      <view>
+        <view class="card-title">喂食计划</view>
+        <view class="card-subtitle">支持实时切换计划启用状态</view>
+      </view>
     </view>
-    <button type="primary" bindtap="savePlans" style="margin-top:10px">保存计划</button>
+
+    <view wx:if="{{loading}}" class="plan-skeleton">
+      <view class="skeleton-item" wx:for="{{[1, 2, 3]}}" wx:key="*this">
+        <view class="skeleton-main">
+          <view class="skeleton-line strong"></view>
+          <view class="skeleton-line short"></view>
+        </view>
+        <view class="skeleton-switch"></view>
+      </view>
+    </view>
+
+    <view wx:elif="{{plans.length > 0}}">
+      <view wx:for="{{plans}}" wx:key="index" class="plan-item">
+        <view class="plan-main">
+          <view class="plan-time">{{item.time}}</view>
+          <view class="plan-meta">投喂 {{item.amount}} 份</view>
+        </view>
+        <switch color="#2c6ef0" checked="{{item.enabled}}" data-index="{{index}}" bindchange="togglePlan"/>
+      </view>
+    </view>
+
+    <view wx:else class="empty-state">暂无喂食计划</view>
+
+    <button class="ghost-action" bindtap="savePlans" disabled="{{loading}}">保存计划</button>
   </view>
 </view>

@@ -5,10 +5,10 @@ App({
     // apiBaseUrl: "http://192.168.1.100:8000", // 替换为你的电脑IP
     
     // 方案2: 内网穿透服务（如ngrok、frp等）
-    // apiBaseUrl: "https://your-ngrok-url.ngrok.io",
+    apiBaseUrl: "https://auto-home-three.vercel.app",
     
     // 方案3: 本地开发（仅模拟器可用）
-    apiBaseUrl: "http://localhost:8000",
+    // apiBaseUrl: "http://localhost:8000",
     
     // 当前环境标识
     environment: "development" // development | production

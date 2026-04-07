@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 # 导入你现有的模块
 from .services.petkit_service import PetKitService
 from .services.cloudpets_service import cloudpets_service, FeedingPlan as CloudPetsPlan
+from .services.xiaomi_service import xiaomi_service
 from .models.models import User, WeightRecord, FeedingPlan
 from .models.db import get_session, init_db
 from .utils.cache_manager import cache_manager
@@ -32,6 +33,7 @@ class AppState:
     def __init__(self):
         self.petkit: Optional[PetKitService] = None
         self.data_refresh_task = None
+        self.xiaomi_initialized: bool = False
 
 state = AppState()
 
@@ -52,6 +54,16 @@ async def lifespan(app: FastAPI):
     cloudpets_start = time.time()
     await cloudpets_service.initialize()
     logger.info(f"✓ CloudPets 服务初始化完成，耗时：{time.time() - cloudpets_start:.2f}秒")
+
+    # 初始化 Xiaomi Cloud 服务
+    logger.info("正在初始化 Xiaomi Cloud 服务...")
+    xiaomi_start = time.time()
+    xiaomi_success = await xiaomi_service.initialize()
+    if xiaomi_success:
+        state.xiaomi_initialized = True
+        logger.info(f"✓ Xiaomi Cloud 服务初始化成功，耗时：{time.time() - xiaomi_start:.2f}秒")
+    else:
+        logger.warning("✗ Xiaomi Cloud 服务初始化失败，体重推送功能将不可用")
 
     # 统一环境变量 ACCOUNT 和 PASSWORD
     # 注意：PetKit 通常需要带区号 (如 86-)，而 CloudPets 会自动去除
@@ -125,6 +137,9 @@ async def lifespan(app: FastAPI):
         await state.petkit.close()
 
     await cloudpets_service.close()
+
+    if state.xiaomi_initialized:
+        logger.info("Xiaomi Cloud service will be closed")
 
 # --- 2. 应用配置 ---
 app = FastAPI(
@@ -443,6 +458,73 @@ def create_user(user: User, session: Session = Depends(get_session)):
     session.refresh(user)
     return user
 
+# --- Xiaomi Cloud 路由 ---
+@app.get("/api/xiaomi/status")
+async def xiaomi_status():
+    """获取小米云服务状态"""
+    return {
+        "initialized": state.xiaomi_initialized,
+        "user_id": xiaomi_service.userId if state.xiaomi_initialized else None,
+        "has_token": bool(xiaomi_service._serviceToken) if state.xiaomi_initialized else False
+    }
+
+@app.post("/api/xiaomi/login")
+async def xiaomi_login():
+    """手动触发小米云登录"""
+    try:
+        success = await xiaomi_service.login()
+        if success:
+            state.xiaomi_initialized = True
+            return {"status": "success", "message": "Login successful"}
+        else:
+            raise HTTPException(status_code=500, detail="Login failed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login error: {str(e)}")
+
+@app.post("/api/xiaomi/push-weight")
+async def push_weight_to_xiaomi(
+    weight: float,
+    body_fat: Optional[float] = None,
+    bmi: Optional[float] = None,
+    muscle: Optional[float] = None,
+    water: Optional[float] = None,
+    visceral_fat: Optional[float] = None,
+    bone_mass: Optional[float] = None,
+    bmr: Optional[float] = None,
+    impedance: Optional[int] = None,
+    user_id: Optional[int] = None
+):
+    """手动推送体重数据到小米云"""
+    if not state.xiaomi_initialized:
+        raise HTTPException(status_code=503, detail="Xiaomi service not initialized")
+    
+    try:
+        user_data = {
+            "weight": weight,
+            "impedance": impedance or 0,
+            "user_id": user_id or 0
+        }
+        
+        # 如果提供了详细数据
+        if body_fat is not None:
+            user_data.update({
+                "body_fat": body_fat,
+                "bmi": bmi,
+                "muscle": muscle,
+                "water": water,
+                "visceral_fat": visceral_fat,
+                "bone_mass": bone_mass,
+                "bmr": bmr
+            })
+        
+        success = await xiaomi_service.push_weight_data(user_data)
+        if success:
+            return {"status": "success", "message": "Data pushed to Xiaomi"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to push data")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Push error: {str(e)}")
+
 @app.get("/api/scale/history/{user_id}")
 def get_weight_history(user_id: int, session: Session = Depends(get_session)):
     statement = select(WeightRecord).where(WeightRecord.user_id == user_id).order_by(WeightRecord.timestamp.desc()).limit(30)
@@ -519,7 +601,48 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
     session.add(record)
     session.commit()
     session.refresh(record)
-    return {"status": "success", "id": record.id}
+    result = {"status": "success", "id": record.id}
+    
+    # 异步推送到小米云（不阻塞响应）
+    if state.xiaomi_initialized:
+        import asyncio
+        asyncio.create_task(push_to_xiaomi(record, user if record.impedance else None))
+    
+    return result
+
+async def push_to_xiaomi(record: WeightRecord, user: Optional[User] = None):
+    """异步推送体重数据到小米云"""
+    try:
+        user_data = {
+            "weight": record.weight,
+            "impedance": record.impedance or 0,
+            "user_id": record.user_id or 0
+        }
+        
+        # 如果有详细体脂数据，使用这些数据
+        if record.body_fat:
+            user_data.update({
+                "body_fat": record.body_fat,
+                "bmi": record.bmi,
+                "muscle": record.muscle,
+                "water": record.water,
+                "visceral_fat": record.visceral_fat,
+                "bone_mass": record.bone_mass,
+                "bmr": record.bmr
+            })
+        elif user:
+            # 如果没有，使用用户信息计算
+            metrics = calculate_body_metrics(record.weight, record.impedance or 0, user)
+            user_data.update(metrics)
+        
+        success = await xiaomi_service.push_weight_data(user_data)
+        if success:
+            logger.info(f"Successfully pushed weight data to Xiaomi for user {record.user_id}")
+        else:
+            logger.error(f"Failed to push weight data to Xiaomi for user {record.user_id}")
+    except Exception as e:
+        logger.error(f"Error pushing to Xiaomi: {e}")
+
 
 # Deleted: # --- Known Devices 路由 ---
 # Deleted: @app.get("/api/devices/known", response_model=List[KnownDevice])

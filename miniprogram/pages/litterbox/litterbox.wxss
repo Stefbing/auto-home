@@ -1,137 +1,285 @@
-/* 容器样式 */
-.container { 
-  padding: 20rpx; 
-  background-color: #f5f5f5;
-  min-height: 100vh;
+page {
+  background: #f4f7fb;
 }
 
-/* 顶部导航栏 */
-.header {
+.page {
+  min-height: 100vh;
+  padding: 28rpx;
+  box-sizing: border-box;
+}
+
+.hero-card,
+.card,
+.info-card,
+.stat-card {
+  background: #ffffff;
+  border-radius: 28rpx;
+  box-shadow: 0 18rpx 36rpx rgba(20, 40, 80, 0.06);
+}
+
+.hero-card {
+  margin-bottom: 24rpx;
+  padding: 32rpx;
+  background: linear-gradient(135deg, #ffffff 0%, #eefaf4 100%);
+}
+
+.hero-main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20rpx;
-  background: #fff;
-  border-radius: 16rpx;
-  margin-bottom: 20rpx;
-  box-shadow: 0 4rpx 12rpx rgba(0,0,0,0.05);
 }
 
-.header .title {
-  font-size: 36rpx;
-  font-weight: bold;
-  color: #333;
+.hero-label {
+  display: inline-block;
+  padding: 10rpx 18rpx;
+  border-radius: 999rpx;
+  background: rgba(36, 170, 102, 0.12);
+  color: #17995c;
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.hero-title {
+  margin-top: 22rpx;
+  font-size: 42rpx;
+  font-weight: 700;
+  color: #142437;
+}
+
+.hero-desc {
+  margin-top: 12rpx;
+  max-width: 420rpx;
+  font-size: 24rpx;
+  line-height: 1.7;
+  color: #66788f;
 }
 
 .refresh-btn {
-  background: #007aff;
-  color: white;
+  margin: 0;
+  padding: 0 26rpx;
+  height: 76rpx;
+  line-height: 76rpx;
+  border-radius: 999rpx;
+  background: #1f7aeb;
+  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+.refresh-btn::after,
+.danger-action::after {
   border: none;
-  padding: 16rpx 32rpx;
-  border-radius: 50rpx;
-  font-size: 28rpx;
-  font-weight: 500;
 }
 
-.refresh-btn[loading] {
-  background: #cccccc;
+.refresh-btn[disabled] {
+  opacity: 0.88;
 }
 
-/* 卡片容器 */
-.card {
-  background: #fff;
-  padding: 30rpx;
-  border-radius: 16rpx;
+.loading-stack {
+  margin-bottom: 24rpx;
+}
+
+.stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+}
+
+.stat-card {
+  width: 48%;
   margin-bottom: 20rpx;
-  box-shadow: 0 4rpx 12rpx rgba(0,0,0,0.05);
+  padding: 28rpx;
+  box-sizing: border-box;
+}
+
+.skeleton-card,
+.skeleton-panel {
+  overflow: hidden;
+}
+
+.skeleton-line,
+.skeleton-chip {
+  background: linear-gradient(90deg, #eef2f8 25%, #f8fbff 50%, #eef2f8 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line {
+  height: 24rpx;
+  border-radius: 999rpx;
+}
+
+.skeleton-line.mini {
+  width: 110rpx;
+}
+
+.skeleton-line.small {
+  width: 90rpx;
+  margin-top: 16rpx;
+}
+
+.skeleton-line.medium {
+  width: 180rpx;
+}
+
+.skeleton-line.large {
+  width: 150rpx;
+  height: 54rpx;
+  margin-top: 22rpx;
+}
+
+.skeleton-line.wide {
+  width: 260rpx;
+  margin-top: 24rpx;
+}
+
+.skeleton-panel {
+  padding: 30rpx;
+}
+
+.skeleton-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 28rpx;
+}
+
+.skeleton-chip {
+  width: 108rpx;
+  height: 48rpx;
+  border-radius: 999rpx;
+}
+
+.stat-label {
+  font-size: 24rpx;
+  color: #7b8aa0;
+}
+
+.stat-number {
+  margin-top: 18rpx;
+  font-size: 50rpx;
+  font-weight: 700;
+  line-height: 1;
+  color: #152335;
+}
+
+.stat-unit {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #8a99ad;
+}
+
+.card {
+  margin-bottom: 24rpx;
+  padding: 30rpx;
+}
+
+.action-card {
+  background: linear-gradient(135deg, #ffffff 0%, #fff4f1 100%);
+}
+
+.detail-card {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
 }
 
 .section-title {
   font-size: 32rpx;
-  font-weight: bold;
-  color: #333;
-  margin-bottom: 24rpx;
-  padding-bottom: 16rpx;
-  border-bottom: 2rpx solid #f0f0f0;
+  font-weight: 700;
+  color: #172639;
 }
 
-/* 统计行 */
-.stat-row {
+.section-desc {
+  margin-top: 10rpx;
+  font-size: 24rpx;
+  color: #7c8ca2;
+}
+
+.danger-action {
+  margin-top: 28rpx;
+  border-radius: 22rpx;
+  background: linear-gradient(135deg, #ff6a5f 0%, #ff8d72 100%);
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.detail-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20rpx;
-  padding: 16rpx 0;
-  border-bottom: 1rpx solid #f5f5f5;
+  min-height: 88rpx;
+  padding: 22rpx 0;
+  border-bottom: 1rpx solid #edf1f5;
 }
 
-.stat-row:last-child {
-  margin-bottom: 0;
+.detail-highlight {
+  margin-top: 10rpx;
+}
+
+.detail-row:last-child {
   border-bottom: none;
 }
 
-.label {
+.detail-label {
   font-size: 28rpx;
-  color: #666;
+  color: #5d6f86;
 }
 
-.value {
-  font-size: 32rpx;
-  font-weight: bold;
-  color: #007aff;
+.detail-value {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #172639;
 }
 
-/* 信息卡片 */
+.detail-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112rpx;
+  min-height: 52rpx;
+  padding: 0 20rpx;
+  border-radius: 999rpx;
+  box-sizing: border-box;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.detail-badge.safe {
+  background: rgba(33, 181, 111, 0.12);
+  color: #17995c;
+}
+
+.detail-badge.danger {
+  background: rgba(255, 98, 87, 0.12);
+  color: #e75a4d;
+}
+
 .info-card {
-  background: #fffbe6;
-  padding: 24rpx;
-  border-radius: 12rpx;
-  margin-bottom: 20rpx;
-  border-left: 8rpx solid #faad14;
+  padding: 28rpx;
+  background: #fff9eb;
+}
+
+.info-title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #b97b15;
 }
 
 .info-text {
-  font-size: 26rpx;
-  color: #d48806;
-  line-height: 1.5;
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  line-height: 1.7;
+  color: #9a6a12;
 }
 
-/* 错误卡片 */
-.error-card {
-  background: #fff1f0;
-  padding: 24rpx;
-  border-radius: 12rpx;
-  margin-bottom: 20rpx;
-  border-left: 8rpx solid #ff4d4f;
-}
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
 
-.error-text {
-  font-size: 26rpx;
-  color: #cf1322;
-  line-height: 1.5;
-}
-
-/* 按钮样式 */
-button[type="warn"] {
-  width: 100%;
-  background: #ff4d4f;
-  color: white;
-  border: none;
-  padding: 24rpx;
-  border-radius: 12rpx;
-  font-size: 32rpx;
-  font-weight: 500;
-}
-
-button[type="warn"]:disabled {
-  background: #cccccc;
-  color: #999999;
-}
-
-/* 加载状态 */
-.loading-text {
-  text-align: center;
-  color: #999;
-  font-size: 28rpx;
-  padding: 40rpx 0;
+  100% {
+    background-position: -200% 0;
+  }
 }

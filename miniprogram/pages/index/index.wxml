@@ -1,17 +1,44 @@
-<view class="container">
-  <view class="header">智能家居控制中心</view>
-  
+<view class="page">
+  <view class="hero">
+    <view class="hero-kicker">AutoHome</view>
+    <view class="hero-title">智能家居控制中心</view>
+    <view class="hero-desc">把宠物照护设备集中到一个更清晰、更轻快的控制面板里。</view>
+  </view>
+
+  <view class="section-head">
+    <view class="section-title">设备入口</view>
+    <view class="section-desc">选择你要管理的设备</view>
+  </view>
+
   <view class="menu-list">
-    <navigator url="/pages/feeder/feeder" class="menu-item">
-      <text>🐱 智能喂食机 (PetWant)</text>
+    <navigator url="/pages/feeder/feeder" class="menu-card feeder-card">
+      <view class="menu-top">
+        <view class="menu-icon">FEED</view>
+        <view class="menu-tag">Control</view>
+      </view>
+      <view class="menu-title">智能喂食器</view>
+      <view class="menu-subtitle">PetWant / CloudPets</view>
+      <view class="menu-desc">快速投喂、计划切换、日常操作更直接</view>
     </navigator>
-    
-    <navigator url="/pages/litterbox/litterbox" class="menu-item">
-      <text>🚽 智能猫厕所 (PetKit)</text>
+
+    <navigator url="/pages/litterbox/litterbox" class="menu-card litter-card">
+      <view class="menu-top">
+        <view class="menu-icon">CARE</view>
+        <view class="menu-tag">Monitor</view>
+      </view>
+      <view class="menu-title">智能猫砂盆</view>
+      <view class="menu-subtitle">PetKit</view>
+      <view class="menu-desc">清理控制、状态监测、今日统计一目了然</view>
     </navigator>
-    
-    <navigator url="/pages/scale/scale" class="menu-item">
-      <text>⚖️ 小米体脂秤</text>
+
+    <navigator url="/pages/scale/scale" class="menu-card scale-card">
+      <view class="menu-top">
+        <view class="menu-icon">BODY</view>
+        <view class="menu-tag">Live</view>
+      </view>
+      <view class="menu-title">智能体重秤</view>
+      <view class="menu-subtitle">Bluetooth Scale</view>
+      <view class="menu-desc">实时读数、用户归属、快速上传体重记录</view>
     </navigator>
   </view>
 </view>

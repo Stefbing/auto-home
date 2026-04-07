@@ -1,34 +1,46 @@
-<view class="container">
-  <view class="status-card">
-    <view class="weight-display">{{weight}} <text class="unit">kg</text></view>
-    <view class="status-text">{{isStabilized ? '已锁定' : '测量中...'}}</view>
-    <view class="device-name" wx:if="{{device}}">设备: {{device}}</view>
+<view class="page">
+  <view class="hero-card">
+    <view class="hero-label">Live Weight</view>
+    <view class="hero-title">智能体重秤</view>
+    <view class="hero-desc">实时读取体重，稳定后可直接归属到用户并上传记录。</view>
   </view>
 
-  <view class="controls">
-    <button type="primary" bindtap="startScan" loading="{{scanning}}">
-      {{scanning ? '扫描中...' : '开始连接体脂秤'}}
-    </button>
-    
-    <button type="default" bindtap="stopScan" wx:if="{{scanning}}" style="margin-top:10px">停止扫描</button>
-    
-    <view class="user-select">
-      <picker mode="selector" range="{{users}}" range-key="name" bindchange="bindUserChange">
-        <view class="picker-text">{{selectedUserIndex>=0 ? users[selectedUserIndex].name : '选择归属用户'}}</view>
-      </picker>
-      <view class="new-user">
-        <input placeholder="新增用户姓名" value="{{newUserName}}" bindinput="bindNewUserInput" />
-        <button bindtap="createUser">新增</button>
-      </view>
-    </view>
+  <view class="status-card">
+    <view class="status-label">{{isStabilized ? '数据已稳定' : '等待稳定读数'}}</view>
+    <view class="weight-display">{{weight}}<text class="unit"> kg</text></view>
+    <view class="status-text">{{scanning ? '蓝牙扫描中' : '尚未开始扫描'}}</view>
+    <view class="device-chip" wx:if="{{device}}">{{device}}</view>
+  </view>
 
-    <button type="warn" bindtap="uploadData" disabled="{{!isStabilized}}" style="margin-top:20px">
+  <view class="card">
+    <view class="section-title">设备连接</view>
+    <view class="button-stack">
+      <button class="primary-action" bindtap="startScan" loading="{{scanning}}">
+        {{scanning ? '扫描中' : '开始连接体重秤'}}
+      </button>
+      <button class="secondary-action" bindtap="stopScan" wx:if="{{scanning}}">停止扫描</button>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">用户归属</view>
+    <picker mode="selector" range="{{users}}" range-key="name" bindchange="bindUserChange">
+      <view class="picker-text">{{selectedUserIndex>=0 ? users[selectedUserIndex].name : '选择归属用户'}}</view>
+    </picker>
+    <view class="new-user">
+      <input class="name-input" placeholder="新增用户姓名" value="{{newUserName}}" bindinput="bindNewUserInput" />
+      <button class="mini-action" bindtap="createUser">新增</button>
+    </view>
+    <button class="upload-action" bindtap="uploadData" disabled="{{!isStabilized}}">
       上传数据
     </button>
   </view>
 
-  <view class="logs">
-    <view class="log-title">日志:</view>
-    <view wx:for="{{logs}}" wx:key="index" class="log-item">{{item}}</view>
+  <view class="card">
+    <view class="section-title">设备日志</view>
+    <view wx:if="{{logs.length > 0}}">
+      <view wx:for="{{logs}}" wx:key="index" class="log-item">{{item}}</view>
+    </view>
+    <view wx:else class="empty-log">暂无日志</view>
   </view>
 </view>
