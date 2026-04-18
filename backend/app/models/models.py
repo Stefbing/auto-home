@@ -7,6 +7,7 @@ from sqlalchemy import BIGINT, Column
 class User(SQLModel, table=True):
     """用户表 - 存储小程序用户信息"""
     __tablename__ = "user"
+    __table_args__ = {"extend_existing": True}  # 防止元数据重复注册
     
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True, max_length=32)  # UUID without hyphens
     phone_number: str = Field(max_length=20, unique=True, index=True)  # 手机号（唯一标识）
@@ -18,6 +19,7 @@ class User(SQLModel, table=True):
 class WeightRecord(SQLModel, table=True):
     """体重记录表"""
     __tablename__ = "weightrecord"
+    __table_args__ = {"extend_existing": True}  # 防止元数据重复注册
     
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True, max_length=32)  # UUID without hyphens
     user_id: str = Field(foreign_key="user.id", index=True, max_length=32)  # 关联用户 UUID
@@ -37,6 +39,7 @@ class WeightRecord(SQLModel, table=True):
 class SystemConfig(SQLModel, table=True):
     """系统配置表 - 加密存储敏感信息"""
     __tablename__ = "systemconfig"
+    __table_args__ = {"extend_existing": True}  # 防止元数据重复注册
     
     key: str = Field(primary_key=True, max_length=100)
     value: str
