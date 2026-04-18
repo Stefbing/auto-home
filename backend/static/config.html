@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统配置</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert.warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            color: #856404;
+            display: block;
+        }
+
+        .alert.success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            color: #155724;
+            display: block;
+        }
+
+        .alert.error {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+            display: block;
+        }
+
+        .config-section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .config-item {
+            margin-bottom: 20px;
+        }
+
+        .config-label {
+            display: block;
+            font-weight: 500;
+            color: #555;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .config-label .required {
+            color: #dc3545;
+            margin-left: 4px;
+        }
+
+        .config-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .config-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .config-input.encrypted {
+            background: #f8f9fa;
+        }
+
+        .config-hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .nav-link {
+            display: inline-block;
+            margin-top: 15px;
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .nav-link:hover {
+            opacity: 1;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚙️ 系统配置</h1>
+            <p>管理账号和数据库配置信息（敏感信息已加密存储）</p>
+            <a href="/" class="nav-link">← 返回首页</a>
+        </div>
+
+        <div class="content">
+            <div id="alertBox" class="alert"></div>
+
+            <div id="loadingState" class="loading">
+                <div class="spinner"></div>
+                <p>加载配置中...</p>
+            </div>
+
+            <form id="configForm" style="display: none;">
+                <div class="config-section">
+                    <div class="section-title">🐱 PetKit / CloudPets 账号</div>
+                    
+                    <div class="config-item">
+                        <label class="config-label">
+                            ACCOUNT (账号)
+                            <span class="required">*</span>
+                        </label>
+                        <input type="text" id="ACCOUNT" class="config-input encrypted" placeholder="例如：86-17757577548">
+                        <div class="config-hint">带区号的手机号，用于 PetKit 和 CloudPets 登录</div>
+                    </div>
+
+                    <div class="config-item">
+                        <label class="config-label">
+                            PASSWORD (密码)
+                            <span class="required">*</span>
+                        </label>
+                        <input type="password" id="PASSWORD" class="config-input encrypted" placeholder="请输入密码">
+                        <div class="config-hint">账号对应的密码</div>
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <div class="section-title">🏠 小米账号</div>
+                    
+                    <div class="config-item">
+                        <label class="config-label">
+                            XIAOMI_ACCOUNT (小米账号)
+                            <span class="required">*</span>
+                        </label>
+                        <input type="text" id="XIAOMI_ACCOUNT" class="config-input encrypted" placeholder="例如：18021518830">
+                        <div class="config-hint">小米账号手机号或邮箱</div>
+                    </div>
+
+                    <div class="config-item">
+                        <label class="config-label">
+                            XIAOMI_PASSWORD (小米密码)
+                            <span class="required">*</span>
+                        </label>
+                        <input type="password" id="XIAOMI_PASSWORD" class="config-input encrypted" placeholder="请输入密码">
+                        <div class="config-hint">小米账号密码</div>
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <div class="section-title">💾 数据库配置</div>
+                    
+                    <div class="config-item">
+                        <label class="config-label">
+                            DATABASE_URL (数据库连接)
+                            <span class="required">*</span>
+                        </label>
+                        <input type="text" id="DATABASE_URL" class="config-input encrypted" 
+                               placeholder="mysql+pymysql://user:pass@host:port/database">
+                        <div class="config-hint">支持 MySQL、PostgreSQL、SQLite</div>
+                    </div>
+
+                    <div class="config-item">
+                        <label class="config-label">PETKIT_DISABLE_SSL_VERIFY</label>
+                        <select id="PETKIT_DISABLE_SSL_VERIFY" class="config-input">
+                            <option value="false">false (默认)</option>
+                            <option value="true">true (仅开发环境)</option>
+                        </select>
+                        <div class="config-hint">遇到 SSL 证书错误时启用</div>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button type="button" class="btn btn-secondary" onclick="loadConfigs()">重置</button>
+                    <button type="submit" class="btn btn-primary">保存配置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/config';
+
+        // 页面加载时获取配置
+        window.addEventListener('DOMContentLoaded', () => {
+            loadConfigs();
+        });
+
+        async function loadConfigs() {
+            try {
+                showLoading(true);
+                hideAlert();
+
+                const response = await fetch(`${API_BASE}/list`);
+                if (!response.ok) throw new Error('加载配置失败');
+
+                const data = await response.json();
+                
+                // 填充表单
+                const configMap = {};
+                data.configs.forEach(config => {
+                    configMap[config.key] = config.value;
+                });
+
+                // 设置字段值
+                ['ACCOUNT', 'PASSWORD', 'XIAOMI_ACCOUNT', 'XIAOMI_PASSWORD', 'DATABASE_URL', 'PETKIT_DISABLE_SSL_VERIFY'].forEach(key => {
+                    const input = document.getElementById(key);
+                    if (input && configMap[key] !== undefined) {
+                        input.value = configMap[key];
+                    }
+                });
+
+                // 检查必需配置
+                if (!data.has_required_configs) {
+                    showAlert('warning', '⚠️ 检测到部分必需配置缺失，请完善配置信息');
+                } else {
+                    showAlert('success', '✅ 所有必需配置已完成');
+                }
+
+                showLoading(false);
+                document.getElementById('configForm').style.display = 'block';
+
+            } catch (error) {
+                console.error('加载配置失败:', error);
+                showAlert('error', '❌ 加载配置失败: ' + error.message);
+                showLoading(false);
+            }
+        }
+
+        // 保存配置
+        document.getElementById('configForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            try {
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                submitBtn.disabled = true;
+                submitBtn.textContent = '保存中...';
+
+                const configs = [
+                    'ACCOUNT', 'PASSWORD', 'XIAOMI_ACCOUNT', 'XIAOMI_PASSWORD', 
+                    'DATABASE_URL', 'PETKIT_DISABLE_SSL_VERIFY'
+                ];
+
+                // 逐个保存配置
+                for (const key of configs) {
+                    const input = document.getElementById(key);
+                    if (input) {
+                        const response = await fetch(API_BASE, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                key: key,
+                                value: input.value.trim(),
+                                is_encrypted: input.classList.contains('encrypted')
+                            })
+                        });
+
+                        if (!response.ok) {
+                            const error = await response.json();
+                            throw new Error(error.detail || `保存 ${key} 失败`);
+                        }
+                    }
+                }
+
+                showAlert('success', '✅ 配置保存成功！系统将使用新配置重启服务');
+                
+                // 3秒后刷新页面
+                setTimeout(() => {
+                    location.reload();
+                }, 3000);
+
+            } catch (error) {
+                console.error('保存配置失败:', error);
+                showAlert('error', '❌ 保存失败: ' + error.message);
+            } finally {
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                submitBtn.disabled = false;
+                submitBtn.textContent = '保存配置';
+            }
+        });
+
+        function showAlert(type, message) {
+            const alertBox = document.getElementById('alertBox');
+            alertBox.className = `alert ${type}`;
+            alertBox.textContent = message;
+            alertBox.style.display = 'block';
+        }
+
+        function hideAlert() {
+            document.getElementById('alertBox').style.display = 'none';
+        }
+
+        function showLoading(show) {
+            document.getElementById('loadingState').style.display = show ? 'block' : 'none';
+        }
+    </script>
+</body>
+</html>

@@ -1,4 +1,49 @@
 <view class="page">
+  <!-- 未登录状态 - 显示简单登录表单 -->
+  <view wx:if="{{!userInfo}}" class="login-container">
+    <view class="hero">
+      <view class="hero-kicker">AutoHome</view>
+      <view class="hero-title">智能家居控制中心</view>
+      <view class="hero-desc">登录后即可管理您的智能设备</view>
+    </view>
+    
+    <view class="login-form">
+      <view class="form-item">
+        <text class="label">手机号</text>
+        <input class="input" type="number" placeholder="请输入手机号" model:value="{{phoneNumber}}" maxlength="11" />
+      </view>
+      
+      <button class="login-btn" bindtap="onLogin">
+        <text>登录 / 注册</text>
+      </button>
+    </view>
+  </view>
+
+  <!-- 已登录但未配置 - 显示配置引导 -->
+  <view wx:elif="{{!hasConfigured}}" class="config-guide">
+    <view class="hero">
+      <view class="hero-kicker">欢迎，{{userInfo.nickname}}</view>
+      <view class="hero-title">完成初始配置</view>
+      <view class="hero-desc">请输入设备账号密码以启用服务</view>
+    </view>
+    
+    <view class="config-form">
+      <view class="form-item">
+        <text class="label">PetKit/CloudPets 账号</text>
+        <input class="input" placeholder="例如：86-17757577548" model:value="{{account}}" />
+      </view>
+      
+      <view class="form-item">
+        <text class="label">密码</text>
+        <input class="input" type="password" placeholder="请输入密码" model:value="{{password}}" />
+      </view>
+      
+      <button class="submit-btn" bindtap="onSubmitConfig">保存配置</button>
+    </view>
+  </view>
+
+  <!-- 已配置 - 显示正常首页 -->
+  <view wx:else>
   <view class="hero">
     <view class="hero-kicker">AutoHome</view>
     <view class="hero-title">智能家居控制中心</view>
@@ -40,5 +85,6 @@
       <view class="menu-subtitle">Bluetooth Scale</view>
       <view class="menu-desc">实时读数、用户归属、快速上传体重记录</view>
     </navigator>
+  </view>
   </view>
 </view>

@@ -134,6 +134,12 @@ class DataRefreshTask:
         try:
             if not self.cloudpets_service:
                 return
+            
+            # 检查是否有有效的 token（避免无配置时不断重试）
+            auth_header = self.cloudpets_service.client.headers.get("authorization", "")
+            if not auth_header:
+                logger.debug("Skipping CloudPets refresh: no authentication token")
+                return
                 
             logger.info("Refreshing CloudPets data...")
             

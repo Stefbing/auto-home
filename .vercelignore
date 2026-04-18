@@ -5,3 +5,7 @@ dist
 .trae
 .log
 .figma
+.venv
+.idea
+*.db
+__pycache__

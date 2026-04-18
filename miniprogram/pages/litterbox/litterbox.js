@@ -157,10 +157,31 @@ Page({
       },
       fail: err => {
         console.error('获取统计数据失败:', err);
-        wx.showToast({
-          title: '获取数据失败',
-          icon: 'error'
-        });
+        
+        // 检查是否是 503 服务未初始化
+        if (err.statusCode === 503) {
+          wx.showModal({
+            title: '服务未配置',
+            content: 'PetKit 猫厕所功能需要配置账号密码\n\n请在首页完成初始配置',
+            showCancel: true,
+            cancelText: '取消',
+            confirmText: '去配置',
+            success: (res) => {
+              if (res.confirm) {
+                // 跳转到首页进行配置
+                wx.switchTab({
+                  url: '/pages/index/index'
+                });
+              }
+            }
+          });
+        } else {
+          wx.showToast({
+            title: '获取数据失败',
+            icon: 'error'
+          });
+        }
+        
         this.setData({
           loading: false,
           refreshing: false

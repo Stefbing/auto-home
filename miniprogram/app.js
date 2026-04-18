@@ -1,14 +1,8 @@
 App({
   globalData: {
-    // 开发环境配置 - 请根据实际情况修改
-    // 方案1: 局域网访问（手机和电脑同一网络）
-    // apiBaseUrl: "http://192.168.1.100:8000", // 替换为你的电脑IP
-    
-    // 方案2: 内网穿透服务（如ngrok、frp等）
-    apiBaseUrl: "https://auto-home-three.vercel.app",
-    
-    // 方案3: 本地开发（仅模拟器可用）
-    // apiBaseUrl: "http://localhost:8000",
+    // API 基础地址配置
+    // 真机调试需要使用电脑IP或内网穿透地址
+    apiBaseUrl: "http://192.168.1.4:8002", // 以太网 IP
     
     // 当前环境标识
     environment: "development" // development | production

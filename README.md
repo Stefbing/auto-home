@@ -25,9 +25,7 @@ AutoHome 是一个轻量级的家庭智能设备聚合控制平台，旨在通�
 
 *   **后端**: Python 3.12 (FastAPI, SQLModel, Uvicorn)
 *   **前端**: 微信小程序 (原生开发)
-*   **数据库**: 
-    *   本地开发：SQLite (轻量级，零配置)
-    *   生产环境：PostgreSQL (AWS RDS)
+*   **数据库**: MySQL 8.0+
 *   **部署**: Vercel Serverless / 本地服务器
 
 ## 🚀 快速开始
@@ -66,23 +64,21 @@ pip install -r requirements.txt
 ACCOUNT=86-17757577548
 PASSWORD=your_password
 
+# ========== 小米账号（用于体重推送）==========
+XIAOMI_ACCOUNT=your_xiaomi_account
+XIAOMI_PASSWORD=your_xiaomi_password
+
 # ========== PetKit 特殊配置 ==========
 # 如果遇到 SSL 证书验证错误，可设置为 true（仅限开发环境）
 PETKIT_DISABLE_SSL_VERIFY=false
 
-
-# ========== 数据库配置（PostgreSQL）==========
-# 本地开发可使用 SQLite
-DATABASE_URL=sqlite:///./auto_home.db
-
-# 生产环境使用 PostgreSQL
-# DATABASE_URL=postgresql://user:password@host:port/dbname
-
+# ========== 数据库配置（MySQL - 必填）==========
+DATABASE_URL=mysql+pymysql://user:password@host:3306/database
 ```
 
 **注意**：
 - CloudPets 服务会自动处理 `86-` 前缀
-- 如果使用 AWS RDS PostgreSQL，需要配置安全组允许访问
+- DATABASE_URL 为必填项，必须配置有效的 MySQL 连接地址
 - 时区警告可以忽略，不影响功能
 
 #### 步骤 4: 启动后端服务
@@ -137,7 +133,7 @@ INFO:     Application startup complete.
 #### 方法 B: Git 自动部署 (推荐生产)
 1.  将代码推送到 GitHub。
 2.  在 Vercel 控制台导入项目。
-3.  配置环境变量 (`ACCOUNT`, `PASSWORD`, `POSTGRES_URL` 等)。
+3.  配置环境变量 (`ACCOUNT`, `PASSWORD`, `DATABASE_URL` 等)。
 4.  点击 Deploy。
 
 ## 📁 目录结构
@@ -165,14 +161,14 @@ PETKIT_DISABLE_SSL_VERIFY=true
 ```
 *注意：这仅适用于开发环境，生产环境应修复 SSL 证书*
 
-**Q: 数据库连接超时？**
+**Q: 数据库连接失败？**
 ```
-(psycopg2.OperationalError) connection to server timed out
+Can't connect to MySQL server
 ```
 **解决**：
-1. 检查 PostgreSQL 服务是否运行
-2. 确认安全组配置（AWS RDS 需要开放 5432 端口）
-3. 本地开发可临时使用 SQLite：`DATABASE_URL=sqlite:///./auto_home.db`
+1. 检查 MySQL 服务是否运行
+2. 确认 DATABASE_URL 配置正确
+3. 检查防火墙/安全组配置（云数据库需开放 3306 端口）
 
 **Q: integer out of range 错误？**
 ```
@@ -192,7 +188,7 @@ UPDATE systemconfig SET updated_at = updated_at / 1000 WHERE updated_at > 100000
 *   **CloudPets 控制失败 (401)？**
     *   后端会自动尝试重新登录并更新 Token。如果持续失败，请检查账号密码是否正确。
 *   **Vercel 部署报错 "Read-only file system"？**
-    *   这是因为 Serverless 环境不支持写入本地 SQLite 文件。本项目已配置在 Vercel 环境下使用内存数据库或 Postgres。
+    *   这是因为 Serverless 环境不支持写入本地文件。本项目已配置在 Vercel 环境下使用 MySQL 数据库。
 
 ### 网络相关
 

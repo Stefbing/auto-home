@@ -5,7 +5,7 @@ pydantic>=2.5.0
 
 # 数据库相关
 sqlmodel>=0.0.14
-psycopg2-binary>=2.9.9
+pymysql>=1.1.0
 python-dotenv>=1.0.0
 
 # HTTP 客户端

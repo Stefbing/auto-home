@@ -20,9 +20,10 @@ from sqlmodel import Session, select
 from .services.petkit_service import PetKitService
 from .services.cloudpets_service import cloudpets_service, FeedingPlan as CloudPetsPlan
 from .services.xiaomi_service import xiaomi_service
-from .models.models import User, WeightRecord, FeedingPlan
+from .models.models import User, WeightRecord, SystemConfig
 from .models.db import get_session, init_db
 from .utils.cache_manager import cache_manager
+from .utils.config_encryptor import ConfigEncryptor
 from .scheduler.task_scheduler import scheduler, create_data_refresh_task
 
 load_dotenv()
@@ -65,10 +66,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("✗ Xiaomi Cloud 服务初始化失败，体重推送功能将不可用")
 
-    # 统一环境变量 ACCOUNT 和 PASSWORD
-    # 注意：PetKit 通常需要带区号 (如 86-)，而 CloudPets 会自动去除
-    username = os.getenv("ACCOUNT")
-    password = os.getenv("PASSWORD")
+    # 统一从数据库读取 ACCOUNT 和 PASSWORD
+    # 注意：PetKit 通常需要带区号 (如 86-)
+    from backend.app.utils.config_manager import get_config_from_db
+    
+    username = get_config_from_db("ACCOUNT")
+    password = get_config_from_db("PASSWORD")
 
     if username and password:
         logger.info(f"正在初始化 PetKit 服务：{username}...")
@@ -81,7 +84,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"PetKit 连接失败：{e}")
             logger.error(f"✗ PetKit 初始化失败，耗时：{time.time() - petkit_start:.2f}秒")
     else:
-        logger.warning("警告：未检测到 PETKIT 环境变量，相关 API 将不可用")
+        logger.warning("警告：未检测到 PETKIT 配置（数据库或环境变量），相关 API 将不可用")
     
     # 初始化数据刷新任务
     logger.info("正在初始化数据刷新任务...")
@@ -144,7 +147,7 @@ async def lifespan(app: FastAPI):
 # --- 2. 应用配置 ---
 app = FastAPI(
     title="Smart Home Controller",
-    version="0.2.1",
+    version="0.3.0",
     lifespan=lifespan
 )
 
@@ -170,7 +173,10 @@ app.add_middleware(
 def get_petkit():
     """快速获取已登录的 PetKit 实例"""
     if not state.petkit:
-        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
+        raise HTTPException(
+            status_code=503, 
+            detail="PetKit 服务未初始化，请在小程序中配置 ACCOUNT 和 PASSWORD"
+        )
     return state.petkit
 
 # --- 4. 数据模型 (Schema) ---
@@ -197,6 +203,10 @@ async def feeder_plans_page():
 @app.get("/scale")
 async def scale_page():
     return FileResponse(os.path.join(STATIC_DIR, 'scale.html'))
+
+@app.get("/config")
+async def config_page():
+    return FileResponse(os.path.join(STATIC_DIR, 'config.html'))
 
 @app.get("/api/cache/status")
 async def cache_status():
@@ -435,16 +445,10 @@ async def cloudpets_feeder_status():
     """获取喂食器实时状态"""
     return await cloudpets_service.get_feeder_status()
 
-# --- PetWant (Placeholder - Deprecated) ---
+# --- PetWant (Deprecated) ---
 @app.post("/api/petwant/feed")
 async def petwant_feed():
     return {"status": "error", "message": "Use /api/cloudpets/feed instead."}
-
-@app.get("/api/petwant/plans", response_model=List[FeedingPlan])
-def get_plans(session: Session = Depends(get_session)):
-    # Local plans for compatibility
-    plans = session.exec(select(FeedingPlan)).all()
-    return plans
 
 # --- Scale & User 路由 ---
 @app.get("/api/users", response_model=List[User])
@@ -609,6 +613,240 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
         asyncio.create_task(push_to_xiaomi(record, user if record.impedance else None))
     
     return result
+
+# --- 用户认证路由 ---
+class UserLoginRequest(BaseModel):
+    phone_number: str
+    nickname: Optional[str] = None
+    gender: str = "male"
+    age: int = 25
+    height: int = 175
+
+class UserLoginResponse(BaseModel):
+    user_id: str  # UUID
+    phone_number: str
+    nickname: Optional[str] = None
+    has_configured: bool  # 是否已配置账号密码
+
+@app.post("/api/auth/login")
+def user_login(request: UserLoginRequest, session: Session = Depends(get_session)):
+    """
+    小程序手机号登录/注册
+    - 首次登录自动创建用户
+    - 返回用户信息和配置状态
+    """
+    try:
+        # 查找或创建用户
+        user = session.exec(
+            select(User).where(User.phone_number == request.phone_number)
+        ).first()
+        
+        if not user:
+            # 新用户，SQLModel 会自动生成 UUID
+            user = User(
+                phone_number=request.phone_number,
+                nickname=request.nickname or f"用户{request.phone_number[-4:]}",
+                gender=request.gender,
+                age=request.age,
+                height=request.height
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            logger.info(f"新用户注册: {request.phone_number}, ID: {user.id}")
+        else:
+            # 更新用户信息（可选）
+            if request.nickname:
+                user.nickname = request.nickname
+            if request.gender != user.gender:
+                user.gender = request.gender
+            if request.age != user.age:
+                user.age = request.age
+            if request.height != user.height:
+                user.height = request.height
+            session.add(user)
+            session.commit()
+        
+        # 检查是否已配置必需的配置项
+        required_configs = ["ACCOUNT", "PASSWORD"]
+        configs = session.exec(select(SystemConfig)).all()
+        configured_keys = {c.key for c in configs}
+        has_configured = all(key in configured_keys for key in required_configs)
+        
+        return UserLoginResponse(
+            user_id=user.id,
+            phone_number=user.phone_number,
+            nickname=user.nickname,
+            has_configured=has_configured
+        )
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"登录失败: {str(e)}")
+
+@app.get("/api/auth/check-config")
+def check_user_config(session: Session = Depends(get_session)):
+    """
+    检查当前用户是否已配置账号密码
+    用于 Web 端访问控制
+    """
+    try:
+        required_configs = ["ACCOUNT", "PASSWORD"]
+        configs = session.exec(select(SystemConfig)).all()
+        configured_keys = {c.key for c in configs}
+        has_configured = all(key in configured_keys for key in required_configs)
+        
+        return {
+            "has_configured": has_configured,
+            "message": "配置完整" if has_configured else "请先在小程序中配置账号密码"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"检查配置失败: {str(e)}")
+
+@app.post("/api/auth/reinit-services")
+async def reinit_services():
+    """
+    重新初始化服务（用户配置账号后调用）
+    - 重新加载 CloudPets 配置并登录
+    - 重新加载 Xiaomi 配置并登录
+    """
+    try:
+        # 重新导入配置（从数据库读取）
+        from backend.app.utils.config_manager import get_config_from_db
+        import importlib
+        import backend.app.services.cloudpets_service as cp_module
+        import backend.app.services.xiaomi_service as xm_module
+        
+        # 重新加载模块以获取新配置
+        importlib.reload(cp_module)
+        importlib.reload(xm_module)
+        
+        # 重新初始化 CloudPets
+        logger.info("Re-initializing CloudPets service...")
+        cp_success = await cloudpets_service.initialize()
+        
+        # 重新初始化 Xiaomi
+        logger.info("Re-initializing Xiaomi service...")
+        xm_success = await xiaomi_service.initialize()
+        if xm_success:
+            state.xiaomi_initialized = True
+        
+        return {
+            "status": "success",
+            "cloudpets_initialized": cp_success,
+            "xiaomi_initialized": xm_success,
+            "message": "服务重新初始化完成"
+        }
+    except Exception as e:
+        logger.error(f"Failed to reinitialize services: {e}")
+        raise HTTPException(status_code=500, detail=f"重新初始化失败: {str(e)}")
+
+# --- System Config 路由 ---
+class ConfigItem(BaseModel):
+    key: str
+    value: str
+    is_encrypted: bool = False
+
+class ConfigListResponse(BaseModel):
+    configs: list[dict]
+    has_required_configs: bool
+
+@app.get("/api/config/list")
+def get_config_list(session: Session = Depends(get_session)):
+    """获取所有配置项（加密字段返回空字符串）"""
+    try:
+        configs = session.exec(select(SystemConfig)).all()
+        config_list = []
+        for config in configs:
+            config_dict = {
+                "key": config.key,
+                "value": config.value if not config.is_encrypted else "",
+                "is_encrypted": config.is_encrypted,
+                "updated_at": config.updated_at
+            }
+            config_list.append(config_dict)
+        
+        # 检查是否有必需的配置
+        required_keys = ["ACCOUNT", "PASSWORD", "XIAOMI_ACCOUNT", "XIAOMI_PASSWORD", "DATABASE_URL"]
+        existing_keys = [c.key for c in configs]
+        has_required = all(key in existing_keys for key in required_keys)
+        
+        return ConfigListResponse(
+            configs=config_list,
+            has_required_configs=has_required
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取配置列表失败: {str(e)}")
+
+@app.get("/api/config/{key}")
+def get_config_value(key: str, session: Session = Depends(get_session)):
+    """获取单个配置值（自动解密）"""
+    try:
+        config = session.get(SystemConfig, key)
+        if not config:
+            raise HTTPException(status_code=404, detail=f"配置项 {key} 不存在")
+        
+        value = config.value
+        if config.is_encrypted:
+            value = ConfigEncryptor.decrypt(value)
+        
+        return {"key": key, "value": value, "is_encrypted": config.is_encrypted}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取配置失败: {str(e)}")
+
+@app.post("/api/config")
+def save_config(config_item: ConfigItem, session: Session = Depends(get_session)):
+    """保存配置项（自动加密敏感信息）"""
+    try:
+        # 判断是否需要加密
+        sensitive_keys = ["ACCOUNT", "PASSWORD", "XIAOMI_ACCOUNT", "XIAOMI_PASSWORD"]
+        should_encrypt = config_item.key in sensitive_keys or config_item.is_encrypted
+        
+        value_to_store = config_item.value
+        if should_encrypt and config_item.value:
+            value_to_store = ConfigEncryptor.encrypt(config_item.value)
+        
+        # 更新或创建配置
+        existing_config = session.get(SystemConfig, config_item.key)
+        if existing_config:
+            existing_config.value = value_to_store
+            existing_config.is_encrypted = should_encrypt
+            existing_config.updated_at = int(time.time() * 1000)
+        else:
+            new_config = SystemConfig(
+                key=config_item.key,
+                value=value_to_store,
+                is_encrypted=should_encrypt,
+                updated_at=int(time.time() * 1000)
+            )
+            session.add(new_config)
+        
+        session.commit()
+        logger.info(f"配置已保存: {config_item.key} (加密={should_encrypt})")
+        
+        return {"status": "success", "message": f"配置 {config_item.key} 已保存"}
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"保存配置失败: {str(e)}")
+
+@app.delete("/api/config/{key}")
+def delete_config(key: str, session: Session = Depends(get_session)):
+    """删除配置项"""
+    try:
+        config = session.get(SystemConfig, key)
+        if not config:
+            raise HTTPException(status_code=404, detail=f"配置项 {key} 不存在")
+        
+        session.delete(config)
+        session.commit()
+        
+        return {"status": "success", "message": f"配置 {key} 已删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"删除配置失败: {str(e)}")
 
 async def push_to_xiaomi(record: WeightRecord, user: Optional[User] = None):
     """异步推送体重数据到小米云"""

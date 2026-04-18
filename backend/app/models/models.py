@@ -1,18 +1,24 @@
 from sqlmodel import SQLModel, Field
 from typing import Optional
 import time
-from sqlalchemy import BIGINT
+import uuid
+from sqlalchemy import BIGINT, Column
 
 class User(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    gender: str = "male"  # male/female
-    age: int = 25
-    height: int = 175    # cm
+    """用户表 - 存储小程序用户信息"""
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True, max_length=32)  # UUID without hyphens
+    phone_number: str = Field(max_length=20, unique=True, index=True)  # 手机号（唯一标识）
+    nickname: Optional[str] = Field(default=None, max_length=100)  # 昵称
+    gender: str = Field(default="male", max_length=10)  # male/female
+    age: int = Field(default=25)
+    height: int = Field(default=175)  # cm
 
 class WeightRecord(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    """体重记录表"""
+    __tablename__ = "weightrecord"
+    
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True, max_length=32)  # UUID without hyphens
+    user_id: str = Field(foreign_key="user.id", index=True, max_length=32)  # 关联用户 UUID
     weight: float
     impedance: Optional[int] = None
     bmi: Optional[float] = None
@@ -22,28 +28,15 @@ class WeightRecord(SQLModel, table=True):
     visceral_fat: Optional[float] = None
     bone_mass: Optional[float] = None
     bmr: Optional[float] = None
-    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})
-
-class FeedingPlan(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    time: str
-    amount: int
-    enabled: bool = True
+    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column=Column(BIGINT, nullable=False, index=True))
+    xiaomi_pushed: bool = Field(default=False)
+    xiaomi_push_time: Optional[int] = Field(default=None, sa_column=Column(BIGINT))
 
 class SystemConfig(SQLModel, table=True):
-    key: str = Field(primary_key=True)
+    """系统配置表 - 加密存储敏感信息"""
+    __tablename__ = "systemconfig"
+    
+    key: str = Field(primary_key=True, max_length=100)
     value: str
-    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})  # 毫秒时间戳
-
-class DeviceCache(SQLModel, table=True):
-    """设备缓存表 - 存储高频查询的设备统计数据"""
-    
-    __tablename__ = "device_cache"
-    
-    device_id: str = Field(primary_key=True, max_length=100)
-    device_type: str = Field(max_length=20)
-    cache_key: str = Field(max_length=100)
-    cache_value: str = Field(default="{}")  # JSON 字符串
-    expires_at: int = Field(sa_column={'type': BIGINT})  # 过期时间戳（毫秒）
-    created_at: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})
-    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column={'type': BIGINT})
+    is_encrypted: bool = Field(default=False)  # 标记是否加密存储
+    updated_at: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column=Column(BIGINT, nullable=False))  # 毫秒时间戳

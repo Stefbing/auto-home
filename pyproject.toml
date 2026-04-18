@@ -10,6 +10,7 @@ dependencies = [
     "pypetkitapi",
     "python-dotenv",
     "sqlmodel",
+    "pymysql",
     "aiohttp",
     "httpx",
     "requests",

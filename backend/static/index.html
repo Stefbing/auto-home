@@ -263,7 +263,10 @@
 <body>
     <div class="app-header">
         <h1 class="app-title">我的智能家</h1>
-        <button class="add-btn" onclick="showDiscoveryModal()"><i class="fas fa-plus"></i></button>
+        <div style="display: flex; gap: 10px;">
+            <button class="add-btn" onclick="location.href='/config'" title="系统配置"><i class="fas fa-cog"></i></button>
+            <button class="add-btn" onclick="showDiscoveryModal()"><i class="fas fa-plus"></i></button>
+        </div>
     </div>
 
     <div class="container" id="device-sections">

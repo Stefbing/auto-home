@@ -1,9 +1,7 @@
 from sqlmodel import SQLModel, create_engine, Session
-from sqlalchemy.pool import StaticPool
 import os
 import time
 from dotenv import load_dotenv
-import tempfile
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,39 +19,26 @@ else:
     load_dotenv()
     logger.info("Loaded .env from current directory")
 
-# 优先使用 SQLite，除非明确配置了 PostgreSQL
-# 检测逻辑：如果没有 DATABASE_URL 或 VERCEL 环境，默认使用 SQLite
-is_serverless = os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("R_LIBS_USER")
+# 获取 MySQL 数据库连接地址
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    raise EnvironmentError(
+        "DATABASE_URL environment variable is required. "
+        "Please set it in .env file or system environment. "
+        "Example: mysql+pymysql://user:password@host:3306/database"
+    )
 
-if is_serverless:
-    logger.info("Detected Serverless Environment.")
-    database_url = os.getenv("POSTGRES_URL")
-    if not database_url:
-        logger.warning("No POSTGRES_URL found. Falling back to in-memory SQLite database.")
-        database_url = "sqlite:///:memory:"
-else:
-    # 本地开发默认使用 SQLite 文件数据库
-    database_url = os.getenv("DATABASE_URL") or "sqlite:///./auto_home.db"
-    logger.info(f"Using SQLite database: {database_url}")
+logger.info(f"Database URL: {database_url.split('://')[0]}://***")
 
-logger.info(f"Database URL: {database_url.split('://')[0]}://***")  # Mask password if any
-
-# SQLAlchemy 需要 postgresql:// 协议头，Vercel 默认给的是 postgres://
-if database_url and database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
-
-# SQLite 需要特殊参数 check_same_thread=False
-connect_args = {"check_same_thread": False} if "sqlite" in database_url else {}
-
-# 如果是 SQLite 内存数据库，必须使用 StaticPool 保持连接不关闭，否则数据会丢失
-poolclass = None
-if "sqlite" in database_url and ":memory:" in database_url:
-    poolclass = StaticPool
-    logger.info("Using StaticPool for in-memory SQLite database.")
+# 确保连接使用 utf8mb4 字符集（支持中文）
+if '?' not in database_url:
+    database_url += '?charset=utf8mb4'
+elif 'charset' not in database_url.lower():
+    database_url += '&charset=utf8mb4'
 
 logger.info("正在创建数据库引擎...")
 engine_start = time.time()
-engine = create_engine(database_url, echo=False, connect_args=connect_args, poolclass=poolclass)
+engine = create_engine(database_url, echo=False)
 logger.info(f"✓ 数据库引擎创建完成，耗时：{time.time() - engine_start:.2f}秒")
 
 def init_db():

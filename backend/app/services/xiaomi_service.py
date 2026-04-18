@@ -16,8 +16,11 @@ class XiaomiCloudService:
     """小米云服务 - 用于获取 Token 和推送数据到小米运动"""
 
     def __init__(self):
-        self.username = os.getenv("XIAOMI_ACCOUNT")
-        self.password = os.getenv("XIAOMI_PASSWORD")
+        # 优先从数据库获取，其次从环境变量
+        from ..utils.config_manager import get_config_from_db
+        # 从数据库读取配置（不再使用环境变量）
+        self.username = get_config_from_db("XIAOMI_ACCOUNT")
+        self.password = get_config_from_db("XIAOMI_PASSWORD")
         self._session = requests.session()
         self._ssecurity = None
         self.userId = None

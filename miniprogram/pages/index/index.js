@@ -1,8 +1,168 @@
+const app = getApp()
+
 Page({
   data: {
-    
+    userInfo: null,
+    hasConfigured: false,
+    account: '',
+    password: '',
+    phoneNumber: '' // 用于登录
   },
+  
   onLoad: function (options) {
+    this.checkLoginStatus()
+  },
+  
+  onShow: function() {
+    // 每次显示页面时检查配置状态
+    if (this.data.userInfo) {
+      this.checkConfigStatus()
+    }
+  },
+  
+  // 检查登录状态
+  checkLoginStatus() {
+    const userInfo = wx.getStorageSync('userInfo')
+    if (userInfo) {
+      this.setData({ userInfo })
+      this.checkConfigStatus()
+    }
+  },
+  
+  // 检查配置状态
+  async checkConfigStatus() {
+    try {
+      const res = await wx.request({
+        url: `${app.globalData.apiBaseUrl}/api/auth/check-config`,
+        method: 'GET'
+      })
+      
+      if (res.statusCode === 200) {
+        this.setData({ hasConfigured: res.data.has_configured })
+      }
+    } catch (err) {
+      console.error('检查配置失败:', err)
+    }
+  },
+  
+  // 手机号登录/注册
+  async onLogin() {
+    const { phoneNumber } = this.data
     
+    if (!phoneNumber || phoneNumber.length !== 11) {
+      wx.showToast({ title: '请输入正确的手机号', icon: 'none' })
+      return
+    }
+    
+    console.log('开始登录，手机号:', phoneNumber)
+    console.log('API地址:', app.globalData.apiBaseUrl)
+    
+    wx.showLoading({ title: '登录中...' })
+    
+    try {
+      const res = await new Promise((resolve, reject) => {
+        wx.request({
+          url: `${app.globalData.apiBaseUrl}/api/auth/login`,
+          method: 'POST',
+          header: { 'Content-Type': 'application/json' },
+          data: {
+            phone_number: phoneNumber,
+            nickname: `用户${phoneNumber.slice(-4)}`
+          },
+          success: resolve,
+          fail: reject
+        })
+      })
+      
+      console.log('登录响应:', res)
+      
+      if (res.statusCode === 200) {
+        const userInfo = res.data
+        console.log('用户信息:', userInfo)
+        wx.setStorageSync('userInfo', userInfo)
+        this.setData({ userInfo, hasConfigured: userInfo.has_configured })
+        
+        wx.hideLoading()
+        wx.showToast({ title: '登录成功', icon: 'success' })
+        
+        // 如果未配置，引导配置
+        if (!userInfo.has_configured) {
+          setTimeout(() => {
+            wx.showToast({ 
+              title: '请完成初始配置', 
+              icon: 'none',
+              duration: 2000
+            })
+          }, 1500)
+        }
+      } else {
+        console.error('登录失败，状态码:', res.statusCode)
+        console.error('错误详情:', res.data)
+        throw new Error(`HTTP ${res.statusCode}`)
+      }
+    } catch (err) {
+      wx.hideLoading()
+      console.error('登录异常:', err)
+      wx.showToast({ 
+        title: err.errMsg || '登录失败，请重试', 
+        icon: 'none',
+        duration: 3000
+      })
+    }
+  },
+  
+  // 提交配置
+  async onSubmitConfig() {
+    const { account, password } = this.data
+    
+    if (!account || !password) {
+      wx.showToast({ title: '请填写完整信息', icon: 'none' })
+      return
+    }
+    
+    wx.showLoading({ title: '保存中...' })
+    
+    try {
+      // 保存 ACCOUNT
+      await wx.request({
+        url: `${app.globalData.apiBaseUrl}/api/config`,
+        method: 'POST',
+        header: { 'Content-Type': 'application/json' },
+        data: {
+          key: 'ACCOUNT',
+          value: account,
+          is_encrypted: true
+        }
+      })
+      
+      // 保存 PASSWORD
+      await wx.request({
+        url: `${app.globalData.apiBaseUrl}/api/config`,
+        method: 'POST',
+        header: { 'Content-Type': 'application/json' },
+        data: {
+          key: 'PASSWORD',
+          value: password,
+          is_encrypted: true
+        }
+      })
+      
+      // 重新初始化服务
+      await wx.request({
+        url: `${app.globalData.apiBaseUrl}/api/auth/reinit-services`,
+        method: 'POST'
+      })
+      
+      wx.hideLoading()
+      wx.showToast({ title: '配置成功', icon: 'success' })
+      
+      // 更新状态
+      this.setData({ hasConfigured: true })
+      
+    } catch (err) {
+      wx.hideLoading()
+      wx.showToast({ title: '配置失败，请重试', icon: 'none' })
+      console.error('配置错误:', err)
+    }
   }
 })

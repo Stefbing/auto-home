@@ -19,9 +19,17 @@ logger = logging.getLogger(__name__)
 
 class PetKitService:
     def __init__(self, username=None, password=None, region="CN", timezone="Asia/Shanghai"):
-        # 优先使用传入的参数，否则从环境变量获取
-        self.username = username or os.getenv("ACCOUNT")
-        self.password = password or os.getenv("PASSWORD")
+        # 优先使用传入的参数，否则从数据库获取，最后从环境变量获取
+        if username and password:
+            self.username = username
+            self.password = password
+        else:
+            # 尝试从数据库获取
+            from ..utils.config_manager import get_config_from_db
+            # 从数据库读取配置（不再使用环境变量）
+            self.username = get_config_from_db("ACCOUNT")
+            self.password = get_config_from_db("PASSWORD")
+        
         self.region = region
         self.timezone = timezone
         self.session = None

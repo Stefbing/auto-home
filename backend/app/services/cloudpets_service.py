@@ -18,8 +18,11 @@ DEVICE_ID = "336704"
 
 # 统一账号密码配置 (ACCOUNT/PASSWORD)
 # CloudPets 需要去除 "86-" 或 "+86" 前缀
-ACCOUNT = os.getenv("ACCOUNT")
-PASSWORD = os.getenv("PASSWORD")
+from ..utils.config_manager import get_config_from_db
+
+# 从数据库读取配置（不再使用环境变量）
+ACCOUNT = get_config_from_db("ACCOUNT")
+PASSWORD = get_config_from_db("PASSWORD")
 
 CLOUDPETS_ACCOUNT = ACCOUNT
 if CLOUDPETS_ACCOUNT:
@@ -52,16 +55,28 @@ class CloudPetsService:
         # 不再同步加载，改为在 initialize 中异步加载
 
     async def initialize(self):
-        """Initialize service: load token from DB, or login if missing"""
+        """Initialize service: load token from DB, or login if credentials available"""
         logger.info("Initializing CloudPets Service...")
-        if not await self._load_token_from_db():
-            logger.info("No token found in DB, attempting initial login...")
-            if await self._login():
-                logger.info("Initial login successful")
-            else:
-                logger.error("Initial login failed")
-        else:
+        
+        # Try to load existing token from database
+        if await self._load_token_from_db():
             logger.info("CloudPets token loaded from DB")
+            return True
+        
+        # No token in DB, check if credentials are configured
+        if not CLOUDPETS_ACCOUNT or not CLOUDPETS_PASSWORD:
+            logger.info("No CloudPets credentials configured, skipping initialization")
+            logger.info("User needs to configure ACCOUNT/PASSWORD via mini-program")
+            return False
+        
+        # Credentials available, attempt login
+        logger.info("No token found in DB, attempting initial login...")
+        if await self._login():
+            logger.info("Initial login successful")
+            return True
+        else:
+            logger.error("Initial login failed")
+            return False
 
     async def _load_token_from_db(self) -> bool:
         """Try to load the latest token from database"""
