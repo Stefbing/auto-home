@@ -200,6 +200,13 @@ page {
   color: #18263a;
 }
 
+.form-item .hint {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #7e8ca0;
+}
+
 .submit-btn {
   margin-top: 20rpx;
   width: 100%;

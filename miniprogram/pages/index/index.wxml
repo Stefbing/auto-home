@@ -29,8 +29,9 @@
     
     <view class="config-form">
       <view class="form-item">
-        <text class="label">PetKit/CloudPets 账号</text>
+        <text class="label">设备账号</text>
         <input class="input" placeholder="例如：86-17757577548" model:value="{{account}}" />
+        <text class="hint">PetKit / CloudPets 共用此账号</text>
       </view>
       
       <view class="form-item">

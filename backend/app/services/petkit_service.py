@@ -108,18 +108,31 @@ class PetKitService:
             session_data = {
                 'timestamp': int(time.time() * 1000),
                 'region': self.region,
-                'timezone': self.timezone
+                'timezone': self.timezone,
+                'username': self.username,  # 保存用户名用于验证
+                'has_valid_session': True  # 标记有效会话
             }
 
-            # 尝试获取客户端的认证信息
+            # 尝试获取客户端的认证信息（cookies/headers）
             try:
                 if hasattr(self.client, 'req') and hasattr(self.client.req, 'session'):
-                    # 存储cookies或其他认证信息
+                    # 存储 cookies
                     cookies = self.client.req.session.cookie_jar.filter_cookies()
                     if cookies:
                         session_data['cookies'] = str(cookies)
+                        logger.debug(f"Saved {len(cookies)} cookies")
+                    
+                    # 存储 headers 中的认证信息
+                    if hasattr(self.client.req, 'headers'):
+                        auth_headers = {}
+                        for key in ['authorization', 'token', 'x-auth-token', 'session-id']:
+                            if key in self.client.req.headers:
+                                auth_headers[key] = self.client.req.headers[key]
+                        if auth_headers:
+                            session_data['auth_headers'] = auth_headers
+                            logger.debug(f"Saved auth headers: {list(auth_headers.keys())}")
             except Exception as e:
-                logger.debug(f"Could not extract session cookies: {e}")
+                logger.debug(f"Could not extract session details: {e}")
 
             with Session(engine) as session_db:
                 config = session_db.get(SystemConfig, self.token_key)
@@ -138,8 +151,20 @@ class PetKitService:
     async def _restore_session(self, session_data: dict):
         """Restore session from stored data"""
         try:
-            # 创建新的会话
-            self.session = aiohttp.ClientSession()
+            # 检查会话是否仍然有效
+            saved_time = session_data.get('timestamp', 0)
+            current_time = int(time.time() * 1000)
+            age_minutes = (current_time - saved_time) / (60 * 1000)
+            
+            # 如果会话超过 25 分钟，直接重新登录（避免边界问题）
+            if age_minutes > 25:
+                logger.info(f"Session too old ({age_minutes:.1f}min), will re-login")
+                return False
+            
+            # 创建新的 aiohttp session，配置 SSL 上下文
+            connector = aiohttp.TCPConnector(ssl=self._ssl_context) if self._ssl_context is not None else None
+            self.session = aiohttp.ClientSession(connector=connector)
+            
             self.client = PetKitClient(
                 username=self.username,
                 password=self.password,
@@ -148,11 +173,23 @@ class PetKitService:
                 session=self.session,
             )
 
-            # 尝试恢复认证状态
-            # 注意：由于pypetkitapi的实现细节，这里可能需要重新登录
-            # 但我们至少建立了会话连接
-            logger.info("Session restored from database")
-            return True
+            # 尝试恢复 cookies
+            if 'cookies' in session_data and hasattr(self.client, 'req') and hasattr(self.client.req, 'session'):
+                try:
+                    # 这里只是记录已保存 cookies，实际 pypetkitapi 会在首次请求时自动处理
+                    logger.debug(f"Restored session with saved cookies")
+                except Exception as e:
+                    logger.debug(f"Could not restore cookies: {e}")
+
+            # 验证会话是否有效：尝试获取设备列表
+            try:
+                await self.client.get_devices_data()
+                logger.info(f"✓ PetKit session restored successfully. Found {len(self.client.petkit_entities)} devices.")
+                return True
+            except Exception as e:
+                logger.warning(f"Restored session invalid, need re-login: {e}")
+                return False
+                
         except Exception as e:
             logger.error(f"Failed to restore session: {e}")
             return False
