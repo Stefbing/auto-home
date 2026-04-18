@@ -1,32 +1,21 @@
 from sqlmodel import SQLModel, create_engine, Session
-import os
 import time
-from dotenv import load_dotenv
 import logging
 
 logger = logging.getLogger(__name__)
 
-# 尝试从项目根目录加载环境变量
-import pathlib
-root_dir = pathlib.Path(__file__).parent.parent.parent
-env_path = root_dir / '.env'
-
-if env_path.exists():
-    load_dotenv(env_path)
-    logger.info(f"Loaded .env from: {env_path}")
-else:
-    # 如果根目录没有.env，则尝试当前目录
-    load_dotenv()
-    logger.info("Loaded .env from current directory")
-
-# 获取 MySQL 数据库连接地址
+# 数据库配置 - 硬编码连接字符串（因为需要先连接数据库才能读取配置）
+# 部署时请在 Vercel/服务器环境变量中设置 DATABASE_URL
+import os
 database_url = os.getenv("DATABASE_URL")
+
+# 如果没有环境变量，使用默认配置（适用于本地开发）
 if not database_url:
-    raise EnvironmentError(
-        "DATABASE_URL environment variable is required. "
-        "Please set it in .env file or system environment. "
-        "Example: mysql+pymysql://user:password@host:3306/database"
-    )
+    # 本地开发默认配置
+    database_url = "mysql+pymysql://stef:%26YLQW84TFdX%26uat@rm-bp1dm2990215o3n4kko.mysql.rds.aliyuncs.com:3306/auto_home"
+    logger.info("⚠️  未检测到 DATABASE_URL 环境变量，使用默认配置（仅开发环境）")
+else:
+    logger.info("✓ 使用环境变量中的 DATABASE_URL")
 
 logger.info(f"Database URL: {database_url.split('://')[0]}://***")
 

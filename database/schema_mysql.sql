@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS weightrecord (
 -- ============================================================================
 INSERT INTO systemconfig (`key`, value, is_encrypted, updated_at)
 VALUES 
-    ('app_version', '0.3.0', 0, UNIX_TIMESTAMP() * 1000),
-    ('initialized', 'false', 0, UNIX_TIMESTAMP() * 1000)
+    ('app_version', '0.4.0', 0, UNIX_TIMESTAMP() * 1000),
+    ('initialized', 'false', 0, UNIX_TIMESTAMP() * 1000),
+    ('PETKIT_DISABLE_SSL_VERIFY', 'false', 0, UNIX_TIMESTAMP() * 1000)
 ON DUPLICATE KEY UPDATE value = VALUES(value);

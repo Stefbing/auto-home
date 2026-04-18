@@ -2,9 +2,9 @@ App({
   globalData: {
     // API 基础地址配置
     // 真机调试需要使用电脑IP或内网穿透地址
-    // apiBaseUrl: "http://192.168.1.4:8002",
+    apiBaseUrl: "http://192.168.1.4:8002",
 
-    apiBaseUrl: "https://auto-home-three.vercel.app",
+    // apiBaseUrl: "https://auto-home-three.vercel.app",
 
     // 当前环境标识
     environment: "development" // development | production

@@ -56,30 +56,18 @@ uv pip install -r backend/requirements.txt
 pip install -r requirements.txt
 ```
 
-#### 步骤 3: 配置环境变量
-在项目根目录创建 `.env` 文件并配置以下信息：
+#### 步骤 3: 数据库配置
 
-```ini
-# ========== 账号统一配置（必填）==========
-ACCOUNT=86-17757577548
-PASSWORD=your_password
+**本地开发**：默认使用硬编码的数据库连接（已在代码中配置）
 
-# ========== 小米账号（用于体重推送）==========
-XIAOMI_ACCOUNT=your_xiaomi_account
-XIAOMI_PASSWORD=your_xiaomi_password
-
-# ========== PetKit 特殊配置 ==========
-# 如果遇到 SSL 证书验证错误，可设置为 true（仅限开发环境）
-PETKIT_DISABLE_SSL_VERIFY=false
-
-# ========== 数据库配置（MySQL - 必填）==========
+**生产部署**：在 Vercel/服务器环境变量中设置 `DATABASE_URL`
+```
 DATABASE_URL=mysql+pymysql://user:password@host:3306/database
 ```
 
 **注意**：
-- CloudPets 服务会自动处理 `86-` 前缀
-- DATABASE_URL 为必填项，必须配置有效的 MySQL 连接地址
-- 时区警告可以忽略，不影响功能
+- 账号密码通过小程序首次登录后自动保存到数据库
+- 所有配置项存储在数据库 `systemconfig` 表中
 
 #### 步骤 4: 启动后端服务
 

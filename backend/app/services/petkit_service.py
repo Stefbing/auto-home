@@ -48,8 +48,12 @@ class PetKitService:
     def _init_ssl_context(self):
         """初始化 SSL 上下文，处理证书验证问题"""
         try:
-            # 检查是否禁用 SSL 验证
-            disable_ssl = os.getenv("PETKIT_DISABLE_SSL_VERIFY", "false").lower() == "true"
+            # 从数据库读取 SSL 配置（优先）
+            from ..utils.config_manager import get_config_from_db
+            disable_ssl_str = get_config_from_db("PETKIT_DISABLE_SSL_VERIFY")
+            
+            # 如果数据库中没有配置，默认不禁用
+            disable_ssl = disable_ssl_str.lower() == "true" if disable_ssl_str else False
             
             if disable_ssl:
                 logger.warning("SSL verification disabled for PetKit (development mode)")
