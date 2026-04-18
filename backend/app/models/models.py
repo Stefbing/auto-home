@@ -6,6 +6,8 @@ from sqlalchemy import BIGINT, Column
 
 class User(SQLModel, table=True):
     """用户表 - 存储小程序用户信息"""
+    __tablename__ = "user"
+    
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True, max_length=32)  # UUID without hyphens
     phone_number: str = Field(max_length=20, unique=True, index=True)  # 手机号（唯一标识）
     nickname: Optional[str] = Field(default=None, max_length=100)  # 昵称

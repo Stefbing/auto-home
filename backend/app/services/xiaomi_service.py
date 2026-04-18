@@ -110,7 +110,7 @@ class XiaomiCloudService:
     async def login(self) -> bool:
         """登录小米云获取 Token"""
         if not self.username or not self.password:
-            logger.error("Missing Xiaomi credentials (ACCOUNT/PASSWORD)")
+            logger.warning("Missing Xiaomi credentials (XIAOMI_ACCOUNT/XIAOMI_PASSWORD). Weight push feature will be disabled.")
             return False
 
         try:
