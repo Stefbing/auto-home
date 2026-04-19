@@ -1,4 +1,4 @@
-const app = getApp();
+const cloudRequest = require('../../utils/cloud_request.js');
 
 function getDefaultStats() {
   return {
@@ -60,8 +60,8 @@ Page({
           title: '发送指令中...'
         });
 
-        wx.request({
-          url: `${app.globalData.apiBaseUrl}/api/petkit/clean`,
+        cloudRequest.callContainer({
+          path: '/api/petkit/clean',
           method: 'POST',
           success: response => {
             wx.hideLoading();
@@ -105,8 +105,8 @@ Page({
       refreshing: true
     });
 
-    wx.request({
-      url: `${app.globalData.apiBaseUrl}/api/petkit/devices-stats`,
+    cloudRequest.callContainer({
+      path: '/api/petkit/devices-stats',
       success: res => {
         const devicesWithStats = Array.isArray(res.data) ? res.data : [];
         let stats = { ...this.data.stats };

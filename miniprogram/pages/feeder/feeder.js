@@ -1,4 +1,4 @@
-const app = getApp();
+const cloudRequest = require('../../utils/cloud_request.js');
 
 Page({
   data: {
@@ -17,8 +17,8 @@ Page({
       title: '正在投喂...'
     });
 
-    wx.request({
-      url: `${app.globalData.apiBaseUrl}/api/cloudpets/feed`,
+    cloudRequest.callContainer({
+      path: '/api/cloudpets/feed',
       method: 'POST',
       data: { amount: 1 },
       success: res => {
@@ -50,8 +50,8 @@ Page({
 
   fetchPlans() {
     this.setData({ loading: true });
-    wx.request({
-      url: `${app.globalData.apiBaseUrl}/api/cloudpets/plans`,
+    cloudRequest.callContainer({
+      path: '/api/cloudpets/plans',
       success: res => {
         this.setData({
           plans: res.data || [],
@@ -80,8 +80,8 @@ Page({
     plans[index] = plan;
     this.setData({ plans });
 
-    wx.request({
-      url: `${app.globalData.apiBaseUrl}/api/cloudpets/plans/${plan.id}`,
+    cloudRequest.callContainer({
+      path: `/api/cloudpets/plans/${plan.id}`,
       method: 'PUT',
       data: plan,
       success: () => {

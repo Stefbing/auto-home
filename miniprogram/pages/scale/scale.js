@@ -1,4 +1,4 @@
-const app = getApp();
+const cloudRequest = require('../../utils/cloud_request.js');
 const bleUtils = require('../../utils/ble_scale.js');
 
 Page({
@@ -18,8 +18,8 @@ Page({
   },
 
   fetchUsers() {
-    wx.request({
-      url: `${app.globalData.apiBaseUrl}/api/users`,
+    cloudRequest.callContainer({
+      path: '/api/users',
       success: res => {
         this.setData({ users: res.data })
       }
@@ -86,8 +86,8 @@ Page({
     const idx = this.data.selectedUserIndex
     const userId = idx >= 0 && this.data.users[idx] ? this.data.users[idx].id : null
     
-    wx.request({
-      url: `${app.globalData.apiBaseUrl}/api/scale/record`,
+    cloudRequest.callContainer({
+      path: '/api/scale/record',
       method: 'POST',
       data: {
         weight: this.data.weight,
@@ -117,8 +117,8 @@ Page({
       wx.showToast({ title: '请输入姓名', icon: 'none' })
       return
     }
-    wx.request({
-      url: `${app.globalData.apiBaseUrl}/api/users`,
+    cloudRequest.callContainer({
+      path: '/api/users',
       method: 'POST',
       data: { name },
       success: res => {

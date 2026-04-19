@@ -1,4 +1,5 @@
 const app = getApp()
+const cloudRequest = require('../../utils/cloud_request.js')
 
 Page({
   data: {
@@ -32,8 +33,8 @@ Page({
   // 检查配置状态
   async checkConfigStatus() {
     try {
-      const res = await wx.request({
-        url: `${app.globalData.apiBaseUrl}/api/auth/check-config`,
+      const res = await cloudRequest.callContainer({
+        path: '/api/auth/check-config',
         method: 'GET'
       })
       
@@ -55,23 +56,17 @@ Page({
     }
     
     console.log('开始登录，手机号:', phoneNumber)
-    console.log('API地址:', app.globalData.apiBaseUrl)
     
     wx.showLoading({ title: '登录中...' })
     
     try {
-      const res = await new Promise((resolve, reject) => {
-        wx.request({
-          url: `${app.globalData.apiBaseUrl}/api/auth/login`,
-          method: 'POST',
-          header: { 'Content-Type': 'application/json' },
-          data: {
-            phone_number: phoneNumber,
-            nickname: `用户${phoneNumber.slice(-4)}`
-          },
-          success: resolve,
-          fail: reject
-        })
+      const res = await cloudRequest.callContainer({
+        path: '/api/auth/login',
+        method: 'POST',
+        data: {
+          phone_number: phoneNumber,
+          nickname: `用户${phoneNumber.slice(-4)}`
+        }
       })
       
       console.log('登录响应:', res)
@@ -124,10 +119,9 @@ Page({
     
     try {
       // 保存 ACCOUNT
-      await wx.request({
-        url: `${app.globalData.apiBaseUrl}/api/config`,
+      await cloudRequest.callContainer({
+        path: '/api/config',
         method: 'POST',
-        header: { 'Content-Type': 'application/json' },
         data: {
           key: 'ACCOUNT',
           value: account,
@@ -136,10 +130,9 @@ Page({
       })
       
       // 保存 PASSWORD
-      await wx.request({
-        url: `${app.globalData.apiBaseUrl}/api/config`,
+      await cloudRequest.callContainer({
+        path: '/api/config',
         method: 'POST',
-        header: { 'Content-Type': 'application/json' },
         data: {
           key: 'PASSWORD',
           value: password,
@@ -148,8 +141,8 @@ Page({
       })
       
       // 重新初始化服务
-      await wx.request({
-        url: `${app.globalData.apiBaseUrl}/api/auth/reinit-services`,
+      await cloudRequest.callContainer({
+        path: '/api/auth/reinit-services',
         method: 'POST'
       })
       
