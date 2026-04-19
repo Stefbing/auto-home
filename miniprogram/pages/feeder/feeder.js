@@ -24,17 +24,11 @@ Page({
       success: res => {
         wx.hideLoading();
         this.setData({ actionLoading: false });
-        if (res.statusCode === 200) {
-          wx.showToast({
-            title: '已投喂 1 份',
-            icon: 'success'
-          });
-        } else {
-          wx.showToast({
-            title: '投喂失败',
-            icon: 'error'
-          });
-        }
+        // callContainer 已返回业务数据，直接显示成功
+        wx.showToast({
+          title: '已投喂 1 份',
+          icon: 'success'
+        });
       },
       fail: err => {
         wx.hideLoading();
@@ -53,8 +47,9 @@ Page({
     cloudRequest.callContainer({
       path: '/api/cloudpets/plans',
       success: res => {
+        // callContainer 已返回业务数据
         this.setData({
-          plans: res.data || [],
+          plans: res || [],
           loading: false
         });
       },

@@ -38,9 +38,8 @@ Page({
         method: 'GET'
       })
       
-      if (res.statusCode === 200) {
-        this.setData({ hasConfigured: res.data.has_configured })
-      }
+      // callContainer 已返回 res.data
+      this.setData({ hasConfigured: res.has_configured })
     } catch (err) {
       console.error('检查配置失败:', err)
     }
@@ -71,29 +70,24 @@ Page({
       
       console.log('登录响应:', res)
       
-      if (res.statusCode === 200) {
-        const userInfo = res.data
-        console.log('用户信息:', userInfo)
-        wx.setStorageSync('userInfo', userInfo)
-        this.setData({ userInfo, hasConfigured: userInfo.has_configured })
-        
-        wx.hideLoading()
-        wx.showToast({ title: '登录成功', icon: 'success' })
-        
-        // 如果未配置，引导配置
-        if (!userInfo.has_configured) {
-          setTimeout(() => {
-            wx.showToast({ 
-              title: '请完成初始配置', 
-              icon: 'none',
-              duration: 2000
-            })
-          }, 1500)
-        }
-      } else {
-        console.error('登录失败，状态码:', res.statusCode)
-        console.error('错误详情:', res.data)
-        throw new Error(`HTTP ${res.statusCode}`)
+      // callContainer 已返回 res.data，直接使用
+      const userInfo = res
+      console.log('用户信息:', userInfo)
+      wx.setStorageSync('userInfo', userInfo)
+      this.setData({ userInfo, hasConfigured: userInfo.has_configured })
+      
+      wx.hideLoading()
+      wx.showToast({ title: '登录成功', icon: 'success' })
+      
+      // 如果未配置，引导配置
+      if (!userInfo.has_configured) {
+        setTimeout(() => {
+          wx.showToast({ 
+            title: '请完成初始配置', 
+            icon: 'none',
+            duration: 2000
+          })
+        }, 1500)
       }
     } catch (err) {
       wx.hideLoading()

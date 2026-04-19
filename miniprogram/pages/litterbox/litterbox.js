@@ -108,7 +108,8 @@ Page({
     cloudRequest.callContainer({
       path: '/api/petkit/devices-stats',
       success: res => {
-        const devicesWithStats = Array.isArray(res.data) ? res.data : [];
+        // callContainer 已返回业务数据
+        const devicesWithStats = Array.isArray(res) ? res : [];
         let stats = { ...this.data.stats };
 
         if (devicesWithStats.length > 0) {

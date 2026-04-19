@@ -21,7 +21,8 @@ Page({
     cloudRequest.callContainer({
       path: '/api/users',
       success: res => {
-        this.setData({ users: res.data })
+        // callContainer 已返回业务数据
+        this.setData({ users: res })
       }
     })
   },
