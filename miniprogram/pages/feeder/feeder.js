@@ -34,10 +34,30 @@ Page({
         wx.hideLoading();
         this.setData({ actionLoading: false });
         console.error('投喂请求失败:', err);
-        wx.showToast({
-          title: '网络错误',
-          icon: 'error'
-        });
+        
+        // 检查是否是 503 服务未初始化
+        if (err.statusCode === 503) {
+          wx.showModal({
+            title: '服务未配置',
+            content: 'CloudPets 喂食器功能需要配置账号密码\n\n请在首页完成初始配置',
+            showCancel: true,
+            cancelText: '取消',
+            confirmText: '去配置',
+            success: (res) => {
+              if (res.confirm) {
+                // 跳转到首页进行配置
+                wx.switchTab({
+                  url: '/pages/index/index'
+                });
+              }
+            }
+          });
+        } else {
+          wx.showToast({
+            title: '网络错误',
+            icon: 'error'
+          });
+        }
       }
     });
   },
@@ -56,10 +76,30 @@ Page({
       fail: err => {
         console.error('获取喂食计划失败:', err);
         this.setData({ loading: false });
-        wx.showToast({
-          title: '加载失败',
-          icon: 'error'
-        });
+        
+        // 检查是否是 503 服务未初始化
+        if (err.statusCode === 503) {
+          wx.showModal({
+            title: '服务未配置',
+            content: 'CloudPets 喂食器功能需要配置账号密码\n\n请在首页完成初始配置',
+            showCancel: true,
+            cancelText: '取消',
+            confirmText: '去配置',
+            success: (res) => {
+              if (res.confirm) {
+                // 跳转到首页进行配置
+                wx.switchTab({
+                  url: '/pages/index/index'
+                });
+              }
+            }
+          });
+        } else {
+          wx.showToast({
+            title: '加载失败',
+            icon: 'error'
+          });
+        }
       }
     });
   },
@@ -92,10 +132,30 @@ Page({
           enabled: !e.detail.value
         };
         this.setData({ plans });
-        wx.showToast({
-          title: '操作失败',
-          icon: 'error'
-        });
+        
+        // 检查是否是 503 服务未初始化
+        if (err.statusCode === 503) {
+          wx.showModal({
+            title: '服务未配置',
+            content: 'CloudPets 喂食器功能需要配置账号密码\n\n请在首页完成初始配置',
+            showCancel: true,
+            cancelText: '取消',
+            confirmText: '去配置',
+            success: (res) => {
+              if (res.confirm) {
+                // 跳转到首页进行配置
+                wx.switchTab({
+                  url: '/pages/index/index'
+                });
+              }
+            }
+          });
+        } else {
+          wx.showToast({
+            title: '操作失败',
+            icon: 'error'
+          });
+        }
       }
     });
   },

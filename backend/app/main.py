@@ -634,8 +634,13 @@ def user_login(request: UserLoginRequest, session: Session = Depends(get_session
     小程序手机号登录/注册
     - 首次登录自动创建用户
     - 返回用户信息和配置状态
+    - 支持演示模式：任意11位手机号即可登录
     """
     try:
+        # 验证手机号格式（简单验证11位数字）
+        if not request.phone_number or len(request.phone_number) != 11 or not request.phone_number.isdigit():
+            raise HTTPException(status_code=400, detail="请输入正确的11位手机号")
+        
         # 查找或创建用户
         user = session.exec(
             select(User).where(User.phone_number == request.phone_number)
@@ -679,6 +684,8 @@ def user_login(request: UserLoginRequest, session: Session = Depends(get_session
             nickname=user.nickname,
             has_configured=has_configured
         )
+    except HTTPException:
+        raise
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"登录失败: {str(e)}")

@@ -23,6 +23,33 @@ Page({
       success: res => {
         // callContainer 已返回业务数据
         this.setData({ users: res })
+      },
+      fail: err => {
+        console.error('获取用户列表失败:', err);
+        
+        // 检查是否是 503 服务未初始化
+        if (err.statusCode === 503) {
+          wx.showModal({
+            title: '服务未配置',
+            content: '体重秤功能需要配置账号密码\n\n请在首页完成初始配置',
+            showCancel: true,
+            cancelText: '取消',
+            confirmText: '去配置',
+            success: (res) => {
+              if (res.confirm) {
+                // 跳转到首页进行配置
+                wx.switchTab({
+                  url: '/pages/index/index'
+                });
+              }
+            }
+          });
+        } else {
+          wx.showToast({
+            title: '加载失败',
+            icon: 'error'
+          });
+        }
       }
     })
   },
@@ -99,7 +126,32 @@ Page({
         wx.showToast({ title: '上传成功' });
       },
       fail: (err) => {
-        this.log("上传失败 " + JSON.stringify(err));
+        console.error('上传体重记录失败:', err);
+        
+        // 检查是否是 503 服务未初始化
+        if (err.statusCode === 503) {
+          wx.showModal({
+            title: '服务未配置',
+            content: '体重秤功能需要配置账号密码\n\n请在首页完成初始配置',
+            showCancel: true,
+            cancelText: '取消',
+            confirmText: '去配置',
+            success: (res) => {
+              if (res.confirm) {
+                // 跳转到首页进行配置
+                wx.switchTab({
+                  url: '/pages/index/index'
+                });
+              }
+            }
+          });
+        } else {
+          this.log("上传失败 " + JSON.stringify(err));
+          wx.showToast({
+            title: '上传失败',
+            icon: 'error'
+          });
+        }
       }
     });
   },
@@ -126,6 +178,33 @@ Page({
         this.setData({ newUserName: "" })
         this.fetchUsers()
         wx.showToast({ title: '已新增' })
+      },
+      fail: err => {
+        console.error('创建用户失败:', err);
+        
+        // 检查是否是 503 服务未初始化
+        if (err.statusCode === 503) {
+          wx.showModal({
+            title: '服务未配置',
+            content: '体重秤功能需要配置账号密码\n\n请在首页完成初始配置',
+            showCancel: true,
+            cancelText: '取消',
+            confirmText: '去配置',
+            success: (res) => {
+              if (res.confirm) {
+                // 跳转到首页进行配置
+                wx.switchTab({
+                  url: '/pages/index/index'
+                });
+              }
+            }
+          });
+        } else {
+          wx.showToast({
+            title: '操作失败',
+            icon: 'error'
+          });
+        }
       }
     })
   },
