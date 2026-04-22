@@ -33,6 +33,7 @@ load_dotenv()
 class AppState:
     def __init__(self):
         self.petkit: Optional[PetKitService] = None
+        self.cloudpets = None  # CloudPets service instance (dynamic)
         self.data_refresh_task = None
         self.xiaomi_initialized: bool = False
 
@@ -413,37 +414,51 @@ async def petkit_devices_with_stats(service: PetKitService = Depends(get_petkit)
 @app.get("/api/cloudpets/servings_today")
 async def cloudpets_servings_today():
     """获取今日已出粮份数"""
-    return await cloudpets_service.get_servings_today()
+    if not state.cloudpets:
+        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
+    return await state.cloudpets.get_servings_today()
 
 @app.post("/api/cloudpets/feed")
 async def cloudpets_manual_feed(amount: int = 1):
     """立即喂食"""
-    return await cloudpets_service.manual_feed(amount)
+    if not state.cloudpets:
+        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
+    return await state.cloudpets.manual_feed(amount)
 
 @app.get("/api/cloudpets/plans", response_model=List[CloudPetsPlan])
 async def cloudpets_get_plans():
     """获取喂食计划"""
-    return await cloudpets_service.get_feeding_plans()
+    if not state.cloudpets:
+        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
+    return await state.cloudpets.get_feeding_plans()
 
 @app.post("/api/cloudpets/plans", response_model=CloudPetsPlan)
 async def cloudpets_add_plan(plan: CloudPetsPlan):
     """添加喂食计划"""
-    return await cloudpets_service.add_feeding_plan(plan)
+    if not state.cloudpets:
+        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
+    return await state.cloudpets.add_feeding_plan(plan)
 
 @app.put("/api/cloudpets/plans/{plan_id}", response_model=CloudPetsPlan)
 async def cloudpets_update_plan(plan_id: str, plan: CloudPetsPlan):
     """更新喂食计划"""
-    return await cloudpets_service.update_feeding_plan(plan_id, plan)
+    if not state.cloudpets:
+        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
+    return await state.cloudpets.update_feeding_plan(plan_id, plan)
 
 @app.delete("/api/cloudpets/plans/{plan_id}")
 async def cloudpets_delete_plan(plan_id: str):
     """删除喂食计划"""
-    return await cloudpets_service.delete_feeding_plan(plan_id)
+    if not state.cloudpets:
+        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
+    return await state.cloudpets.delete_feeding_plan(plan_id)
 
 @app.get("/api/cloudpets/feeder/status")
 async def cloudpets_feeder_status():
     """获取喂食器实时状态"""
-    return await cloudpets_service.get_feeder_status()
+    if not state.cloudpets:
+        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
+    return await state.cloudpets.get_feeder_status()
 
 # --- PetWant (Deprecated) ---
 @app.post("/api/petwant/feed")
@@ -629,12 +644,13 @@ class UserLoginResponse(BaseModel):
     has_configured: bool  # 是否已配置账号密码
 
 @app.post("/api/auth/login")
-def user_login(request: UserLoginRequest, session: Session = Depends(get_session)):
+async def user_login(request: UserLoginRequest, session: Session = Depends(get_session)):
     """
     小程序手机号登录/注册
     - 首次登录自动创建用户
-    - 返回用户信息和配置状态
+    - 返回用户信息和是否有设备的状态
     - 支持演示模式：任意11位手机号即可登录
+    - 如果用户已添加设备，自动后台初始化对应服务并缓存token
     """
     try:
         # 验证手机号格式（简单验证11位数字）
@@ -646,6 +662,7 @@ def user_login(request: UserLoginRequest, session: Session = Depends(get_session
             select(User).where(User.phone_number == request.phone_number)
         ).first()
         
+        is_new_user = False
         if not user:
             # 新用户，SQLModel 会自动生成 UUID
             user = User(
@@ -659,6 +676,7 @@ def user_login(request: UserLoginRequest, session: Session = Depends(get_session
             session.commit()
             session.refresh(user)
             logger.info(f"新用户注册: {request.phone_number}, ID: {user.id}")
+            is_new_user = True
         else:
             # 更新用户信息（可选）
             if request.nickname:
@@ -672,17 +690,91 @@ def user_login(request: UserLoginRequest, session: Session = Depends(get_session
             session.add(user)
             session.commit()
         
-        # 检查是否已配置必需的配置项
-        required_configs = ["ACCOUNT", "PASSWORD"]
-        configs = session.exec(select(SystemConfig)).all()
-        configured_keys = {c.key for c in configs}
-        has_configured = all(key in configured_keys for key in required_configs)
+        # 检查用户是否已添加设备
+        from .utils.config_manager import get_user_devices
+        user_devices = get_user_devices(user.id)
+        has_devices = len(user_devices) > 0
+        
+        # 如果用户已有设备配置，自动后台初始化服务（无论新老用户）
+        if has_devices:
+            logger.info(f"检测到用户 {request.phone_number} 有 {len(user_devices)} 个设备，开始自动初始化服务...")
+            try:
+                # 按平台分组设备
+                platforms = {}
+                for device in user_devices:
+                    platform = device['platform']
+                    if platform not in platforms:
+                        platforms[platform] = []
+                    platforms[platform].append(device)
+                
+                # 为每个平台初始化服务
+                for platform, devices in platforms.items():
+                    if not devices:
+                        continue
+                    
+                    # 获取第一个设备的账号密码（同一平台通常共用账号）
+                    first_device = devices[0]
+                    credentials = first_device.get('credentials', {})
+                    account = credentials.get('account')
+                    password = credentials.get('password')
+                    
+                    if not account or not password:
+                        logger.warning(f"⚠ {platform} 设备缺少账号密码，跳过初始化")
+                        continue
+                    
+                    logger.info(f"正在初始化 {platform} 服务...")
+                    
+                    if platform == "petkit":
+                        state.petkit = PetKitService(account, password, user_id=user.id)
+                        success = await state.petkit.initialize()
+                        if success:
+                            logger.info(f"✓ PetKit 自动登录成功，发现 {len(devices)} 个设备")
+                        else:
+                            logger.warning(f"⚠ PetKit 自动登录失败")
+                    
+                    elif platform == "cloudpets":
+                        # CloudPets 需要更新全局配置（因为模块级别读取）
+                        from .utils.config_manager import set_config_to_db
+                        set_config_to_db("account", user.id, account, is_encrypted=True, platform="cloudpets")
+                        set_config_to_db("password", user.id, password, is_encrypted=True, platform="cloudpets")
+                        
+                        # 重新加载模块并传入user_id
+                        import importlib
+                        import backend.app.services.cloudpets_service as cp_module
+                        importlib.reload(cp_module)
+                        
+                        # 创建新的服务实例并传入user_id，保存到state
+                        state.cloudpets = cp_module.CloudPetsService(user_id=user.id)
+                        success = await state.cloudpets.initialize()
+                        if success:
+                            logger.info(f"✓ CloudPets 自动登录成功")
+                        else:
+                            logger.warning(f"⚠ CloudPets 自动登录失败")
+                    
+                    elif platform == "xiaomi":
+                        from .utils.config_manager import set_config_to_db
+                        set_config_to_db("account", user.id, account, is_encrypted=True, platform="xiaomi")
+                        set_config_to_db("password", user.id, password, is_encrypted=True, platform="xiaomi")
+                        
+                        xm_success = await xiaomi_service.initialize()
+                        if xm_success:
+                            state.xiaomi_initialized = True
+                            logger.info(f"✓ Xiaomi 自动登录成功")
+                        else:
+                            logger.warning(f"⚠ Xiaomi 自动登录失败")
+                
+                logger.info("自动后台初始化完成")
+            except Exception as e:
+                logger.error(f"自动后台初始化失败: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # 不阻断登录流程，仅记录日志
         
         return UserLoginResponse(
-            user_id=user.id,
+            user_id=str(user.id),  # 转换为字符串
             phone_number=user.phone_number,
             nickname=user.nickname,
-            has_configured=has_configured
+            has_configured=has_devices  # 改名但保持兼容，表示是否有设备
         )
     except HTTPException:
         raise
@@ -691,21 +783,27 @@ def user_login(request: UserLoginRequest, session: Session = Depends(get_session
         raise HTTPException(status_code=500, detail=f"登录失败: {str(e)}")
 
 @app.get("/api/auth/check-config")
-def check_user_config(session: Session = Depends(get_session)):
+def check_user_config(
+    user_id: str,
+    session: Session = Depends(get_session)
+):
     """
-    检查当前用户是否已配置账号密码
-    用于 Web 端访问控制
+    检查当前用户是否已添加设备
+    用于前端判断是否需要引导添加设备
     """
     try:
-        required_configs = ["ACCOUNT", "PASSWORD"]
-        configs = session.exec(select(SystemConfig)).all()
-        configured_keys = {c.key for c in configs}
-        has_configured = all(key in configured_keys for key in required_configs)
+        uid = int(user_id)
+        from .utils.config_manager import get_user_devices
+        user_devices = get_user_devices(uid)
+        has_devices = len(user_devices) > 0
         
         return {
-            "has_configured": has_configured,
-            "message": "配置完整" if has_configured else "请先在小程序中配置账号密码"
+            "has_configured": has_devices,
+            "device_count": len(user_devices),
+            "message": f"已添加 {len(user_devices)} 个设备" if has_devices else "请先添加设备"
         }
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"检查配置失败: {str(e)}")
 
@@ -772,10 +870,8 @@ def get_config_list(session: Session = Depends(get_session)):
             }
             config_list.append(config_dict)
         
-        # 检查是否有必需的配置
-        required_keys = ["ACCOUNT", "PASSWORD", "XIAOMI_ACCOUNT", "XIAOMI_PASSWORD", "DATABASE_URL"]
-        existing_keys = [c.key for c in configs]
-        has_required = all(key in existing_keys for key in required_keys)
+        # 检查是否有必需的配置（简化后不再需要特定keys）
+        has_required = len(configs) > 0
         
         return ConfigListResponse(
             configs=config_list,
@@ -788,7 +884,12 @@ def get_config_list(session: Session = Depends(get_session)):
 def get_config_value(key: str, session: Session = Depends(get_session)):
     """获取单个配置值（自动解密）"""
     try:
-        config = session.get(SystemConfig, key)
+        # 查询全局配置
+        statement = select(SystemConfig).where(
+            SystemConfig.key == key
+        ).order_by(SystemConfig.id.desc())
+        config = session.exec(statement).first()
+        
         if not config:
             raise HTTPException(status_code=404, detail=f"配置项 {key} 不存在")
         
@@ -814,8 +915,12 @@ def save_config(config_item: ConfigItem, session: Session = Depends(get_session)
         if should_encrypt and config_item.value:
             value_to_store = ConfigEncryptor.encrypt(config_item.value)
         
-        # 更新或创建配置
-        existing_config = session.get(SystemConfig, config_item.key)
+        # 查找现有配置
+        statement = select(SystemConfig).where(
+            SystemConfig.key == config_item.key
+        )
+        existing_config = session.exec(statement).first()
+        
         if existing_config:
             existing_config.value = value_to_store
             existing_config.is_encrypted = should_encrypt
@@ -841,7 +946,12 @@ def save_config(config_item: ConfigItem, session: Session = Depends(get_session)
 def delete_config(key: str, session: Session = Depends(get_session)):
     """删除配置项"""
     try:
-        config = session.get(SystemConfig, key)
+        # 查询配置
+        statement = select(SystemConfig).where(
+            SystemConfig.key == key
+        )
+        config = session.exec(statement).first()
+        
         if not config:
             raise HTTPException(status_code=404, detail=f"配置项 {key} 不存在")
         
@@ -889,26 +999,139 @@ async def push_to_xiaomi(record: WeightRecord, user: Optional[User] = None):
         logger.error(f"Error pushing to Xiaomi: {e}")
 
 
-# Deleted: # --- Known Devices 路由 ---
-# Deleted: @app.get("/api/devices/known", response_model=List[KnownDevice])
-# Deleted: def get_known_devices(session: Session = Depends(get_session)):
-# Deleted:     return session.exec(select(KnownDevice)).all()
+# --- 用户设备管理路由 ---
+from .utils.config_manager import get_user_devices, add_device as add_device_to_db
 
-# Deleted: @app.post("/api/devices/bind")
-# Deleted: def bind_device(device: KnownDevice, session: Session = Depends(get_session)):
-# Deleted:     existing = session.exec(select(KnownDevice).where(KnownDevice.device_id == device.device_id)).first()
-# Deleted:     if existing:
-# Deleted:         existing.last_seen = int(time.time() * 1000)
-# Deleted:         session.add(existing)
-# Deleted:     else:
-# Deleted:         session.add(device)
-# Deleted:     session.commit()
-# Deleted:     return {"status": "success"}
+class AddDeviceRequest(BaseModel):
+    device_type: str  # feeder/litterbox/scale
+    device_name: Optional[str] = None
+    platform: str  # petkit/xiaomi/cloudpets
+    account: str
+    password: str
 
-# Deleted: @app.delete("/api/devices/unbind/{device_id}")
-# Deleted: def unbind_device(device_id: str, session: Session = Depends(get_session)):
-# Deleted:     device = session.exec(select(KnownDevice).where(KnownDevice.device_id == device_id)).first()
-# Deleted:     if device:
-# Deleted:         session.delete(device)
-# Deleted:         session.commit()
-# Deleted:     return {"status": "success"}
+class DeviceResponse(BaseModel):
+    device_key: str  # 设备标识符
+    device_type: str
+    device_name: Optional[str]
+    platform: str
+    status: str
+
+@app.get("/api/devices", response_model=List[DeviceResponse])
+async def get_user_devices_api(
+    user_id: str  # 前端传字符串
+):
+    """获取用户的设备列表（不返回账号密码）"""
+    try:
+        # 转换为int
+        uid = int(user_id)
+        devices = get_user_devices(uid)
+        
+        # platform到device_type的映射
+        platform_to_type = {
+            'cloudpets': 'feeder',
+            'petkit': 'litterbox',
+            'xiaomi': 'scale'
+        }
+        
+        result = []
+        for idx, device in enumerate(devices):
+            platform = device.get('platform', '')
+            device_type = platform_to_type.get(platform, 'unknown')
+            
+            result.append(DeviceResponse(
+                device_key=f"device_{idx}",
+                device_type=device_type,
+                device_name=device.get('device_name') or f"{platform}_device",
+                platform=platform,
+                status='active'  # 简化：有配置即为active
+            ))
+        return result
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    except Exception as e:
+        import traceback
+        logger.error(f"获取设备列表失败: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"获取设备列表失败：{str(e)}")
+
+@app.post("/api/devices/add", response_model=DeviceResponse)
+async def add_device_api(
+    request: AddDeviceRequest,
+    user_id: str  # 前端传字符串
+):
+    """添加设备到用户账户，并自动后台登录缓存token"""
+    try:
+        # 转换为int
+        uid = int(user_id)
+        device_key = add_device_to_db(
+            user_id=uid,
+            platform=request.platform,
+            account=request.account,
+            password=request.password,
+            device_name=request.device_name
+        )
+        
+        # 根据平台类型，立即重新初始化服务以自动登录并缓存token
+        if request.platform == "petkit":
+            try:
+                logger.info(f"检测到 PetKit 设备添加，正在重新初始化服务...")
+                state.petkit = PetKitService(request.account, request.password, user_id=uid)
+                petkit_success = await state.petkit.initialize()
+                if petkit_success:
+                    logger.info("✓ PetKit 服务重新初始化成功，token已缓存")
+                else:
+                    logger.warning("⚠ PetKit 服务初始化失败，请检查账号密码")
+            except Exception as e:
+                logger.error(f"PetKit 重新初始化失败：{e}")
+        
+        elif request.platform == "cloudpets":
+            try:
+                logger.info(f"检测到 CloudPets 设备添加，正在重新初始化服务...")
+                # CloudPets 需要更新全局配置（因为模块级别读取）
+                from .utils.config_manager import set_config_to_db
+                set_config_to_db("account", uid, request.account, is_encrypted=True, platform="cloudpets")
+                set_config_to_db("password", uid, request.password, is_encrypted=True, platform="cloudpets")
+                
+                # 重新加载模块以获取新配置
+                import importlib
+                import backend.app.services.cloudpets_service as cp_module
+                importlib.reload(cp_module)
+                
+                # 创建新的服务实例并传入user_id，保存到state
+                state.cloudpets = cp_module.CloudPetsService(user_id=uid)
+                cloudpets_success = await state.cloudpets.initialize()
+                if cloudpets_success:
+                    logger.info("✓ CloudPets 服务重新初始化成功，token已缓存")
+                else:
+                    logger.warning("⚠ CloudPets 服务初始化失败，请检查账号密码")
+            except Exception as e:
+                logger.error(f"CloudPets 重新初始化失败：{e}")
+        
+        elif request.platform == "xiaomi":
+            try:
+                logger.info(f"检测到 Xiaomi 设备添加，正在重新初始化服务...")
+                # Xiaomi 也需要保存配置
+                from .utils.config_manager import set_config_to_db
+                set_config_to_db("account", uid, request.account, is_encrypted=True, platform="xiaomi")
+                set_config_to_db("password", uid, request.password, is_encrypted=True, platform="xiaomi")
+                
+                xm_success = await xiaomi_service.initialize()
+                if xm_success:
+                    state.xiaomi_initialized = True
+                    logger.info("✓ Xiaomi 服务重新初始化成功，token已缓存")
+                else:
+                    logger.warning("⚠ Xiaomi 服务初始化失败，请检查账号密码")
+            except Exception as e:
+                logger.error(f"Xiaomi 重新初始化失败：{e}")
+        
+        return DeviceResponse(
+            device_key=device_key,
+            device_type=request.device_type,
+            device_name=request.device_name or f"{request.platform}_device",
+            platform=request.platform,
+            status="active"
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加设备失败：{str(e)}")
+

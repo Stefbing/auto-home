@@ -1,4 +1,13 @@
 <view class="page">
+  <!-- 顶部导航栏 -->
+  <view class="header-section">
+    <navigator url="/pages/index/index" class="back-btn">
+      <text class="back-icon">‹</text>
+    </navigator>
+    <text class="page-title">智能喂食器</text>
+    <view class="placeholder"></view>
+  </view>
+
   <view class="hero-card">
     <view class="hero-label">Feeder Control</view>
     <view class="hero-title">智能喂食器</view>

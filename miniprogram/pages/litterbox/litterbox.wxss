@@ -1,11 +1,52 @@
 page {
-  background: #f4f7fb;
+  background: #f2f4f8;
 }
 
 .page {
   min-height: 100vh;
-  padding: 28rpx;
+  padding: 0;
   box-sizing: border-box;
+}
+
+/* ========== 顶部导航栏 ========== */
+.header-section {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #ffffff;
+  padding: 20rpx 32rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
+}
+
+.back-btn {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08);
+}
+
+.back-icon {
+  font-size: 48rpx;
+  color: #1677ff;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.page-title {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: #333333;
+}
+
+.placeholder {
+  width: 72rpx;
 }
 
 .hero-card,
@@ -13,14 +54,14 @@ page {
 .info-card,
 .stat-card {
   background: #ffffff;
-  border-radius: 28rpx;
-  box-shadow: 0 18rpx 36rpx rgba(20, 40, 80, 0.06);
+  border-radius: 32rpx;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04);
 }
 
 .hero-card {
-  margin-bottom: 24rpx;
-  padding: 32rpx;
-  background: linear-gradient(135deg, #ffffff 0%, #eefaf4 100%);
+  margin: 32rpx 32rpx 24rpx;
+  padding: 36rpx;
+  background: linear-gradient(135deg, #ffffff 0%, #e8f8f0 100%);
 }
 
 .hero-main {
@@ -33,8 +74,8 @@ page {
   display: inline-block;
   padding: 10rpx 18rpx;
   border-radius: 999rpx;
-  background: rgba(36, 170, 102, 0.12);
-  color: #17995c;
+  background: rgba(82, 196, 26, 0.1);
+  color: #52c41a;
   font-size: 22rpx;
   font-weight: 600;
 }
@@ -43,7 +84,7 @@ page {
   margin-top: 22rpx;
   font-size: 42rpx;
   font-weight: 700;
-  color: #142437;
+  color: #333333;
 }
 
 .hero-desc {
@@ -51,7 +92,7 @@ page {
   max-width: 420rpx;
   font-size: 24rpx;
   line-height: 1.7;
-  color: #66788f;
+  color: #666666;
 }
 
 .refresh-btn {
@@ -60,7 +101,7 @@ page {
   height: 76rpx;
   line-height: 76rpx;
   border-radius: 999rpx;
-  background: #1f7aeb;
+  background: #1677ff;
   color: #ffffff;
   font-size: 26rpx;
   font-weight: 600;
@@ -72,7 +113,7 @@ page {
 }
 
 .refresh-btn[disabled] {
-  opacity: 0.88;
+  opacity: 0.6;
 }
 
 .loading-stack {
@@ -100,7 +141,7 @@ page {
 
 .skeleton-line,
 .skeleton-chip {
-  background: linear-gradient(90deg, #eef2f8 25%, #f8fbff 50%, #eef2f8 75%);
+  background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 50%, #f0f0f0 75%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
 }
@@ -153,7 +194,7 @@ page {
 
 .stat-label {
   font-size: 24rpx;
-  color: #7b8aa0;
+  color: #888888;
 }
 
 .stat-number {
@@ -161,18 +202,18 @@ page {
   font-size: 50rpx;
   font-weight: 700;
   line-height: 1;
-  color: #152335;
+  color: #333333;
 }
 
 .stat-unit {
   margin-top: 10rpx;
   font-size: 22rpx;
-  color: #8a99ad;
+  color: #888888;
 }
 
 .card {
   margin-bottom: 24rpx;
-  padding: 30rpx;
+  padding: 32rpx;
 }
 
 .action-card {
@@ -180,28 +221,29 @@ page {
 }
 
 .detail-card {
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
 }
 
 .section-title {
   font-size: 32rpx;
   font-weight: 700;
-  color: #172639;
+  color: #333333;
 }
 
 .section-desc {
   margin-top: 10rpx;
   font-size: 24rpx;
-  color: #7c8ca2;
+  color: #888888;
 }
 
 .danger-action {
   margin-top: 28rpx;
   border-radius: 22rpx;
-  background: linear-gradient(135deg, #ff6a5f 0%, #ff8d72 100%);
+  background: linear-gradient(135deg, #ff4d4f 0%, #ff7875 100%);
   color: #ffffff;
   font-size: 30rpx;
   font-weight: 600;
+  box-shadow: 0 8rpx 24rpx rgba(255, 77, 79, 0.25);
 }
 
 .detail-row {
@@ -210,7 +252,7 @@ page {
   align-items: center;
   min-height: 88rpx;
   padding: 22rpx 0;
-  border-bottom: 1rpx solid #edf1f5;
+  border-bottom: 1rpx solid #f0f0f0;
 }
 
 .detail-highlight {
@@ -223,13 +265,13 @@ page {
 
 .detail-label {
   font-size: 28rpx;
-  color: #5d6f86;
+  color: #666666;
 }
 
 .detail-value {
   font-size: 30rpx;
   font-weight: 700;
-  color: #172639;
+  color: #333333;
 }
 
 .detail-badge {
@@ -247,31 +289,31 @@ page {
 }
 
 .detail-badge.safe {
-  background: rgba(33, 181, 111, 0.12);
-  color: #17995c;
+  background: rgba(82, 196, 26, 0.1);
+  color: #52c41a;
 }
 
 .detail-badge.danger {
-  background: rgba(255, 98, 87, 0.12);
-  color: #e75a4d;
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
 }
 
 .info-card {
   padding: 28rpx;
-  background: #fff9eb;
+  background: #fffbe6;
 }
 
 .info-title {
   font-size: 26rpx;
   font-weight: 700;
-  color: #b97b15;
+  color: #faad14;
 }
 
 .info-text {
   margin-top: 12rpx;
   font-size: 24rpx;
   line-height: 1.7;
-  color: #9a6a12;
+  color: #d48806;
 }
 
 @keyframes skeleton-shimmer {

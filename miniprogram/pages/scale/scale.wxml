@@ -1,4 +1,13 @@
 <view class="page">
+  <!-- 顶部导航栏 -->
+  <view class="header-section">
+    <navigator url="/pages/index/index" class="back-btn">
+      <text class="back-icon">‹</text>
+    </navigator>
+    <text class="page-title">智能体重秤</text>
+    <view class="placeholder"></view>
+  </view>
+
   <view class="hero-card">
     <view class="hero-label">Live Weight</view>
     <view class="hero-title">智能体重秤</view>
@@ -24,12 +33,9 @@
 
   <view class="card">
     <view class="section-title">用户归属</view>
-    <picker mode="selector" range="{{users}}" range-key="name" bindchange="bindUserChange">
-      <view class="picker-text">{{selectedUserIndex>=0 ? users[selectedUserIndex].name : '选择归属用户'}}</view>
-    </picker>
-    <view class="new-user">
-      <input class="name-input" placeholder="新增用户姓名" value="{{newUserName}}" bindinput="bindNewUserInput" />
-      <button class="mini-action" bindtap="createUser">新增</button>
+    <view class="current-user">
+      <text class="user-label">当前用户：</text>
+      <text class="user-name">{{userInfo.nickname || userInfo.phone_number}}</text>
     </view>
     <button class="upload-action" bindtap="uploadData" disabled="{{!isStabilized}}">
       上传数据

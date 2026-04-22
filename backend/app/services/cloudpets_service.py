@@ -4,7 +4,7 @@ import logging
 import asyncio
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, select
 from ..models.db import engine
 from ..models.models import SystemConfig
 import time
@@ -16,13 +16,14 @@ BASE_URL = "https://cn.cloudpets.net"
 
 DEVICE_ID = "336704"
 
-# 统一账号密码配置 (ACCOUNT/PASSWORD)
+# 统一账号密码配置 (account/password)
 # CloudPets 需要去除 "86-" 或 "+86" 前缀
 from ..utils.config_manager import get_config_from_db
 
 # 从数据库读取配置（不再使用环境变量）
-ACCOUNT = get_config_from_db("ACCOUNT")
-PASSWORD = get_config_from_db("PASSWORD")
+# 注意：这里读取的是全局配置或第一个用户的配置，用于模块级别初始化
+ACCOUNT = get_config_from_db("account")
+PASSWORD = get_config_from_db("password")
 
 CLOUDPETS_ACCOUNT = ACCOUNT
 if CLOUDPETS_ACCOUNT:
@@ -50,28 +51,45 @@ class FeedingPlan(BaseModel):
     remark: Optional[str] = ""
 
 class CloudPetsService:
-    def __init__(self):
+    def __init__(self, user_id: Optional[int] = None):
+        self.user_id = user_id
+        self.account = None  # 保存账号密码用于重试登录
+        self.password = None
         self.client = httpx.AsyncClient(base_url=BASE_URL, headers=DEFAULT_HEADERS, timeout=10.0)
-        # 不再同步加载，改为在 initialize 中异步加载
 
-    async def initialize(self):
+    async def initialize(self, user_id: Optional[int] = None) -> bool:
         """Initialize service: load token from DB, or login if credentials available"""
-        logger.info("Initializing CloudPets Service...")
+        # 使用传入的user_id或实例的user_id
+        uid = user_id or self.user_id
+        
+        logger.info(f"Initializing CloudPets Service (user_id={uid})...")
         
         # Try to load existing token from database
         if await self._load_token_from_db():
             logger.info("CloudPets token loaded from DB")
             return True
         
-        # No token in DB, check if credentials are configured
-        if not CLOUDPETS_ACCOUNT or not CLOUDPETS_PASSWORD:
-            logger.info("No CloudPets credentials configured, skipping initialization")
-            logger.info("User needs to configure ACCOUNT/PASSWORD via mini-program")
+        # No token in DB, check if credentials are configured for this user
+        account = get_config_from_db("account", user_id=uid, platform="cloudpets")
+        password = get_config_from_db("password", user_id=uid, platform="cloudpets")
+        
+        if not account or not password:
+            logger.info(f"No CloudPets credentials configured for user {uid}, skipping initialization")
             return False
         
+        # Save credentials for retry login
+        self.account = account
+        self.password = password
+        
+        # Process account (remove 86- prefix)
+        if account.startswith("86-"):
+            account = account[3:]
+        elif account.startswith("+86"):
+            account = account[3:]
+        
         # Credentials available, attempt login
-        logger.info("No token found in DB, attempting initial login...")
-        if await self._login():
+        logger.info(f"No token found in DB, attempting initial login for user {uid}...")
+        if await self._login(account, password):
             logger.info("Initial login successful")
             return True
         else:
@@ -82,7 +100,10 @@ class CloudPetsService:
         """Try to load the latest token from database"""
         try:
             with Session(engine) as session:
-                config = session.get(SystemConfig, "cloudpets_token")
+                statement = select(SystemConfig).where(
+                    SystemConfig.key == "cloudpets_token"
+                ).order_by(SystemConfig.id.desc())
+                config = session.exec(statement).first()
                 if config:
                     self.client.headers["authorization"] = config.value
                     logger.info("Loaded CloudPets token from database")
@@ -95,7 +116,11 @@ class CloudPetsService:
         """Save new token to database"""
         try:
             with Session(engine) as session:
-                config = session.get(SystemConfig, "cloudpets_token")
+                statement = select(SystemConfig).where(
+                    SystemConfig.key == "cloudpets_token"
+                )
+                config = session.exec(statement).first()
+                
                 if not config:
                     config = SystemConfig(key="cloudpets_token", value=token)
                     session.add(config)
@@ -108,21 +133,17 @@ class CloudPetsService:
         except Exception as e:
             logger.error(f"Failed to save token to DB: {e}")
 
-    async def _login(self) -> bool:
+    async def _login(self, account: str, password: str) -> bool:
         """
         Login to get new token
         Path: /app/terminal/user/login
         Method: POST
         """
-        if not CLOUDPETS_ACCOUNT or not CLOUDPETS_PASSWORD:
-            logger.error("Missing CloudPets credentials (CLOUDPETS_ACCOUNT/PASSWORD)")
-            return False
-
         try:
-            logger.info(f"Attempting to login to CloudPets with account {CLOUDPETS_ACCOUNT}")
+            logger.info(f"Attempting to login to CloudPets with account {account}")
             payload = {
-                "account": CLOUDPETS_ACCOUNT,
-                "pwd": CLOUDPETS_PASSWORD,
+                "account": account,
+                "pwd": password,
                 "userType": "1"
             }
             # Login endpoint might need clean headers without old auth
@@ -193,7 +214,7 @@ class CloudPetsService:
 
             if should_retry:
                 logger.warning("Received 401 from CloudPets, attempting to re-login...")
-                if await self._login():
+                if self.account and self.password and await self._login(self.account, self.password):
                     # Retry the request with new token
                     # Update authorization header in kwargs if it was passed explicitly (rare)
                     if "headers" in kwargs:

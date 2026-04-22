@@ -4,20 +4,26 @@ const cloudRequest = require('../../utils/cloud_request.js')
 Page({
   data: {
     userInfo: null,
-    hasConfigured: false,
-    account: '',
-    password: '',
-    phoneNumber: '' // 用于登录
+    phoneNumber: '',
+    userDevices: [],
+    petDevices: [],
+    healthDevices: [],
+    showAddDeviceDialog: false,
+    showDeviceConfigDialog: false,
+    selectedDeviceType: '',
+    selectedPlatform: '',
+    selectedDeviceTypeText: '',
+    deviceAccount: '',
+    devicePassword: ''
   },
   
-  onLoad: function (options) {
+  onLoad: function () {
     this.checkLoginStatus()
   },
   
   onShow: function() {
-    // 每次显示页面时检查配置状态
     if (this.data.userInfo) {
-      this.checkConfigStatus()
+      this.loadUserDevices()
     }
   },
   
@@ -26,26 +32,16 @@ Page({
     const userInfo = wx.getStorageSync('userInfo')
     if (userInfo) {
       this.setData({ userInfo })
-      this.checkConfigStatus()
+      this.loadUserDevices()
     }
   },
   
-  // 检查配置状态
-  async checkConfigStatus() {
-    try {
-      const res = await cloudRequest.callContainer({
-        path: '/api/auth/check-config',
-        method: 'GET'
-      })
-      
-      // callContainer 已返回 res.data
-      this.setData({ hasConfigured: res.has_configured })
-    } catch (err) {
-      console.error('检查配置失败:', err)
-    }
+  // 手机号输入
+  onPhoneInput(e) {
+    this.setData({ phoneNumber: e.detail.value })
   },
   
-  // 手机号登录/注册
+  // 登录/注册
   async onLogin() {
     const { phoneNumber } = this.data
     
@@ -53,8 +49,6 @@ Page({
       wx.showToast({ title: '请输入正确的手机号', icon: 'none' })
       return
     }
-    
-    console.log('开始登录，手机号:', phoneNumber)
     
     wx.showLoading({ title: '登录中...' })
     
@@ -68,27 +62,18 @@ Page({
         }
       })
       
-      console.log('登录响应:', res)
-      
-      // callContainer 已返回 res.data，直接使用
       const userInfo = res
-      console.log('用户信息:', userInfo)
       wx.setStorageSync('userInfo', userInfo)
-      this.setData({ userInfo, hasConfigured: userInfo.has_configured })
+      this.setData({ userInfo })
+      
+      // 自动加载设备（后端已自动初始化服务）
+      await this.loadUserDevices()
       
       wx.hideLoading()
-      wx.showToast({ title: '登录成功', icon: 'success' })
-      
-      // 如果未配置，引导配置
-      if (!userInfo.has_configured) {
-        setTimeout(() => {
-          wx.showToast({ 
-            title: '请完成初始配置', 
-            icon: 'none',
-            duration: 2000
-          })
-        }, 1500)
-      }
+      wx.showToast({ 
+        title: userInfo.has_configured ? '登录成功，设备已连接' : '登录成功', 
+        icon: 'success' 
+      })
     } catch (err) {
       wx.hideLoading()
       console.error('登录异常:', err)
@@ -100,56 +85,134 @@ Page({
     }
   },
   
-  // 提交配置
-  async onSubmitConfig() {
-    const { account, password } = this.data
+  // 加载用户设备列表
+  async loadUserDevices() {
+    if (!this.data.userInfo || !this.data.userInfo.user_id) return
     
-    if (!account || !password) {
+    try {
+      const devices = await cloudRequest.callContainer({
+        path: `/api/devices?user_id=${this.data.userInfo.user_id}`,
+        method: 'GET'
+      })
+      
+      const petDevices = devices.filter(d => d.device_type === 'feeder' || d.device_type === 'litterbox')
+      const healthDevices = devices.filter(d => d.device_type === 'scale')
+      
+      this.setData({
+        userDevices: devices,
+        petDevices,
+        healthDevices
+      })
+    } catch (err) {
+      console.error('加载设备列表失败:', err)
+    }
+  },
+  
+  // 显示添加设备弹窗
+  showAddDeviceModal() {
+    this.setData({ showAddDeviceDialog: true })
+  },
+
+  // 关闭添加设备弹窗
+  closeAddDeviceModal() {
+    this.setData({ showAddDeviceDialog: false })
+  },
+
+  // 选择设备类型
+  selectDeviceType(e) {
+    const type = e.currentTarget.dataset.type
+    const platform = e.currentTarget.dataset.platform
+    const typeMap = {
+      'feeder': '喂食机',
+      'litterbox': '猫厕所',
+      'scale': '体脂秤'
+    }
+    
+    this.setData({
+      selectedDeviceType: type,
+      selectedPlatform: platform,
+      selectedDeviceTypeText: typeMap[type],
+      showAddDeviceDialog: false,
+      showDeviceConfigDialog: true,
+      deviceAccount: '',
+      devicePassword: ''
+    })
+  },
+
+  // 关闭设备配置弹窗
+  closeDeviceConfigModal() {
+    this.setData({
+      showDeviceConfigDialog: false,
+      deviceAccount: '',
+      devicePassword: ''
+    })
+  },
+  
+  // 账号输入
+  onAccountInput(e) {
+    this.setData({ deviceAccount: e.detail.value })
+  },
+  
+  // 密码输入
+  onPasswordInput(e) {
+    this.setData({ devicePassword: e.detail.value })
+  },
+
+  // 提交设备配置
+  async onSubmitDeviceConfig() {
+    const { selectedDeviceType, selectedPlatform, deviceAccount, devicePassword } = this.data
+    
+    if (!deviceAccount || !devicePassword) {
       wx.showToast({ title: '请填写完整信息', icon: 'none' })
       return
     }
     
-    wx.showLoading({ title: '保存中...' })
+    wx.showLoading({ title: '添加中...' })
     
     try {
-      // 保存 ACCOUNT
       await cloudRequest.callContainer({
-        path: '/api/config',
+        path: `/api/devices/add?user_id=${this.data.userInfo.user_id}`,
         method: 'POST',
         data: {
-          key: 'ACCOUNT',
-          value: account,
-          is_encrypted: true
+          device_type: selectedDeviceType,
+          platform: selectedPlatform,
+          account: deviceAccount,
+          password: devicePassword
         }
-      })
-      
-      // 保存 PASSWORD
-      await cloudRequest.callContainer({
-        path: '/api/config',
-        method: 'POST',
-        data: {
-          key: 'PASSWORD',
-          value: password,
-          is_encrypted: true
-        }
-      })
-      
-      // 重新初始化服务
-      await cloudRequest.callContainer({
-        path: '/api/auth/reinit-services',
-        method: 'POST'
       })
       
       wx.hideLoading()
-      wx.showToast({ title: '配置成功', icon: 'success' })
+      wx.showToast({ title: '添加成功', icon: 'success' })
       
-      // 更新状态
-      this.setData({ hasConfigured: true })
-      
+      this.closeDeviceConfigModal()
+      await this.loadUserDevices()
     } catch (err) {
       wx.hideLoading()
-      wx.showToast({ title: '配置失败，请重试', icon: 'none' })
-      console.error('配置错误:', err)
+      console.error('添加设备失败:', err)
+      wx.showToast({ title: '添加失败，请重试', icon: 'none' })
     }
+  },
+
+  // 阻止事件冒泡
+  stopPropagation() {},
+
+  // 退出登录
+  logout() {
+    wx.showModal({
+      title: '确认退出',
+      content: '确定要退出登录吗？',
+      success: (res) => {
+        if (res.confirm) {
+          wx.removeStorageSync('userInfo')
+          this.setData({ 
+            userInfo: null,
+            userDevices: [],
+            petDevices: [],
+            healthDevices: []
+          })
+          wx.showToast({ title: '已退出', icon: 'success' })
+        }
+      }
+    })
   }
 })

@@ -1,4 +1,6 @@
 {
   "usingComponents": {},
-  "navigationBarTitleText": "智能喂食器"
+  "navigationBarTitleText": "智能喂食器",
+  "navigationBarBackgroundColor": "#0a0e27",
+  "navigationBarTextStyle": "white"
 }

@@ -10,7 +10,7 @@ import logging
 import asyncio
 import json
 import time
-from sqlmodel import Session
+from sqlmodel import Session, select
 from ..models.db import engine
 from ..models.models import SystemConfig
 
@@ -18,18 +18,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PetKitService:
-    def __init__(self, username=None, password=None, region="CN", timezone="Asia/Shanghai"):
-        # 优先使用传入的参数，否则从数据库获取，最后从环境变量获取
+    def __init__(self, username=None, password=None, region="CN", timezone="Asia/Shanghai", user_id=None):
+        # 优先使用传入的参数
         if username and password:
             self.username = username
             self.password = password
         else:
-            # 尝试从数据库获取
+            # 从数据库获取（支持user_id）
             from ..utils.config_manager import get_config_from_db
-            # 从数据库读取配置（不再使用环境变量）
-            self.username = get_config_from_db("ACCOUNT")
-            self.password = get_config_from_db("PASSWORD")
+            self.username = get_config_from_db("account", user_id=user_id, platform="petkit")
+            self.password = get_config_from_db("password", user_id=user_id, platform="petkit")
         
+        self.user_id = user_id  # 保存user_id用于后续操作
         self.region = region
         self.timezone = timezone
         self.session = None
@@ -82,7 +82,11 @@ class PetKitService:
         """Try to load the latest session data from database"""
         try:
             with Session(engine) as session_db:
-                config = session_db.get(SystemConfig, self.token_key)
+                statement = select(SystemConfig).where(
+                    SystemConfig.key == self.token_key
+                ).order_by(SystemConfig.id.desc())
+                config = session_db.exec(statement).first()
+                
                 if config:
                     # 解析存储的会话数据
                     session_data = json.loads(config.value)
@@ -139,7 +143,11 @@ class PetKitService:
                 logger.debug(f"Could not extract session details: {e}")
 
             with Session(engine) as session_db:
-                config = session_db.get(SystemConfig, self.token_key)
+                statement = select(SystemConfig).where(
+                    SystemConfig.key == self.token_key
+                )
+                config = session_db.exec(statement).first()
+                
                 if not config:
                     config = SystemConfig(key=self.token_key, value=json.dumps(session_data))
                     session_db.add(config)

@@ -4,18 +4,30 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 数据库配置 - 硬编码连接字符串（因为需要先连接数据库才能读取配置）
-# 部署时请在 Vercel/服务器环境变量中设置 DATABASE_URL
+# 数据库配置 - 从环境变量读取
 import os
-database_url = os.getenv("DATABASE_URL")
+from dotenv import load_dotenv
 
-# 如果没有环境变量，使用默认配置（适用于本地开发）
-if not database_url:
-    # 本地开发默认配置
-    database_url = "mysql+pymysql://stef:%26YLQW84TFdX%26uat@rm-bp1dm2990215o3n4kko.mysql.rds.aliyuncs.com:3306/auto_home"
-    logger.info("⚠️  未检测到 DATABASE_URL 环境变量，使用默认配置（仅开发环境）")
+# 检测是否为开发环境（通过检查是否存在.env文件或特定环境变量）
+if os.path.exists('.env'):
+    load_dotenv()  # 加载.env文件
+    logger.info("✓ 开发环境，已加载.env配置")
 else:
-    logger.info("✓ 使用环境变量中的 DATABASE_URL")
+    logger.info("✓ 生产环境，从系统环境变量读取配置")
+
+# 从环境变量读取数据库配置（无默认值）
+mysql_host = os.getenv("MYSQL_ADDRESS")
+mysql_user = os.getenv("MYSQL_USERNAME")
+mysql_password = os.getenv("MYSQL_PASSWORD")
+
+if not all([mysql_host, mysql_user, mysql_password]):
+    raise EnvironmentError(
+        "必须配置 MYSQL_ADDRESS、MYSQL_USERNAME、MYSQL_PASSWORD 环境变量\n"
+        "开发环境：创建.env文件并填写配置\n"
+        "生产环境：在微信云托管控制台配置环境变量"
+    )
+
+database_url = f"mysql+pymysql://{mysql_user}:{mysql_password}@{mysql_host}/auto_home"
 
 logger.info(f"Database URL: {database_url.split('://')[0]}://***")
 
@@ -33,15 +45,15 @@ logger.info(f"✓ 数据库引擎创建完成，耗时：{time.time() - engine_s
 def init_db():
     """初始化数据库表结构，检测无表时自动创建"""
     logger.info("正在检查数据库表结构...")
-    
+
     # 检查是否已有表
     from sqlmodel import SQLModel
     from sqlalchemy import inspect
-    
+
     inspector = inspect(engine)
     existing_tables = inspector.get_table_names()
     expected_tables = list(SQLModel.metadata.tables.keys())
-    
+
     if not existing_tables:
         logger.info("📊 检测到空数据库，开始自动创建表结构...")
         logger.info(f"📋 计划创建的表：{', '.join(expected_tables)}")

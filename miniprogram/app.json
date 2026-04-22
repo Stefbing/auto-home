@@ -7,8 +7,8 @@
   ],
   "window": {
     "backgroundTextStyle": "light",
-    "navigationBarBackgroundColor": "#f7f9fc",
-    "navigationBarTitleText": "AutoHome",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTitleText": "物联四方",
     "navigationBarTextStyle": "black"
   },
   "style": "v2",

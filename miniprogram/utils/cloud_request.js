@@ -1,6 +1,19 @@
 /**
- * 微信云托管请求封装 - 优化版
+ * 通用请求封装 - 支持云开发和本地调试
  */
+
+// 配置：切换运行环境
+const CONFIG = {
+  // 'cloud' - 云托管模式, 'local' - 本地调试模式
+  mode: 'local',
+
+  // 云托管配置
+  cloudEnv: 'prod-2gv6fjaz6751c24a',
+  cloudService: 'home',
+
+  // 本地调试配置（替换为你的本地后端地址）
+  localBaseUrl: 'http://localhost:8000'
+};
 
 let isCloudInitialized = false;
 
@@ -13,7 +26,7 @@ function initCloud() {
   }
 
   wx.cloud.init({
-    env: 'prod-2gv6fjaz6751c24a',
+    env: CONFIG.cloudEnv,
     traceUser: true,
   });
 
@@ -22,41 +35,87 @@ function initCloud() {
 }
 
 /**
- * 云托管请求封装
+ * 统一请求封装 - 自动根据模式选择请求方式
  */
 function callContainer(options) {
   const { path, method = 'GET', data = {}, header = {}, success, fail } = options;
 
+  // 自动从本地缓存获取 Token
+  const token = wx.getStorageSync('token');
+  const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+  // 根据模式选择请求方式
+  if (CONFIG.mode === 'local') {
+    return localRequest(path, method, data, { ...authHeader, ...header }, success, fail);
+  } else {
+    return cloudRequest(path, method, data, { ...authHeader, ...header }, success, fail);
+  }
+}
+
+/**
+ * 本地调试请求
+ */
+function localRequest(path, method, data, header, success, fail) {
+  return new Promise((resolve, reject) => {
+    wx.request({
+      url: `${CONFIG.localBaseUrl}${path}`,
+      method: method,
+      header: {
+        'Content-Type': 'application/json',
+        ...header
+      },
+      data: data,
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          const result = res.data;
+          if (success) success(result);
+          resolve(result);
+        } else if (res.statusCode === 401) {
+          console.error('登录失效');
+          if (fail) fail(res);
+          reject(res);
+        } else {
+          if (fail) fail(res);
+          reject(res);
+        }
+      },
+      fail: (err) => {
+        console.error('本地请求异常:', err);
+        if (fail) fail(err);
+        reject(err);
+      }
+    });
+  });
+}
+
+/**
+ * 云托管请求
+ */
+function cloudRequest(path, method, data, header, success, fail) {
   if (!initCloud()) {
     const error = new Error('云开发初始化失败');
     if (fail) fail(error);
     return Promise.reject(error);
   }
 
-  // 自动从本地缓存获取 Token
-  const token = wx.getStorageSync('token');
-  const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
-
   return new Promise((resolve, reject) => {
     wx.cloud.callContainer({
       config: {
-        env: 'prod-2gv6fjaz6751c24a'
+        env: CONFIG.cloudEnv
       },
       path: path,
       method: method,
       header: {
-        'X-WX-SERVICE': 'home',
+        'X-WX-SERVICE': CONFIG.cloudService,
         'Content-Type': 'application/json',
-        ...authHeader,
         ...header
       },
       data: data,
       success: (res) => {
-        // 状态码拦截
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          const result = res.data; // 直接返回业务数据
-          if (success) success(result); // 兼容回调方式
-          resolve(result); // Promise 方式
+          const result = res.data;
+          if (success) success(result);
+          resolve(result);
         } else if (res.statusCode === 401) {
           console.error('登录失效');
           if (fail) fail(res);
@@ -77,5 +136,6 @@ function callContainer(options) {
 
 module.exports = {
   callContainer,
-  initCloud
+  initCloud,
+  getConfig: () => CONFIG
 };

@@ -7,7 +7,7 @@
 -- 1. 用户表
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS user (
-    id VARCHAR(32) PRIMARY KEY,                       -- UUID (32 chars, no hyphens)
+    id INT AUTO_INCREMENT PRIMARY KEY,                  -- 自增主键
     phone_number VARCHAR(20) UNIQUE NOT NULL,          -- 手机号（唯一标识）
     nickname VARCHAR(100),                              -- 昵称
     gender VARCHAR(10) DEFAULT 'male',                  -- 性别：male/female
@@ -18,21 +18,29 @@ CREATE TABLE IF NOT EXISTS user (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 2. 系统配置表（加密存储敏感信息）
+-- 2. 系统配置表（加密存储敏感信息，支持多用户多设备）
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS systemconfig (
-    `key` VARCHAR(100) PRIMARY KEY,                     -- 配置键名（key 是 MySQL 保留字，需要反引号）
+    id INT AUTO_INCREMENT PRIMARY KEY,                  -- 自增主键
+    user_id INT NOT NULL DEFAULT 0,                     -- 关联用户ID（0表示全局配置）
+    `key` VARCHAR(50) NOT NULL,                         -- 配置键名（如：account, password, app_version）
     value TEXT NOT NULL,                                -- 配置值（加密或明文）
+    platform VARCHAR(50),                               -- 平台：petkit/xiaomi/cloudpets（设备配置专用）
+    device_name VARCHAR(100),                           -- 设备名称（设备配置专用）
     is_encrypted TINYINT(1) NOT NULL DEFAULT 0,         -- 是否加密：0=明文, 1=加密
-    updated_at BIGINT NOT NULL                          -- 更新时间戳（毫秒）
+    updated_at BIGINT NOT NULL,                         -- 更新时间戳（毫秒）
+    
+    INDEX idx_user_key (user_id, `key`),                -- 用户+配置键联合索引
+    INDEX idx_platform (platform),                      -- 平台索引
+    CONSTRAINT fk_config_user FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
 -- 3. 体重记录表
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS weightrecord (
-    id VARCHAR(32) PRIMARY KEY,                         -- UUID (32 chars, no hyphens)
-    user_id VARCHAR(32) NOT NULL,                       -- 关联用户 UUID
+    id INT AUTO_INCREMENT PRIMARY KEY,                  -- 自增主键
+    user_id INT NOT NULL,                               -- 关联用户ID
     weight DECIMAL(5,2) NOT NULL,                       -- 体重（kg），最大 999.99
     impedance INT,                                      -- 阻抗值
     bmi DECIMAL(5,2),                                   -- BMI
@@ -53,11 +61,10 @@ CREATE TABLE IF NOT EXISTS weightrecord (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 初始化默认配置
+-- 初始化默认全局配置
 -- ============================================================================
-INSERT INTO systemconfig (`key`, value, is_encrypted, updated_at)
+INSERT INTO systemconfig (user_id, `key`, value, is_encrypted, updated_at)
 VALUES 
-    ('app_version', '0.4.0', 0, UNIX_TIMESTAMP() * 1000),
-    ('initialized', 'false', 0, UNIX_TIMESTAMP() * 1000),
-    ('PETKIT_DISABLE_SSL_VERIFY', 'false', 0, UNIX_TIMESTAMP() * 1000)
+    (0, 'app_version', '0.5.0', 0, UNIX_TIMESTAMP() * 1000),
+    (0, 'PETKIT_DISABLE_SSL_VERIFY', 'false', 0, UNIX_TIMESTAMP() * 1000)
 ON DUPLICATE KEY UPDATE value = VALUES(value);

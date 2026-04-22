@@ -9,7 +9,7 @@ class User(SQLModel, table=True):
     __tablename__ = "user"
     __table_args__ = {"extend_existing": True}  # 防止元数据重复注册
     
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True, max_length=32)  # UUID without hyphens
+    id: Optional[int] = Field(default=None, primary_key=True)  # 自增主键
     phone_number: str = Field(max_length=20, unique=True, index=True)  # 手机号（唯一标识）
     nickname: Optional[str] = Field(default=None, max_length=100)  # 昵称
     gender: str = Field(default="male", max_length=10)  # male/female
@@ -21,8 +21,8 @@ class WeightRecord(SQLModel, table=True):
     __tablename__ = "weightrecord"
     __table_args__ = {"extend_existing": True}  # 防止元数据重复注册
     
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True, max_length=32)  # UUID without hyphens
-    user_id: str = Field(foreign_key="user.id", index=True, max_length=32)  # 关联用户 UUID
+    id: Optional[int] = Field(default=None, primary_key=True)  # 自增主键
+    user_id: int = Field(foreign_key="user.id", index=True)  # 关联用户ID
     weight: float
     impedance: Optional[int] = None
     bmi: Optional[float] = None
@@ -37,11 +37,16 @@ class WeightRecord(SQLModel, table=True):
     xiaomi_push_time: Optional[int] = Field(default=None, sa_column=Column(BIGINT))
 
 class SystemConfig(SQLModel, table=True):
-    """系统配置表 - 加密存储敏感信息"""
+    """系统配置表 - 简化版，支持多用户多设备"""
     __tablename__ = "systemconfig"
     __table_args__ = {"extend_existing": True}  # 防止元数据重复注册
     
-    key: str = Field(primary_key=True, max_length=100)
-    value: str
+    id: Optional[int] = Field(default=None, primary_key=True)  # 自增主键
+    user_id: int = Field(default=0, foreign_key="user.id", index=True)  # 关联用户ID（0表示全局配置）
+    key: str = Field(max_length=50, index=True)  # 配置键（如：account, password, app_version）
+    value: str  # 配置值（加密或明文）
+    platform: Optional[str] = Field(default=None, max_length=50, index=True)  # 平台：petkit/xiaomi/cloudpets（设备配置专用）
+    device_name: Optional[str] = Field(default=None, max_length=100)  # 设备名称（设备配置专用）
     is_encrypted: bool = Field(default=False)  # 标记是否加密存储
     updated_at: int = Field(default_factory=lambda: int(time.time() * 1000), sa_column=Column(BIGINT, nullable=False))  # 毫秒时间戳
+

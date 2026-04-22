@@ -8,50 +8,30 @@ Page({
     weight: 0,
     isStabilized: false,
     logs: [],
-    users: [],
-    selectedUserIndex: -1,
-    newUserName: ""
+    userInfo: null,  // 当前登录用户
+    selectedUserIndex: -1,  // 保留字段但不再使用多用户选择
+    users: [{ id: null, name: '当前用户' }]  // 简化为单用户
   },
 
   onLoad() {
-    this.fetchUsers()
+    this.checkLoginStatus()
   },
 
-  fetchUsers() {
-    cloudRequest.callContainer({
-      path: '/api/users',
-      success: res => {
-        // callContainer 已返回业务数据
-        this.setData({ users: res })
-      },
-      fail: err => {
-        console.error('获取用户列表失败:', err);
-        
-        // 检查是否是 503 服务未初始化
-        if (err.statusCode === 503) {
-          wx.showModal({
-            title: '服务未配置',
-            content: '体重秤功能需要配置账号密码\n\n请在首页完成初始配置',
-            showCancel: true,
-            cancelText: '取消',
-            confirmText: '去配置',
-            success: (res) => {
-              if (res.confirm) {
-                // 跳转到首页进行配置
-                wx.switchTab({
-                  url: '/pages/index/index'
-                });
-              }
-            }
-          });
-        } else {
-          wx.showToast({
-            title: '加载失败',
-            icon: 'error'
-          });
+  checkLoginStatus() {
+    const userInfo = wx.getStorageSync('userInfo')
+    if (!userInfo) {
+      wx.showModal({
+        title: '未登录',
+        content: '请先在首页登录',
+        showCancel: false,
+        confirmText: '去登录',
+        success: () => {
+          wx.reLaunch({ url: '/pages/index/index' })
         }
-      }
-    })
+      })
+      return
+    }
+    this.setData({ userInfo })
   },
 
   startScan() {
@@ -111,8 +91,11 @@ Page({
       wx.showToast({ title: '无效体重', icon: 'none' });
       return;
     }
-    const idx = this.data.selectedUserIndex
-    const userId = idx >= 0 && this.data.users[idx] ? this.data.users[idx].id : null
+    
+    if (!this.data.userInfo || !this.data.userInfo.user_id) {
+      wx.showToast({ title: '请先登录', icon: 'none' });
+      return;
+    }
     
     cloudRequest.callContainer({
       path: '/api/scale/record',
@@ -120,7 +103,7 @@ Page({
       data: {
         weight: this.data.weight,
         timestamp: Date.now(),
-        user_id: userId
+        user_id: parseInt(this.data.userInfo.user_id)
       },
       success: (res) => {
         wx.showToast({ title: '上传成功' });
@@ -132,16 +115,13 @@ Page({
         if (err.statusCode === 503) {
           wx.showModal({
             title: '服务未配置',
-            content: '体重秤功能需要配置账号密码\n\n请在首页完成初始配置',
+            content: '体重秤功能需要配置账号密码\n\n请在首页添加体脂秤设备',
             showCancel: true,
             cancelText: '取消',
             confirmText: '去配置',
             success: (res) => {
               if (res.confirm) {
-                // 跳转到首页进行配置
-                wx.switchTab({
-                  url: '/pages/index/index'
-                });
+                wx.reLaunch({ url: '/pages/index/index' });
               }
             }
           });
@@ -157,56 +137,12 @@ Page({
   },
 
   bindUserChange(e) {
-    this.setData({ selectedUserIndex: e.detail.value })
-  },
-
-  bindNewUserInput(e) {
-    this.setData({ newUserName: e.detail.value })
+    // 保留方法但不执行任何操作（兼容旧代码）
   },
 
   createUser() {
-    const name = this.data.newUserName.trim()
-    if (!name) {
-      wx.showToast({ title: '请输入姓名', icon: 'none' })
-      return
-    }
-    cloudRequest.callContainer({
-      path: '/api/users',
-      method: 'POST',
-      data: { name },
-      success: res => {
-        this.setData({ newUserName: "" })
-        this.fetchUsers()
-        wx.showToast({ title: '已新增' })
-      },
-      fail: err => {
-        console.error('创建用户失败:', err);
-        
-        // 检查是否是 503 服务未初始化
-        if (err.statusCode === 503) {
-          wx.showModal({
-            title: '服务未配置',
-            content: '体重秤功能需要配置账号密码\n\n请在首页完成初始配置',
-            showCancel: true,
-            cancelText: '取消',
-            confirmText: '去配置',
-            success: (res) => {
-              if (res.confirm) {
-                // 跳转到首页进行配置
-                wx.switchTab({
-                  url: '/pages/index/index'
-                });
-              }
-            }
-          });
-        } else {
-          wx.showToast({
-            title: '操作失败',
-            icon: 'error'
-          });
-        }
-      }
-    })
+    // 废弃：现在直接使用登录用户
+    wx.showToast({ title: '请使用首页登录', icon: 'none' })
   },
 
   log(msg) {

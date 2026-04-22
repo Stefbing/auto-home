@@ -5,7 +5,7 @@ import base64
 import time
 import logging
 from typing import Optional, Dict, Any
-from sqlmodel import Session
+from sqlmodel import Session, select
 import requests
 from ..models.db import engine
 from ..models.models import SystemConfig
@@ -63,7 +63,11 @@ class XiaomiCloudService:
         """从数据库加载 Token"""
         try:
             with Session(engine) as session:
-                config = session.get(SystemConfig, self._token_key)
+                statement = select(SystemConfig).where(
+                    SystemConfig.key == self._token_key
+                ).order_by(SystemConfig.id.desc())
+                config = session.exec(statement).first()
+                
                 if config:
                     token_data = json.loads(config.value)
                     self._ssecurity = token_data.get('ssecurity')
@@ -94,7 +98,11 @@ class XiaomiCloudService:
             }
 
             with Session(engine) as session:
-                config = session.get(SystemConfig, self._token_key)
+                statement = select(SystemConfig).where(
+                    SystemConfig.key == self._token_key
+                )
+                config = session.exec(statement).first()
+                
                 if not config:
                     config = SystemConfig(key=self._token_key, value=json.dumps(token_data))
                     session.add(config)

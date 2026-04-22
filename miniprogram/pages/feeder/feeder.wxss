@@ -1,32 +1,73 @@
 page {
-  background: #f4f7fb;
+  background: #f2f4f8;
 }
 
 .page {
   min-height: 100vh;
-  padding: 28rpx;
+  padding: 0;
   box-sizing: border-box;
+}
+
+/* ========== 顶部导航栏 ========== */
+.header-section {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #ffffff;
+  padding: 20rpx 32rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
+}
+
+.back-btn {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08);
+}
+
+.back-icon {
+  font-size: 48rpx;
+  color: #1677ff;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.page-title {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: #333333;
+}
+
+.placeholder {
+  width: 72rpx;
 }
 
 .hero-card,
 .card {
   background: #ffffff;
-  border-radius: 28rpx;
-  box-shadow: 0 18rpx 36rpx rgba(20, 40, 80, 0.06);
+  border-radius: 32rpx;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04);
 }
 
 .hero-card {
-  margin-bottom: 24rpx;
-  padding: 34rpx;
-  background: linear-gradient(135deg, #ffffff 0%, #eef5ff 100%);
+  margin: 32rpx 32rpx 24rpx;
+  padding: 36rpx;
+  background: linear-gradient(135deg, #ffffff 0%, #e8f2ff 100%);
 }
 
 .hero-label {
   display: inline-block;
   padding: 10rpx 18rpx;
   border-radius: 999rpx;
-  background: rgba(44, 110, 240, 0.12);
-  color: #2c6ef0;
+  background: rgba(22, 119, 255, 0.1);
+  color: #1677ff;
   font-size: 22rpx;
   font-weight: 600;
 }
@@ -35,19 +76,19 @@ page {
   margin-top: 22rpx;
   font-size: 42rpx;
   font-weight: 700;
-  color: #132238;
+  color: #333333;
 }
 
 .hero-desc {
   margin-top: 14rpx;
   font-size: 25rpx;
   line-height: 1.7;
-  color: #66788f;
+  color: #666666;
 }
 
 .card {
   margin-bottom: 24rpx;
-  padding: 30rpx;
+  padding: 32rpx;
 }
 
 .highlight-card {
@@ -63,20 +104,20 @@ page {
 .card-title {
   font-size: 32rpx;
   font-weight: 700;
-  color: #162436;
+  color: #333333;
 }
 
 .card-subtitle {
   margin-top: 10rpx;
   font-size: 24rpx;
-  color: #7b8ba0;
+  color: #888888;
 }
 
 .pill-tag {
   padding: 10rpx 18rpx;
   border-radius: 999rpx;
-  background: #fff;
-  color: #ef8d22;
+  background: rgba(255, 140, 66, 0.1);
+  color: #ff8c42;
   font-size: 22rpx;
   font-weight: 700;
 }
@@ -84,10 +125,11 @@ page {
 .primary-action {
   margin-top: 28rpx;
   border-radius: 22rpx;
-  background: linear-gradient(135deg, #2c6ef0 0%, #5a8dff 100%);
+  background: linear-gradient(135deg, #1677ff 0%, #4096ff 100%);
   color: #ffffff;
   font-size: 30rpx;
   font-weight: 600;
+  box-shadow: 0 8rpx 24rpx rgba(22, 119, 255, 0.25);
 }
 
 .primary-action::after,
@@ -97,7 +139,7 @@ page {
 
 .primary-action[disabled],
 .ghost-action[disabled] {
-  opacity: 0.86;
+  opacity: 0.6;
 }
 
 .plan-skeleton {
@@ -110,7 +152,7 @@ page {
   justify-content: space-between;
   align-items: center;
   padding: 24rpx 0;
-  border-bottom: 1rpx solid #edf1f5;
+  border-bottom: 1rpx solid #f0f0f0;
 }
 
 .skeleton-item:last-child,
@@ -124,7 +166,7 @@ page {
 
 .skeleton-line,
 .skeleton-switch {
-  background: linear-gradient(90deg, #eef2f8 25%, #f8fbff 50%, #eef2f8 75%);
+  background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 50%, #f0f0f0 75%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
 }
@@ -153,27 +195,27 @@ page {
 .plan-time {
   font-size: 30rpx;
   font-weight: 700;
-  color: #1b2a3d;
+  color: #333333;
 }
 
 .plan-meta {
   margin-top: 8rpx;
   font-size: 23rpx;
-  color: #7b8ca3;
+  color: #888888;
 }
 
 .empty-state {
   padding: 42rpx 0 20rpx;
   text-align: center;
   font-size: 24rpx;
-  color: #93a1b3;
+  color: #888888;
 }
 
 .ghost-action {
   margin-top: 24rpx;
   border-radius: 22rpx;
-  background: #eef3fb;
-  color: #2c6ef0;
+  background: #e8f2ff;
+  color: #1677ff;
   font-size: 28rpx;
   font-weight: 600;
 }
