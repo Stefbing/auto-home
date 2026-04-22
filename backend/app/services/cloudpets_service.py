@@ -101,7 +101,8 @@ class CloudPetsService:
         try:
             with Session(engine) as session:
                 statement = select(SystemConfig).where(
-                    SystemConfig.key == "cloudpets_token"
+                    SystemConfig.key == "cloudpets_token",
+                    SystemConfig.user_id == (self.user_id or 0)
                 ).order_by(SystemConfig.id.desc())
                 config = session.exec(statement).first()
                 if config:
@@ -117,12 +118,17 @@ class CloudPetsService:
         try:
             with Session(engine) as session:
                 statement = select(SystemConfig).where(
-                    SystemConfig.key == "cloudpets_token"
+                    SystemConfig.key == "cloudpets_token",
+                    SystemConfig.user_id == (self.user_id or 0)
                 )
                 config = session.exec(statement).first()
                 
                 if not config:
-                    config = SystemConfig(key="cloudpets_token", value=token)
+                    config = SystemConfig(
+                        user_id=self.user_id or 0,
+                        key="cloudpets_token",
+                        value=token
+                    )
                     session.add(config)
                 else:
                     config.value = token
@@ -231,8 +237,6 @@ class CloudPetsService:
 
     async def close(self):
         await self.client.aclose()
-
-    # ... (get_servings_today, manual_feed, get_feeding_plans 保持不变) ...
 
     async def get_servings_today(self) -> Dict[str, Any]:
         """

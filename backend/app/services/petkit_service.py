@@ -71,19 +71,23 @@ class PetKitService:
         logger.info("Initializing PetKit Service...")
         if not await self._load_session_from_db():
             logger.info("No session found in DB, attempting initial login...")
-            if await self._login():
+            success = await self._login()
+            if success:
                 logger.info("Initial login successful")
             else:
                 logger.error("Initial login failed")
+            return success
         else:
             logger.info("PetKit session loaded from DB")
+            return True
 
     async def _load_session_from_db(self) -> bool:
         """Try to load the latest session data from database"""
         try:
             with Session(engine) as session_db:
                 statement = select(SystemConfig).where(
-                    SystemConfig.key == self.token_key
+                    SystemConfig.key == self.token_key,
+                    SystemConfig.user_id == (self.user_id or 0)
                 ).order_by(SystemConfig.id.desc())
                 config = session_db.exec(statement).first()
                 
@@ -144,12 +148,17 @@ class PetKitService:
 
             with Session(engine) as session_db:
                 statement = select(SystemConfig).where(
-                    SystemConfig.key == self.token_key
+                    SystemConfig.key == self.token_key,
+                    SystemConfig.user_id == (self.user_id or 0)
                 )
                 config = session_db.exec(statement).first()
                 
                 if not config:
-                    config = SystemConfig(key=self.token_key, value=json.dumps(session_data))
+                    config = SystemConfig(
+                        user_id=self.user_id or 0,
+                        key=self.token_key,
+                        value=json.dumps(session_data)
+                    )
                     session_db.add(config)
                 else:
                     config.value = json.dumps(session_data)
