@@ -54,8 +54,46 @@ async def lifespan(app: FastAPI):
     # 初始化 CloudPets 服务 (从数据库加载 Token 或自动登录)
     logger.info("正在初始化 CloudPets 服务...")
     cloudpets_start = time.time()
-    await cloudpets_service.initialize()
-    logger.info(f"✓ CloudPets 服务初始化完成，耗时：{time.time() - cloudpets_start:.2f}秒")
+    
+    # 查找第一个有 CloudPets 配置的用户
+    from backend.app.utils.config_manager import get_user_devices
+    from sqlmodel import Session, select
+    from .models.models import SystemConfig
+    from .models.db import engine  # 添加 engine 导入
+    
+    first_user_id = None
+    try:
+        with Session(engine) as session:
+            # 查询所有有 cloudpets 平台配置的用户
+            statement = select(SystemConfig.user_id).where(
+                SystemConfig.platform == "cloudpets",
+                SystemConfig.key == "account"
+            ).distinct()
+            user_ids = session.exec(statement).all()
+            if user_ids:
+                first_user_id = user_ids[0]
+                logger.info(f"找到 CloudPets 配置用户: {first_user_id}")
+    except Exception as e:
+        logger.warning(f"查询 CloudPets 配置用户失败: {e}")
+    
+    # 如果找到用户配置，使用该用户ID初始化；否则使用默认方式
+    if first_user_id:
+        # 创建新的服务实例并传入user_id
+        import importlib
+        import backend.app.services.cloudpets_service as cp_module
+        importlib.reload(cp_module)
+        state.cloudpets = cp_module.CloudPetsService(user_id=first_user_id)
+        init_success = await state.cloudpets.initialize()
+        if init_success:
+            logger.info(f"✓ CloudPets 服务初始化成功（用户 {first_user_id}），耗时：{time.time() - cloudpets_start:.2f}秒")
+        else:
+            logger.warning(f"⚠ CloudPets 服务初始化失败（用户 {first_user_id}）")
+            state.cloudpets = None
+    else:
+        # 没有用户配置，尝试使用全局配置初始化
+        await cloudpets_service.initialize()
+        state.cloudpets = cloudpets_service
+        logger.info(f"✓ CloudPets 服务初始化完成（全局配置），耗时：{time.time() - cloudpets_start:.2f}秒")
 
     # 初始化 Xiaomi Cloud 服务
     logger.info("正在初始化 Xiaomi Cloud 服务...")
@@ -67,32 +105,72 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("✗ Xiaomi Cloud 服务初始化失败，体重推送功能将不可用")
 
-    # 统一从数据库读取 ACCOUNT 和 PASSWORD
-    # 注意：PetKit 通常需要带区号 (如 86-)
-    from backend.app.utils.config_manager import get_config_from_db
+    # 初始化 PetKit 服务
+    logger.info("正在初始化 PetKit 服务...")
+    petkit_start = time.time()
     
-    username = get_config_from_db("ACCOUNT")
-    password = get_config_from_db("PASSWORD")
-
-    if username and password:
-        logger.info(f"正在初始化 PetKit 服务：{username}...")
-        petkit_start = time.time()
-        state.petkit = PetKitService(username, password)
-        try:
-            await state.petkit.initialize()
-            logger.info(f"✓ PetKit 服务连接成功，耗时：{time.time() - petkit_start:.2f}秒")
-        except Exception as e:
-            logger.error(f"PetKit 连接失败：{e}")
-            logger.error(f"✗ PetKit 初始化失败，耗时：{time.time() - petkit_start:.2f}秒")
+    # 查找第一个有 PetKit 配置的用户
+    petkit_user_id = None
+    try:
+        with Session(engine) as session:
+            # 查询所有有 petkit 平台配置的用户
+            statement = select(SystemConfig.user_id).where(
+                SystemConfig.platform == "petkit",
+                SystemConfig.key == "account"
+            ).distinct()
+            user_ids = session.exec(statement).all()
+            if user_ids:
+                petkit_user_id = user_ids[0]
+                logger.info(f"找到 PetKit 配置用户: {petkit_user_id}")
+    except Exception as e:
+        logger.warning(f"查询 PetKit 配置用户失败: {e}")
+    
+    # 如果找到用户配置，使用该用户ID初始化
+    if petkit_user_id:
+        from backend.app.utils.config_manager import get_config_from_db
+        
+        # 获取该用户的账号密码（PetKit 通常需要带区号如 86-）
+        username = get_config_from_db("account", user_id=petkit_user_id, platform="petkit")
+        password = get_config_from_db("password", user_id=petkit_user_id, platform="petkit")
+        
+        if username and password:
+            logger.info(f"正在初始化 PetKit 服务（用户 {petkit_user_id}）：{username}...")
+            state.petkit = PetKitService(username, password, user_id=petkit_user_id)
+            try:
+                await state.petkit.initialize()
+                logger.info(f"✓ PetKit 服务连接成功（用户 {petkit_user_id}），耗时：{time.time() - petkit_start:.2f}秒")
+            except Exception as e:
+                logger.error(f"PetKit 连接失败：{e}")
+                logger.error(f"✗ PetKit 初始化失败（用户 {petkit_user_id}），耗时：{time.time() - petkit_start:.2f}秒")
+                state.petkit = None
+        else:
+            logger.warning(f"警告：用户 {petkit_user_id} 的 PetKit 配置不完整")
+            state.petkit = None
     else:
-        logger.warning("警告：未检测到 PETKIT 配置（数据库或环境变量），相关 API 将不可用")
+        # 没有用户配置，尝试使用全局配置初始化
+        from backend.app.utils.config_manager import get_config_from_db
+        username = get_config_from_db("ACCOUNT")
+        password = get_config_from_db("PASSWORD")
+        
+        if username and password:
+            logger.info(f"正在初始化 PetKit 服务（全局配置）：{username}...")
+            state.petkit = PetKitService(username, password)
+            try:
+                await state.petkit.initialize()
+                logger.info(f"✓ PetKit 服务连接成功（全局配置），耗时：{time.time() - petkit_start:.2f}秒")
+            except Exception as e:
+                logger.error(f"PetKit 连接失败：{e}")
+                state.petkit = None
+        else:
+            logger.warning("警告：未检测到 PetKit 配置（数据库或环境变量），相关 API 将不可用")
+            state.petkit = None
     
     # 初始化数据刷新任务
     logger.info("正在初始化数据刷新任务...")
     task_start = time.time()
     state.data_refresh_task = create_data_refresh_task(
         state.petkit, 
-        cloudpets_service, 
+        state.cloudpets or cloudpets_service,  # 使用 state.cloudpets（可能为None）或全局实例
         cache_manager
     )
     logger.info(f"✓ 数据刷新任务初始化完成，耗时：{time.time() - task_start:.2f}秒")
@@ -140,7 +218,9 @@ async def lifespan(app: FastAPI):
         logger.info("正在关闭 PetKit 服务...")
         await state.petkit.close()
 
-    await cloudpets_service.close()
+    if state.cloudpets:
+        logger.info("正在关闭 CloudPets 服务...")
+        await state.cloudpets.close()
 
     if state.xiaomi_initialized:
         logger.info("Xiaomi Cloud service will be closed")
