@@ -13,8 +13,8 @@ CREATE TABLE IF NOT EXISTS user (
     gender VARCHAR(10) DEFAULT 'male',                  -- 性别：male/female
     age INT DEFAULT 25,                                 -- 年龄
     height INT DEFAULT 175,                             -- 身高（cm）
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,     -- 创建时间
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP  -- 更新时间
+    created_at BIGINT NOT NULL DEFAULT 0,               -- 创建时间戳（毫秒）
+    updated_at BIGINT NOT NULL DEFAULT 0                -- 更新时间戳（毫秒）
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
@@ -25,12 +25,12 @@ CREATE TABLE IF NOT EXISTS systemconfig (
     user_id INT NOT NULL DEFAULT 0,                     -- 关联用户ID（0表示全局配置）
     `key` VARCHAR(50) NOT NULL,                         -- 配置键名（如：account, password, app_version）
     value TEXT NOT NULL,                                -- 配置值（加密或明文）
-    platform VARCHAR(50),                               -- 平台：petkit/xiaomi/cloudpets（设备配置专用）
-    device_name VARCHAR(100),                           -- 设备名称（设备配置专用）
+    platform VARCHAR(50) DEFAULT '',                    -- 平台：petkit/xiaomi/cloudpets（设备配置专用）
+    device_name VARCHAR(100) DEFAULT '',                -- 设备名称（设备配置专用）
     is_encrypted TINYINT(1) NOT NULL DEFAULT 0,         -- 是否加密：0=明文, 1=加密
     updated_at BIGINT NOT NULL,                         -- 更新时间戳（毫秒）
     
-    INDEX idx_user_key (user_id, `key`),                -- 用户+配置键联合索引
+    UNIQUE KEY uk_user_key_platform (user_id, `key`, platform), -- 唯一约束：防止同一用户同一平台同一配置重复
     INDEX idx_platform (platform),                      -- 平台索引
     CONSTRAINT fk_config_user FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -50,18 +50,19 @@ CREATE TABLE IF NOT EXISTS weightrecord (
     visceral_fat DECIMAL(5,2),                          -- 内脏脂肪等级
     bone_mass DECIMAL(5,2),                             -- 骨量（kg）
     bmr DECIMAL(8,2),                                   -- 基础代谢（kcal）
-    timestamp BIGINT NOT NULL,                          -- 时间戳（毫秒）
+    timestamp BIGINT NOT NULL,                          -- 记录时间戳（毫秒）
     xiaomi_pushed TINYINT(1) DEFAULT 0,                 -- 是否已推送至小米：0=否, 1=是
-    xiaomi_push_time TIMESTAMP,                         -- 小米推送时间
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,     -- 创建时间
+    xiaomi_push_time BIGINT,                            -- 小米推送时间戳（毫秒）
+    created_at BIGINT NOT NULL DEFAULT 0,               -- 创建时间戳（毫秒）
     
-    INDEX idx_user_id (user_id),                        -- 用户ID索引
-    INDEX idx_timestamp (timestamp DESC),               -- 时间戳索引（降序）
+    INDEX idx_user_timestamp (user_id, timestamp DESC), -- 联合索引：加速查询用户最新记录
     CONSTRAINT fk_weight_user FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
 -- 初始化默认全局配置
+-- 注意：由于外键约束，请确保 user 表中存在 id=0 的记录，或者在执行此脚本前临时禁用外键检查
+-- SET FOREIGN_KEY_CHECKS = 0; 
 -- ============================================================================
 INSERT INTO systemconfig (user_id, `key`, value, is_encrypted, updated_at)
 VALUES 

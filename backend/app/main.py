@@ -1,8 +1,5 @@
-import os
-import uvicorn
-import asyncio
-import time
-import logging
+"""Smart Home Controller API - Main Application"""
+import os, uvicorn, asyncio, time, logging
 from contextlib import asynccontextmanager
 from typing import Optional, List
 
@@ -16,7 +13,6 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from sqlmodel import Session, select
 
-# 导入你现有的模块
 from .services.petkit_service import PetKitService
 from .services.cloudpets_service import cloudpets_service, FeedingPlan as CloudPetsPlan
 from .services.xiaomi_service import xiaomi_service
@@ -28,243 +24,196 @@ from .scheduler.task_scheduler import scheduler, create_data_refresh_task
 
 load_dotenv()
 
-# --- 1. 生命周期管理 (Lifespan) ---
-# 用于在应用生命周期内共享全局服务实例
+# --- AppState & Helpers ---
 class AppState:
     def __init__(self):
         self.petkit: Optional[PetKitService] = None
-        self.cloudpets = None  # CloudPets service instance (dynamic)
+        self.cloudpets = None
         self.data_refresh_task = None
         self.xiaomi_initialized: bool = False
 
 state = AppState()
 
+async def _init_service_for_user(platform: str, user_id: int, account: str, password: str) -> bool:
+    """Unified service initialization helper"""
+    try:
+        logger.info(f"Initializing {platform} service for user {user_id}...")
+        if platform == "petkit":
+            state.petkit = PetKitService(account, password, user_id=user_id)
+            success = await state.petkit.initialize()
+            logger.info(f"{'✓' if success else '⚠'} PetKit init {'success' if success else 'failed'}")
+            return success
+        elif platform == "cloudpets":
+            from .utils.config_manager import set_config_to_db
+            await set_config_to_db("account", user_id, account, is_encrypted=True, platform="cloudpets")
+            await set_config_to_db("password", user_id, password, is_encrypted=True, platform="cloudpets")
+            import backend.app.services.cloudpets_service as cp_module
+            state.cloudpets = cp_module.CloudPetsService(user_id=user_id)
+            success = await state.cloudpets.initialize()
+            logger.info(f"{'✓' if success else '⚠'} CloudPets init {'success' if success else 'failed'}")
+            return success
+        elif platform == "xiaomi":
+            from .utils.config_manager import set_config_to_db
+            await set_config_to_db("account", user_id, account, is_encrypted=True, platform="xiaomi")
+            await set_config_to_db("password", user_id, password, is_encrypted=True, platform="xiaomi")
+            success = await xiaomi_service.initialize()
+            if success:
+                state.xiaomi_initialized = True
+            logger.info(f"{'✓' if success else '⚠'} Xiaomi init {'success' if success else 'failed'}")
+            return success
+        else:
+            logger.warning(f"Unknown platform: {platform}")
+            return False
+    except Exception as e:
+        logger.error(f"{platform} init failed: {e}")
+        return False
+
+async def _get_first_user_with_platform(platform: str) -> Optional[int]:
+    """Query first user ID with specified platform config"""
+    try:
+        from sqlmodel import Session, select
+        from .models.models import SystemConfig
+        from .models.db import engine
+        loop = asyncio.get_running_loop()
+        def _query():
+            with Session(engine) as session:
+                stmt = select(SystemConfig.user_id).where(
+                    SystemConfig.platform == platform, SystemConfig.key == "account"
+                ).distinct()
+                ids = session.exec(stmt).all()
+                return ids[0] if ids else None
+        return await loop.run_in_executor(None, _query)
+    except Exception as e:
+        logger.warning(f"Query {platform} user failed: {e}")
+        return None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """管理应用启动和关闭时的逻辑"""
-    import time
+    """Manage app startup and shutdown"""
     start_time = time.time()
+    logger.info("=== Starting application ===")
     
-    # 启动时：初始化数据库和长连接服务
-    logger.info("=== 开始初始化应用 ===")
-    db_start = time.time()
     init_db()
-    logger.info(f"✓ 数据库初始化完成，耗时：{time.time() - db_start:.2f}秒")
+    logger.info(f"✓ DB initialized in {time.time() - start_time:.2f}s")
 
-    # 初始化 CloudPets 服务 (从数据库加载 Token 或自动登录)
-    logger.info("正在初始化 CloudPets 服务...")
-    cloudpets_start = time.time()
-    
-    # 查找第一个有 CloudPets 配置的用户
-    from backend.app.utils.config_manager import get_user_devices
-    from sqlmodel import Session, select
-    from .models.models import SystemConfig
-    from .models.db import engine  # 添加 engine 导入
-    
-    first_user_id = None
-    try:
-        with Session(engine) as session:
-            # 查询所有有 cloudpets 平台配置的用户
-            statement = select(SystemConfig.user_id).where(
-                SystemConfig.platform == "cloudpets",
-                SystemConfig.key == "account"
-            ).distinct()
-            user_ids = session.exec(statement).all()
-            if user_ids:
-                first_user_id = user_ids[0]
-                logger.info(f"找到 CloudPets 配置用户: {first_user_id}")
-    except Exception as e:
-        logger.warning(f"查询 CloudPets 配置用户失败: {e}")
-    
-    # 如果找到用户配置，使用该用户ID初始化；否则使用默认方式
+    # Initialize CloudPets
+    logger.info("Initializing CloudPets...")
+    cp_start = time.time()
+    first_user_id = await _get_first_user_with_platform("cloudpets")
     if first_user_id:
-        # 创建新的服务实例并传入user_id
-        import importlib
-        import backend.app.services.cloudpets_service as cp_module
-        importlib.reload(cp_module)
-        state.cloudpets = cp_module.CloudPetsService(user_id=first_user_id)
-        init_success = await state.cloudpets.initialize()
-        if init_success:
-            logger.info(f"✓ CloudPets 服务初始化成功（用户 {first_user_id}），耗时：{time.time() - cloudpets_start:.2f}秒")
+        from .utils.config_manager import get_config_from_db
+        account = await get_config_from_db("account", user_id=first_user_id, platform="cloudpets")
+        password = await get_config_from_db("password", user_id=first_user_id, platform="cloudpets")
+        if account and password:
+            success = await _init_service_for_user("cloudpets", first_user_id, account, password)
+            if not success:
+                state.cloudpets = None
         else:
-            logger.warning(f"⚠ CloudPets 服务初始化失败（用户 {first_user_id}）")
+            logger.warning(f"User {first_user_id} CloudPets config incomplete")
             state.cloudpets = None
     else:
-        # 没有用户配置，尝试使用全局配置初始化
         await cloudpets_service.initialize()
         state.cloudpets = cloudpets_service
-        logger.info(f"✓ CloudPets 服务初始化完成（全局配置），耗时：{time.time() - cloudpets_start:.2f}秒")
+        logger.info(f"✓ CloudPets initialized (global) in {time.time() - cp_start:.2f}s")
 
-    # 初始化 Xiaomi Cloud 服务
-    logger.info("正在初始化 Xiaomi Cloud 服务...")
-    xiaomi_start = time.time()
-    xiaomi_success = await xiaomi_service.initialize()
-    if xiaomi_success:
+    # Initialize Xiaomi
+    logger.info("Initializing Xiaomi...")
+    xm_start = time.time()
+    xm_success = await xiaomi_service.initialize()
+    if xm_success:
         state.xiaomi_initialized = True
-        logger.info(f"✓ Xiaomi Cloud 服务初始化成功，耗时：{time.time() - xiaomi_start:.2f}秒")
+        logger.info(f"✓ Xiaomi initialized in {time.time() - xm_start:.2f}s")
     else:
-        logger.warning("✗ Xiaomi Cloud 服务初始化失败，体重推送功能将不可用")
+        logger.warning("✗ Xiaomi init failed")
 
-    # 初始化 PetKit 服务
-    logger.info("正在初始化 PetKit 服务...")
-    petkit_start = time.time()
-    
-    # 查找第一个有 PetKit 配置的用户
-    petkit_user_id = None
-    try:
-        with Session(engine) as session:
-            # 查询所有有 petkit 平台配置的用户
-            statement = select(SystemConfig.user_id).where(
-                SystemConfig.platform == "petkit",
-                SystemConfig.key == "account"
-            ).distinct()
-            user_ids = session.exec(statement).all()
-            if user_ids:
-                petkit_user_id = user_ids[0]
-                logger.info(f"找到 PetKit 配置用户: {petkit_user_id}")
-    except Exception as e:
-        logger.warning(f"查询 PetKit 配置用户失败: {e}")
-    
-    # 如果找到用户配置，使用该用户ID初始化
+    # Initialize PetKit
+    logger.info("Initializing PetKit...")
+    pk_start = time.time()
+    petkit_user_id = await _get_first_user_with_platform("petkit")
     if petkit_user_id:
-        from backend.app.utils.config_manager import get_config_from_db
-        
-        # 获取该用户的账号密码（PetKit 通常需要带区号如 86-）
-        username = get_config_from_db("account", user_id=petkit_user_id, platform="petkit")
-        password = get_config_from_db("password", user_id=petkit_user_id, platform="petkit")
-        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=petkit_user_id, platform="petkit")
+        password = await get_config_from_db("password", user_id=petkit_user_id, platform="petkit")
         if username and password:
-            logger.info(f"正在初始化 PetKit 服务（用户 {petkit_user_id}）：{username}...")
             state.petkit = PetKitService(username, password, user_id=petkit_user_id)
             try:
                 await state.petkit.initialize()
-                logger.info(f"✓ PetKit 服务连接成功（用户 {petkit_user_id}），耗时：{time.time() - petkit_start:.2f}秒")
+                logger.info(f"✓ PetKit connected (user {petkit_user_id}) in {time.time() - pk_start:.2f}s")
             except Exception as e:
-                logger.error(f"PetKit 连接失败：{e}")
-                logger.error(f"✗ PetKit 初始化失败（用户 {petkit_user_id}），耗时：{time.time() - petkit_start:.2f}秒")
+                logger.error(f"PetKit connection failed: {e}")
                 state.petkit = None
         else:
-            logger.warning(f"警告：用户 {petkit_user_id} 的 PetKit 配置不完整")
+            logger.warning(f"User {petkit_user_id} PetKit config incomplete")
             state.petkit = None
     else:
-        # 没有用户配置，尝试使用全局配置初始化
-        from backend.app.utils.config_manager import get_config_from_db
-        username = get_config_from_db("ACCOUNT")
-        password = get_config_from_db("PASSWORD")
-        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("ACCOUNT")
+        password = await get_config_from_db("PASSWORD")
         if username and password:
-            logger.info(f"正在初始化 PetKit 服务（全局配置）：{username}...")
             state.petkit = PetKitService(username, password)
             try:
                 await state.petkit.initialize()
-                logger.info(f"✓ PetKit 服务连接成功（全局配置），耗时：{time.time() - petkit_start:.2f}秒")
+                logger.info(f"✓ PetKit connected (global) in {time.time() - pk_start:.2f}s")
             except Exception as e:
-                logger.error(f"PetKit 连接失败：{e}")
+                logger.error(f"PetKit connection failed: {e}")
                 state.petkit = None
         else:
-            logger.warning("警告：未检测到 PetKit 配置（数据库或环境变量），相关 API 将不可用")
+            logger.warning("No PetKit config detected")
             state.petkit = None
     
-    # 初始化数据刷新任务
-    logger.info("正在初始化数据刷新任务...")
+    # Init data refresh task
+    logger.info("Initializing data refresh task...")
     task_start = time.time()
     state.data_refresh_task = create_data_refresh_task(
-        state.petkit, 
-        state.cloudpets or cloudpets_service,  # 使用 state.cloudpets（可能为None）或全局实例
-        cache_manager
+        state.petkit, state.cloudpets or cloudpets_service, cache_manager
     )
-    logger.info(f"✓ 数据刷新任务初始化完成，耗时：{time.time() - task_start:.2f}秒")
+    logger.info(f"✓ Task initialized in {time.time() - task_start:.2f}s")
     
-    # 添加定时任务
-    logger.info("正在添加定时任务...")
-    scheduler_start = time.time()
-    await scheduler.add_task(
-        'dashboard_refresh', 
-        state.data_refresh_task.refresh_combined_dashboard_data,
-        interval=60,  # 每分钟刷新一次
-        immediate=True
-    )
-        
-    await scheduler.add_task(
-        'petkit_refresh',
-        state.data_refresh_task.refresh_petkit_data,
-        interval=180,  # 每 3 分钟刷新 PetKit 数据
-        immediate=False
-    )
-        
-    await scheduler.add_task(
-        'cloudpets_refresh',
-        state.data_refresh_task.refresh_cloudpets_data,
-        interval=120,  # 每 2 分钟刷新 CloudPets 数据
-        immediate=False
-    )
-    logger.info(f"✓ 定时任务添加完成，耗时：{time.time() - scheduler_start:.2f}秒")
-        
-    # 启动调度器
-    logger.info("正在启动调度器...")
+    # Add scheduled tasks
+    logger.info("Adding scheduled tasks...")
+    sched_start = time.time()
+    await scheduler.add_task('dashboard_refresh', state.data_refresh_task.refresh_combined_dashboard_data, interval=60, immediate=True)
+    await scheduler.add_task('petkit_refresh', state.data_refresh_task.refresh_petkit_data, interval=180, immediate=False)
+    await scheduler.add_task('cloudpets_refresh', state.data_refresh_task.refresh_cloudpets_data, interval=120, immediate=False)
+    logger.info(f"✓ Tasks added in {time.time() - sched_start:.2f}s")
+    
     await scheduler.start()
-    logger.info(f"✓ 调度器启动完成")
-        
-    total_time = time.time() - start_time
-    logger.info(f"=== 应用初始化完成，总耗时：{total_time:.2f}秒 ===")
+    logger.info(f"=== App initialized in {time.time() - start_time:.2f}s ===")
 
-    yield  # 分隔符，上方是启动逻辑，下方是关闭逻辑
+    yield
 
-    # 关闭时：清理资源
-    logger.info("正在关闭调度器...")
+    # Shutdown
+    logger.info("Shutting down...")
     await scheduler.stop()
-    
     if state.petkit:
-        logger.info("正在关闭 PetKit 服务...")
+        logger.info("Closing PetKit...")
         await state.petkit.close()
-
     if state.cloudpets:
-        logger.info("正在关闭 CloudPets 服务...")
+        logger.info("Closing CloudPets...")
         await state.cloudpets.close()
-
     if state.xiaomi_initialized:
-        logger.info("Xiaomi Cloud service will be closed")
+        logger.info("Xiaomi service closed")
 
-# --- 2. 应用配置 ---
-app = FastAPI(
-    title="Smart Home Controller",
-    version="0.3.0",
-    lifespan=lifespan
-)
+# --- App Config ---
+app = FastAPI(title="Smart Home Controller", version="0.3.0", lifespan=lifespan)
 
-# 使用绝对路径定位 static 目录，适配 Vercel 环境
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# backend/app/main.py -> backend/static
 STATIC_DIR = os.path.join(os.path.dirname(BASE_DIR), "static")
 
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 else:
-    logger.warning(f"Warning: Static directory not found at {STATIC_DIR}")
+    logger.warning(f"Static directory not found: {STATIC_DIR}")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# --- 3. 依赖注入 ---
 def get_petkit():
-    """快速获取已登录的 PetKit 实例"""
+    """Get logged-in PetKit instance"""
     if not state.petkit:
-        raise HTTPException(
-            status_code=503, 
-            detail="PetKit 服务未初始化，请在小程序中配置 ACCOUNT 和 PASSWORD"
-        )
+        raise HTTPException(status_code=503, detail="PetKit service not initialized")
     return state.petkit
 
-# --- 4. 数据模型 (Schema) ---
-# (使用 models.py 中的定义)
-
-# --- 5. 路由实现 ---
-
+# --- Static Routes ---
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(STATIC_DIR, 'index.html'))
@@ -289,47 +238,36 @@ async def scale_page():
 async def config_page():
     return FileResponse(os.path.join(STATIC_DIR, 'config.html'))
 
+# --- Cache & Dashboard APIs ---
 @app.get("/api/cache/status")
 async def cache_status():
-    """获取缓存状态"""
-    return {
-        "size": await cache_manager.size(),
-        "last_refresh": await cache_manager.get('dashboard_last_refresh')
-    }
+    return {"size": await cache_manager.size(), "last_refresh": await cache_manager.get('dashboard_last_refresh')}
 
 @app.post("/api/cache/refresh")
 async def force_refresh_cache():
-    """强制刷新所有缓存数据"""
     try:
         if state.data_refresh_task:
             await state.data_refresh_task.refresh_combined_dashboard_data()
             return {"status": "success", "message": "数据已强制刷新"}
-        else:
-            return {"status": "error", "message": "刷新任务未初始化"}
+        return {"status": "error", "message": "刷新任务未初始化"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"刷新失败: {str(e)}")
 
 @app.get("/api/dashboard/data")
 async def get_dashboard_data():
-    """获取首页聚合数据（优先从缓存获取）"""
+    """Get aggregated dashboard data (cached)"""
     try:
-        # 尝试从缓存获取数据
         cached_data = await cache_manager.get('dashboard_combined_data')
         if cached_data:
             return cached_data
         
-        # 缓存未命中，实时获取数据
         dashboard_data = {}
-        
-        # 获取 PetKit 设备数据
         petkit_devices = await cache_manager.get('petkit_devices')
         if not petkit_devices and state.petkit:
             petkit_devices = await state.petkit.get_devices()
             await cache_manager.set('petkit_devices', petkit_devices, ttl=300)
-        
         dashboard_data['petkit_devices'] = petkit_devices or []
         
-        # 获取猫厕所统计数据
         litterbox_stats = {}
         if petkit_devices:
             for device in petkit_devices:
@@ -340,47 +278,34 @@ async def get_dashboard_data():
                         stats = await state.petkit.get_daily_stats(device.id)
                         await cache_manager.set(cache_key, stats, ttl=180)
                     litterbox_stats[device.id] = stats or {}
-        
         dashboard_data['litterbox_stats'] = litterbox_stats
         
-        # 获取 CloudPets 数据
         cloudpets_servings = await cache_manager.get('cloudpets_servings')
         if not cloudpets_servings:
             cloudpets_servings = await cloudpets_service.get_servings_today()
             await cache_manager.set('cloudpets_servings', cloudpets_servings, ttl=120)
-        
         dashboard_data['cloudpets_servings'] = cloudpets_servings
         
         cloudpets_plans = await cache_manager.get('cloudpets_plans')
         if not cloudpets_plans:
             cloudpets_plans = await cloudpets_service.get_feeding_plans()
             await cache_manager.set('cloudpets_plans', cloudpets_plans, ttl=300)
-        
         dashboard_data['cloudpets_plans'] = cloudpets_plans or []
         
-        # 缓存聚合数据
         await cache_manager.set('dashboard_combined_data', dashboard_data, ttl=60)
-        
         return dashboard_data
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取仪表板数据失败：{str(e)}")
-
-
-
+# --- PetKit APIs ---
 @app.get("/api/petkit/devices")
 async def petkit_devices(service: PetKitService = Depends(get_petkit)):
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
-        # 优先从缓存获取
         cached_devices = await cache_manager.get('petkit_devices')
         if cached_devices:
             return cached_devices
-        
-        # 缓存未命中，从服务获取
         devices = await service.get_devices()
-        # 缓存 5 分钟
         await cache_manager.set('petkit_devices', devices, ttl=300)
         return devices
     except Exception as e:
@@ -388,7 +313,7 @@ async def petkit_devices(service: PetKitService = Depends(get_petkit)):
 
 @app.post("/api/petkit/clean")
 async def petkit_clean(service: PetKitService = Depends(get_petkit)):
-    """清理猫厕所（自动选择第一个设备）"""
+    """Clean litterbox (auto-select first device)"""
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
@@ -398,7 +323,7 @@ async def petkit_clean(service: PetKitService = Depends(get_petkit)):
 
 @app.post("/api/petkit/deodorize")
 async def petkit_deodorize(service: PetKitService = Depends(get_petkit)):
-    """除臭猫厕所（自动选择第一个设备）"""
+    """Deodorize litterbox (auto-select first device)"""
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
@@ -408,25 +333,17 @@ async def petkit_deodorize(service: PetKitService = Depends(get_petkit)):
 
 @app.get("/api/petkit/stats")
 async def petkit_daily_stats(device_id: Optional[str] = None, service: PetKitService = Depends(get_petkit)):
-    """获取今日统计数据（修复后的准确数据）"""
+    """Get daily stats (accurate data)"""
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
-        # 处理 device_id 为字符串 "null" 的情况
         if device_id == "null" or device_id == "":
             device_id = None
-        
-        # 构建缓存键
         cache_key = f'petkit_stats_{device_id or "default"}'
-        
-        # 优先从缓存获取
         cached_stats = await cache_manager.get(cache_key)
         if cached_stats:
             return cached_stats
-        
-        # 缓存未命中，从服务获取
         stats = await service.get_daily_stats(device_id)
-        # 缓存 3 分钟
         await cache_manager.set(cache_key, stats, ttl=180)
         return stats
     except Exception as e:
@@ -434,7 +351,7 @@ async def petkit_daily_stats(device_id: Optional[str] = None, service: PetKitSer
 
 @app.get("/api/petkit/history")
 async def petkit_history_stats(device_id: Optional[str] = None, days: int = 7, service: PetKitService = Depends(get_petkit)):
-    """获取历史统计数据"""
+    """Get historical stats"""
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
     try:
@@ -444,108 +361,84 @@ async def petkit_history_stats(device_id: Optional[str] = None, days: int = 7, s
 
 @app.get("/api/petkit/devices-stats")
 async def petkit_devices_with_stats(service: PetKitService = Depends(get_petkit)):
-    """合并获取设备列表和统计数据的接口（带缓存）- 与 Web端一致"""
+    """Get devices with stats (cached) - consistent with Web"""
     if not service or not service.username or not service.password:
         raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
-    
     try:
-        # 优先从缓存获取完整数据
         cached_data = await cache_manager.get('petkit_devices_with_stats')
         if cached_data:
             return cached_data
-        
-        # 缓存未命中，获取设备列表
         devices = await service.get_devices()
-        
-        # 为每个设备获取统计信息
         result = []
         for device in devices:
             device_id = getattr(device, 'id', '') if hasattr(device, 'id') else ''
             if device_id:
-                # 优先从缓存获取统计信息
                 stats_cache_key = f'petkit_stats_{device_id}'
                 stats = await cache_manager.get(stats_cache_key)
                 if not stats:
                     stats = await service.get_daily_stats(device_id)
-                    # 缓存统计信息 3 分钟
                     await cache_manager.set(stats_cache_key, stats, ttl=180)
-                
                 device_dict = device if isinstance(device, dict) else {
-                    "id": device_id,
-                    "name": getattr(device, 'name', 'Unknown'),
-                    "type": getattr(device, 'type', 'Unknown'),
-                    "data": getattr(device, 'data', {})
+                    "id": device_id, "name": getattr(device, 'name', 'Unknown'),
+                    "type": getattr(device, 'type', 'Unknown'), "data": getattr(device, 'data', {})
                 }
-                
-                # 将统计数据放入 state_summary 字段（与 Web端一致）
                 device_dict['state_summary'] = stats if isinstance(stats, dict) else {}
-                
                 result.append(device_dict)
             else:
                 result.append(device)
-        
-        # 缓存完整结果 2 分钟
         await cache_manager.set('petkit_devices_with_stats', result, ttl=120)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取设备和统计数据失败：{str(e)}")
 
-# --- CloudPets (云宠智能) 路由 ---
+# --- CloudPets APIs ---
 @app.get("/api/cloudpets/servings_today")
 async def cloudpets_servings_today():
-    """获取今日已出粮份数"""
     if not state.cloudpets:
         raise HTTPException(status_code=503, detail="CloudPets service not initialized")
     return await state.cloudpets.get_servings_today()
 
 @app.post("/api/cloudpets/feed")
 async def cloudpets_manual_feed(amount: int = 1):
-    """立即喂食"""
     if not state.cloudpets:
         raise HTTPException(status_code=503, detail="CloudPets service not initialized")
     return await state.cloudpets.manual_feed(amount)
 
 @app.get("/api/cloudpets/plans", response_model=List[CloudPetsPlan])
 async def cloudpets_get_plans():
-    """获取喂食计划"""
     if not state.cloudpets:
         raise HTTPException(status_code=503, detail="CloudPets service not initialized")
     return await state.cloudpets.get_feeding_plans()
 
 @app.post("/api/cloudpets/plans", response_model=CloudPetsPlan)
 async def cloudpets_add_plan(plan: CloudPetsPlan):
-    """添加喂食计划"""
     if not state.cloudpets:
         raise HTTPException(status_code=503, detail="CloudPets service not initialized")
     return await state.cloudpets.add_feeding_plan(plan)
 
 @app.put("/api/cloudpets/plans/{plan_id}", response_model=CloudPetsPlan)
 async def cloudpets_update_plan(plan_id: str, plan: CloudPetsPlan):
-    """更新喂食计划"""
     if not state.cloudpets:
         raise HTTPException(status_code=503, detail="CloudPets service not initialized")
     return await state.cloudpets.update_feeding_plan(plan_id, plan)
 
 @app.delete("/api/cloudpets/plans/{plan_id}")
 async def cloudpets_delete_plan(plan_id: str):
-    """删除喂食计划"""
     if not state.cloudpets:
         raise HTTPException(status_code=503, detail="CloudPets service not initialized")
     return await state.cloudpets.delete_feeding_plan(plan_id)
 
 @app.get("/api/cloudpets/feeder/status")
 async def cloudpets_feeder_status():
-    """获取喂食器实时状态"""
     if not state.cloudpets:
         raise HTTPException(status_code=503, detail="CloudPets service not initialized")
     return await state.cloudpets.get_feeder_status()
 
-# --- PetWant (Deprecated) ---
 @app.post("/api/petwant/feed")
 async def petwant_feed():
     return {"status": "error", "message": "Use /api/cloudpets/feed instead."}
 
-# --- Scale & User 路由 ---
+# --- Scale & User APIs ---
 @app.get("/api/users", response_model=List[User])
 def get_users(session: Session = Depends(get_session)):
     return session.exec(select(User)).all()
@@ -557,134 +450,69 @@ def create_user(user: User, session: Session = Depends(get_session)):
     session.refresh(user)
     return user
 
-# --- Xiaomi Cloud 路由 ---
+# --- Xiaomi Cloud APIs ---
 @app.get("/api/xiaomi/status")
 async def xiaomi_status():
-    """获取小米云服务状态"""
-    return {
-        "initialized": state.xiaomi_initialized,
-        "user_id": xiaomi_service.userId if state.xiaomi_initialized else None,
-        "has_token": bool(xiaomi_service._serviceToken) if state.xiaomi_initialized else False
-    }
+    return {"initialized": state.xiaomi_initialized, "user_id": xiaomi_service.userId if state.xiaomi_initialized else None,
+            "has_token": bool(xiaomi_service._serviceToken) if state.xiaomi_initialized else False}
 
 @app.post("/api/xiaomi/login")
 async def xiaomi_login():
-    """手动触发小米云登录"""
     try:
         success = await xiaomi_service.login()
         if success:
             state.xiaomi_initialized = True
             return {"status": "success", "message": "Login successful"}
-        else:
-            raise HTTPException(status_code=500, detail="Login failed")
+        raise HTTPException(status_code=500, detail="Login failed")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Login error: {str(e)}")
 
 @app.post("/api/xiaomi/push-weight")
-async def push_weight_to_xiaomi(
-    weight: float,
-    body_fat: Optional[float] = None,
-    bmi: Optional[float] = None,
-    muscle: Optional[float] = None,
-    water: Optional[float] = None,
-    visceral_fat: Optional[float] = None,
-    bone_mass: Optional[float] = None,
-    bmr: Optional[float] = None,
-    impedance: Optional[int] = None,
-    user_id: Optional[int] = None
-):
-    """手动推送体重数据到小米云"""
+async def push_weight_to_xiaomi(weight: float, body_fat: Optional[float] = None, bmi: Optional[float] = None,
+                                 muscle: Optional[float] = None, water: Optional[float] = None,
+                                 visceral_fat: Optional[float] = None, bone_mass: Optional[float] = None,
+                                 bmr: Optional[float] = None, impedance: Optional[int] = None, user_id: Optional[int] = None):
+    """Manually push weight data to Xiaomi Cloud"""
     if not state.xiaomi_initialized:
         raise HTTPException(status_code=503, detail="Xiaomi service not initialized")
-    
     try:
-        user_data = {
-            "weight": weight,
-            "impedance": impedance or 0,
-            "user_id": user_id or 0
-        }
-        
-        # 如果提供了详细数据
+        user_data = {"weight": weight, "impedance": impedance or 0, "user_id": user_id or 0}
         if body_fat is not None:
-            user_data.update({
-                "body_fat": body_fat,
-                "bmi": bmi,
-                "muscle": muscle,
-                "water": water,
-                "visceral_fat": visceral_fat,
-                "bone_mass": bone_mass,
-                "bmr": bmr
-            })
-        
+            user_data.update({"body_fat": body_fat, "bmi": bmi, "muscle": muscle, "water": water,
+                              "visceral_fat": visceral_fat, "bone_mass": bone_mass, "bmr": bmr})
         success = await xiaomi_service.push_weight_data(user_data)
         if success:
             return {"status": "success", "message": "Data pushed to Xiaomi"}
-        else:
-            raise HTTPException(status_code=500, detail="Failed to push data")
+        raise HTTPException(status_code=500, detail="Failed to push data")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Push error: {str(e)}")
 
 @app.get("/api/scale/history/{user_id}")
 def get_weight_history(user_id: int, session: Session = Depends(get_session)):
-    statement = select(WeightRecord).where(WeightRecord.user_id == user_id).order_by(WeightRecord.timestamp.desc()).limit(30)
-    results = session.exec(statement).all()
-    return results
+    stmt = select(WeightRecord).where(WeightRecord.user_id == user_id).order_by(WeightRecord.timestamp.desc()).limit(30)
+    return session.exec(stmt).all()
 
 def calculate_body_metrics(weight: float, impedance: int, user: User):
-    """
-    小米体脂秤 2 简化版计算算法
-    参考开源算法: https://github.com/wiebeandriessen/misale
-    """
+    """Simplified body metrics calculation (Xiaomi Scale 2)"""
     height = user.height / 100.0
     bmi = weight / (height * height)
     is_male = user.gender == "male"
     age = user.age
-
-    # 1. 体脂率 (简化估算)
-    if is_male:
-        body_fat = 0.8 * bmi + 0.1 * age - 5.4
-    else:
-        body_fat = 0.8 * bmi + 0.1 * age + 4.1
-
-    # 如果有阻抗值，进行修正 (这里使用阻抗比例修正)
+    body_fat = (0.8 * bmi + 0.1 * age - 5.4) if is_male else (0.8 * bmi + 0.1 * age + 4.1)
     if impedance > 0:
-        # 阻抗越高，体脂越高 (这是一个非常简化的线性比例)
-        # 正常范围 400-800
-        impedance_factor = (impedance - 500) / 100.0
-        body_fat += impedance_factor
-
-    # 限制范围
+        body_fat += (impedance - 500) / 100.0
     body_fat = max(5.0, min(body_fat, 50.0))
-
-    # 2. 肌肉量
     muscle = weight * (1 - body_fat / 100.0) * 0.75
-
-    # 3. 水分
     water = (100 - body_fat) * 0.7
-
-    # 4. 内脏脂肪 (基于 BMI 估算)
-    visceral_fat = bmi - 13.0
-    visceral_fat = max(1.0, min(visceral_fat, 20.0))
-
-    # 5. 骨量
+    visceral_fat = max(1.0, min(bmi - 13.0, 20.0))
     bone_mass = weight * 0.04
-
-    # 6. 基础代谢
     bmr = weight * 24.0 if is_male else weight * 22.0
-
-    return {
-        "bmi": round(bmi, 1),
-        "body_fat": round(body_fat, 1),
-        "muscle": round(muscle, 1),
-        "water": round(water, 1),
-        "visceral_fat": round(visceral_fat, 1),
-        "bone_mass": round(bone_mass, 1),
-        "bmr": round(bmr, 0)
-    }
+    return {"bmi": round(bmi, 1), "body_fat": round(body_fat, 1), "muscle": round(muscle, 1),
+            "water": round(water, 1), "visceral_fat": round(visceral_fat, 1),
+            "bone_mass": round(bone_mass, 1), "bmr": round(bmr, 0)}
 
 @app.post("/api/scale/record")
 def record_weight(record: WeightRecord, session: Session = Depends(get_session)):
-    # 如果有阻抗但没有详细指标，则在后端计算
     if record.impedance and not record.body_fat:
         user = session.get(User, record.user_id)
         if user:
@@ -696,20 +524,15 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
             record.visceral_fat = metrics["visceral_fat"]
             record.bone_mass = metrics["bone_mass"]
             record.bmr = metrics["bmr"]
-
     session.add(record)
     session.commit()
     session.refresh(record)
     result = {"status": "success", "id": record.id}
-    
-    # 异步推送到小米云（不阻塞响应）
     if state.xiaomi_initialized:
-        import asyncio
-        asyncio.create_task(push_to_xiaomi(record, user if record.impedance else None))
-    
+        asyncio.create_task(_safe_create_push_task(record, user if record.impedance else None))
     return result
 
-# --- 用户认证路由 ---
+# --- Auth APIs ---
 class UserLoginRequest(BaseModel):
     phone_number: str
     nickname: Optional[str] = None
@@ -718,144 +541,67 @@ class UserLoginRequest(BaseModel):
     height: int = 175
 
 class UserLoginResponse(BaseModel):
-    user_id: str  # UUID
+    user_id: str
     phone_number: str
     nickname: Optional[str] = None
-    has_configured: bool  # 是否已配置账号密码
+    has_configured: bool
 
 @app.post("/api/auth/login")
 async def user_login(request: UserLoginRequest, session: Session = Depends(get_session)):
-    """
-    小程序手机号登录/注册
-    - 首次登录自动创建用户
-    - 返回用户信息和是否有设备的状态
-    - 支持演示模式：任意11位手机号即可登录
-    - 如果用户已添加设备，自动后台初始化对应服务并缓存token
-    """
+    """Mini-program phone login/register with auto service init"""
     try:
-        # 验证手机号格式（简单验证11位数字）
         if not request.phone_number or len(request.phone_number) != 11 or not request.phone_number.isdigit():
             raise HTTPException(status_code=400, detail="请输入正确的11位手机号")
         
-        # 查找或创建用户
-        user = session.exec(
-            select(User).where(User.phone_number == request.phone_number)
-        ).first()
-        
+        user = session.exec(select(User).where(User.phone_number == request.phone_number)).first()
         is_new_user = False
         if not user:
-            # 新用户，SQLModel 会自动生成 UUID
-            user = User(
-                phone_number=request.phone_number,
-                nickname=request.nickname or f"用户{request.phone_number[-4:]}",
-                gender=request.gender,
-                age=request.age,
-                height=request.height
-            )
+            user = User(phone_number=request.phone_number, nickname=request.nickname or f"用户{request.phone_number[-4:]}",
+                        gender=request.gender, age=request.age, height=request.height)
             session.add(user)
             session.commit()
             session.refresh(user)
-            logger.info(f"新用户注册: {request.phone_number}, ID: {user.id}")
+            logger.info(f"New user registered: {request.phone_number}, ID: {user.id}")
             is_new_user = True
         else:
-            # 更新用户信息（可选）
-            if request.nickname:
-                user.nickname = request.nickname
-            if request.gender != user.gender:
-                user.gender = request.gender
-            if request.age != user.age:
-                user.age = request.age
-            if request.height != user.height:
-                user.height = request.height
+            if request.nickname: user.nickname = request.nickname
+            if request.gender != user.gender: user.gender = request.gender
+            if request.age != user.age: user.age = request.age
+            if request.height != user.height: user.height = request.height
             session.add(user)
             session.commit()
         
-        # 检查用户是否已添加设备
         from .utils.config_manager import get_user_devices
-        user_devices = get_user_devices(user.id)
+        user_devices = await get_user_devices(user.id)
         has_devices = len(user_devices) > 0
         
-        # 如果用户已有设备配置，自动后台初始化服务（无论新老用户）
         if has_devices:
-            logger.info(f"检测到用户 {request.phone_number} 有 {len(user_devices)} 个设备，开始自动初始化服务...")
+            logger.info(f"User {request.phone_number} has {len(user_devices)} devices, initializing services...")
             try:
-                # 按平台分组设备
                 platforms = {}
                 for device in user_devices:
                     platform = device['platform']
                     if platform not in platforms:
                         platforms[platform] = []
                     platforms[platform].append(device)
-                
-                # 为每个平台初始化服务
                 for platform, devices in platforms.items():
-                    if not devices:
-                        continue
-                    
-                    # 获取第一个设备的账号密码（同一平台通常共用账号）
+                    if not devices: continue
                     first_device = devices[0]
                     credentials = first_device.get('credentials', {})
                     account = credentials.get('account')
                     password = credentials.get('password')
-                    
                     if not account or not password:
-                        logger.warning(f"⚠ {platform} 设备缺少账号密码，跳过初始化")
+                        logger.warning(f"⚠ {platform} missing credentials")
                         continue
-                    
-                    logger.info(f"正在初始化 {platform} 服务...")
-                    
-                    if platform == "petkit":
-                        state.petkit = PetKitService(account, password, user_id=user.id)
-                        success = await state.petkit.initialize()
-                        if success:
-                            logger.info(f"✓ PetKit 自动登录成功，发现 {len(devices)} 个设备")
-                        else:
-                            logger.warning(f"⚠ PetKit 自动登录失败")
-                    
-                    elif platform == "cloudpets":
-                        # CloudPets 需要更新全局配置（因为模块级别读取）
-                        from .utils.config_manager import set_config_to_db
-                        set_config_to_db("account", user.id, account, is_encrypted=True, platform="cloudpets")
-                        set_config_to_db("password", user.id, password, is_encrypted=True, platform="cloudpets")
-                        
-                        # 重新加载模块并传入user_id
-                        import importlib
-                        import backend.app.services.cloudpets_service as cp_module
-                        importlib.reload(cp_module)
-                        
-                        # 创建新的服务实例并传入user_id，保存到state
-                        state.cloudpets = cp_module.CloudPetsService(user_id=user.id)
-                        success = await state.cloudpets.initialize()
-                        if success:
-                            logger.info(f"✓ CloudPets 自动登录成功")
-                        else:
-                            logger.warning(f"⚠ CloudPets 自动登录失败")
-                    
-                    elif platform == "xiaomi":
-                        from .utils.config_manager import set_config_to_db
-                        set_config_to_db("account", user.id, account, is_encrypted=True, platform="xiaomi")
-                        set_config_to_db("password", user.id, password, is_encrypted=True, platform="xiaomi")
-                        
-                        xm_success = await xiaomi_service.initialize()
-                        if xm_success:
-                            state.xiaomi_initialized = True
-                            logger.info(f"✓ Xiaomi 自动登录成功")
-                        else:
-                            logger.warning(f"⚠ Xiaomi 自动登录失败")
-                
-                logger.info("自动后台初始化完成")
+                    await _init_service_for_user(platform, user.id, account, password)
+                logger.info("Auto-init completed")
             except Exception as e:
-                logger.error(f"自动后台初始化失败: {e}")
+                logger.error(f"Auto-init failed: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
-                # 不阻断登录流程，仅记录日志
         
-        return UserLoginResponse(
-            user_id=str(user.id),  # 转换为字符串
-            phone_number=user.phone_number,
-            nickname=user.nickname,
-            has_configured=has_devices  # 改名但保持兼容，表示是否有设备
-        )
+        return UserLoginResponse(user_id=str(user.id), phone_number=user.phone_number,
+                                 nickname=user.nickname, has_configured=has_devices)
     except HTTPException:
         raise
     except Exception as e:
@@ -863,69 +609,44 @@ async def user_login(request: UserLoginRequest, session: Session = Depends(get_s
         raise HTTPException(status_code=500, detail=f"登录失败: {str(e)}")
 
 @app.get("/api/auth/check-config")
-def check_user_config(
-    user_id: str,
-    session: Session = Depends(get_session)
-):
-    """
-    检查当前用户是否已添加设备
-    用于前端判断是否需要引导添加设备
-    """
+async def check_user_config(user_id: str):
+    """Check if user has devices configured"""
     try:
         uid = int(user_id)
-        from .utils.config_manager import get_user_devices
-        user_devices = get_user_devices(uid)
-        has_devices = len(user_devices) > 0
-        
-        return {
-            "has_configured": has_devices,
-            "device_count": len(user_devices),
-            "message": f"已添加 {len(user_devices)} 个设备" if has_devices else "请先添加设备"
-        }
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的user_id")
+    try:
+        from .utils.config_manager import get_user_devices
+        user_devices = await get_user_devices(uid)
+        has_devices = len(user_devices) > 0
+        return {"has_configured": has_devices, "device_count": len(user_devices),
+                "message": f"已添加 {len(user_devices)} 个设备" if has_devices else "请先添加设备"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"检查配置失败: {str(e)}")
 
 @app.post("/api/auth/reinit-services")
 async def reinit_services():
-    """
-    重新初始化服务（用户配置账号后调用）
-    - 重新加载 CloudPets 配置并登录
-    - 重新加载 Xiaomi 配置并登录
-    """
+    """Reinitialize services after user configures accounts"""
     try:
-        # 重新导入配置（从数据库读取）
         from backend.app.utils.config_manager import get_config_from_db
         import importlib
         import backend.app.services.cloudpets_service as cp_module
         import backend.app.services.xiaomi_service as xm_module
-        
-        # 重新加载模块以获取新配置
         importlib.reload(cp_module)
         importlib.reload(xm_module)
-        
-        # 重新初始化 CloudPets
         logger.info("Re-initializing CloudPets service...")
         cp_success = await cloudpets_service.initialize()
-        
-        # 重新初始化 Xiaomi
         logger.info("Re-initializing Xiaomi service...")
         xm_success = await xiaomi_service.initialize()
         if xm_success:
             state.xiaomi_initialized = True
-        
-        return {
-            "status": "success",
-            "cloudpets_initialized": cp_success,
-            "xiaomi_initialized": xm_success,
-            "message": "服务重新初始化完成"
-        }
+        return {"status": "success", "cloudpets_initialized": cp_success,
+                "xiaomi_initialized": xm_success, "message": "服务重新初始化完成"}
     except Exception as e:
         logger.error(f"Failed to reinitialize services: {e}")
         raise HTTPException(status_code=500, detail=f"重新初始化失败: {str(e)}")
 
-# --- System Config 路由 ---
+# --- System Config APIs ---
 class ConfigItem(BaseModel):
     key: str
     value: str
@@ -937,46 +658,28 @@ class ConfigListResponse(BaseModel):
 
 @app.get("/api/config/list")
 def get_config_list(session: Session = Depends(get_session)):
-    """获取所有配置项（加密字段返回空字符串）"""
+    """Get all config items (encrypted fields return empty string)"""
     try:
         configs = session.exec(select(SystemConfig)).all()
         config_list = []
         for config in configs:
-            config_dict = {
-                "key": config.key,
-                "value": config.value if not config.is_encrypted else "",
-                "is_encrypted": config.is_encrypted,
-                "updated_at": config.updated_at
-            }
-            config_list.append(config_dict)
-        
-        # 检查是否有必需的配置（简化后不再需要特定keys）
-        has_required = len(configs) > 0
-        
-        return ConfigListResponse(
-            configs=config_list,
-            has_required_configs=has_required
-        )
+            config_list.append({"key": config.key, "value": config.value if not config.is_encrypted else "",
+                                "is_encrypted": config.is_encrypted, "updated_at": config.updated_at})
+        return ConfigListResponse(configs=config_list, has_required_configs=len(configs) > 0)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取配置列表失败: {str(e)}")
 
 @app.get("/api/config/{key}")
 def get_config_value(key: str, session: Session = Depends(get_session)):
-    """获取单个配置值（自动解密）"""
+    """Get single config value (auto-decrypt)"""
     try:
-        # 查询全局配置
-        statement = select(SystemConfig).where(
-            SystemConfig.key == key
-        ).order_by(SystemConfig.id.desc())
-        config = session.exec(statement).first()
-        
+        stmt = select(SystemConfig).where(SystemConfig.key == key).order_by(SystemConfig.id.desc())
+        config = session.exec(stmt).first()
         if not config:
             raise HTTPException(status_code=404, detail=f"配置项 {key} 不存在")
-        
         value = config.value
         if config.is_encrypted:
             value = ConfigEncryptor.decrypt(value)
-        
         return {"key": key, "value": value, "is_encrypted": config.is_encrypted}
     except HTTPException:
         raise
@@ -985,38 +688,23 @@ def get_config_value(key: str, session: Session = Depends(get_session)):
 
 @app.post("/api/config")
 def save_config(config_item: ConfigItem, session: Session = Depends(get_session)):
-    """保存配置项（自动加密敏感信息）"""
+    """Save config item (auto-encrypt sensitive info)"""
     try:
-        # 判断是否需要加密
         sensitive_keys = ["ACCOUNT", "PASSWORD", "XIAOMI_ACCOUNT", "XIAOMI_PASSWORD"]
         should_encrypt = config_item.key in sensitive_keys or config_item.is_encrypted
-        
-        value_to_store = config_item.value
-        if should_encrypt and config_item.value:
-            value_to_store = ConfigEncryptor.encrypt(config_item.value)
-        
-        # 查找现有配置
-        statement = select(SystemConfig).where(
-            SystemConfig.key == config_item.key
-        )
-        existing_config = session.exec(statement).first()
-        
+        value_to_store = ConfigEncryptor.encrypt(config_item.value) if should_encrypt and config_item.value else config_item.value
+        stmt = select(SystemConfig).where(SystemConfig.key == config_item.key)
+        existing_config = session.exec(stmt).first()
         if existing_config:
             existing_config.value = value_to_store
             existing_config.is_encrypted = should_encrypt
             existing_config.updated_at = int(time.time() * 1000)
         else:
-            new_config = SystemConfig(
-                key=config_item.key,
-                value=value_to_store,
-                is_encrypted=should_encrypt,
-                updated_at=int(time.time() * 1000)
-            )
+            new_config = SystemConfig(key=config_item.key, value=value_to_store,
+                                      is_encrypted=should_encrypt, updated_at=int(time.time() * 1000))
             session.add(new_config)
-        
         session.commit()
-        logger.info(f"配置已保存: {config_item.key} (加密={should_encrypt})")
-        
+        logger.info(f"Config saved: {config_item.key} (encrypted={should_encrypt})")
         return {"status": "success", "message": f"配置 {config_item.key} 已保存"}
     except Exception as e:
         session.rollback()
@@ -1024,20 +712,14 @@ def save_config(config_item: ConfigItem, session: Session = Depends(get_session)
 
 @app.delete("/api/config/{key}")
 def delete_config(key: str, session: Session = Depends(get_session)):
-    """删除配置项"""
+    """Delete config item"""
     try:
-        # 查询配置
-        statement = select(SystemConfig).where(
-            SystemConfig.key == key
-        )
-        config = session.exec(statement).first()
-        
+        stmt = select(SystemConfig).where(SystemConfig.key == key)
+        config = session.exec(stmt).first()
         if not config:
             raise HTTPException(status_code=404, detail=f"配置项 {key} 不存在")
-        
         session.delete(config)
         session.commit()
-        
         return {"status": "success", "message": f"配置 {key} 已删除"}
     except HTTPException:
         raise
@@ -1046,30 +728,16 @@ def delete_config(key: str, session: Session = Depends(get_session)):
         raise HTTPException(status_code=500, detail=f"删除配置失败: {str(e)}")
 
 async def push_to_xiaomi(record: WeightRecord, user: Optional[User] = None):
-    """异步推送体重数据到小米云"""
+    """Async push weight data to Xiaomi Cloud"""
     try:
-        user_data = {
-            "weight": record.weight,
-            "impedance": record.impedance or 0,
-            "user_id": record.user_id or 0
-        }
-        
-        # 如果有详细体脂数据，使用这些数据
+        user_data = {"weight": record.weight, "impedance": record.impedance or 0, "user_id": record.user_id or 0}
         if record.body_fat:
-            user_data.update({
-                "body_fat": record.body_fat,
-                "bmi": record.bmi,
-                "muscle": record.muscle,
-                "water": record.water,
-                "visceral_fat": record.visceral_fat,
-                "bone_mass": record.bone_mass,
-                "bmr": record.bmr
-            })
+            user_data.update({"body_fat": record.body_fat, "bmi": record.bmi, "muscle": record.muscle,
+                              "water": record.water, "visceral_fat": record.visceral_fat,
+                              "bone_mass": record.bone_mass, "bmr": record.bmr})
         elif user:
-            # 如果没有，使用用户信息计算
             metrics = calculate_body_metrics(record.weight, record.impedance or 0, user)
             user_data.update(metrics)
-        
         success = await xiaomi_service.push_weight_data(user_data)
         if success:
             logger.info(f"Successfully pushed weight data to Xiaomi for user {record.user_id}")
@@ -1077,141 +745,69 @@ async def push_to_xiaomi(record: WeightRecord, user: Optional[User] = None):
             logger.error(f"Failed to push weight data to Xiaomi for user {record.user_id}")
     except Exception as e:
         logger.error(f"Error pushing to Xiaomi: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
-
-# --- 用户设备管理路由 ---
+async def _safe_create_push_task(record: WeightRecord, user: Optional[User] = None):
+    """Safely create background task with error handling"""
+    try:
+        await push_to_xiaomi(record, user)
+    except Exception as e:
+        logger.error(f"Background push task failed: {e}")
+# --- Device Management APIs ---
 from .utils.config_manager import get_user_devices, add_device as add_device_to_db
 
 class AddDeviceRequest(BaseModel):
-    device_type: str  # feeder/litterbox/scale
+    device_type: str
     device_name: Optional[str] = None
-    platform: str  # petkit/xiaomi/cloudpets
+    platform: str
     account: str
     password: str
 
 class DeviceResponse(BaseModel):
-    device_key: str  # 设备标识符
+    device_key: str
     device_type: str
     device_name: Optional[str]
     platform: str
     status: str
 
 @app.get("/api/devices", response_model=List[DeviceResponse])
-async def get_user_devices_api(
-    user_id: str  # 前端传字符串
-):
-    """获取用户的设备列表（不返回账号密码）"""
+async def get_user_devices_api(user_id: str):
+    """Get user's device list (no credentials)"""
     try:
-        # 转换为int
         uid = int(user_id)
-        devices = get_user_devices(uid)
-        
-        # platform到device_type的映射
-        platform_to_type = {
-            'cloudpets': 'feeder',
-            'petkit': 'litterbox',
-            'xiaomi': 'scale'
-        }
-        
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    try:
+        devices = await get_user_devices(uid)
+        platform_to_type = {'cloudpets': 'feeder', 'petkit': 'litterbox', 'xiaomi': 'scale'}
         result = []
         for idx, device in enumerate(devices):
             platform = device.get('platform', '')
             device_type = platform_to_type.get(platform, 'unknown')
-            
-            result.append(DeviceResponse(
-                device_key=f"device_{idx}",
-                device_type=device_type,
-                device_name=device.get('device_name') or f"{platform}_device",
-                platform=platform,
-                status='active'  # 简化：有配置即为active
-            ))
+            result.append(DeviceResponse(device_key=f"device_{idx}", device_type=device_type,
+                                         device_name=device.get('device_name') or f"{platform}_device",
+                                         platform=platform, status='active'))
         return result
-    except ValueError:
-        raise HTTPException(status_code=400, detail="无效的user_id")
     except Exception as e:
         import traceback
         logger.error(f"获取设备列表失败: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"获取设备列表失败：{str(e)}")
 
 @app.post("/api/devices/add", response_model=DeviceResponse)
-async def add_device_api(
-    request: AddDeviceRequest,
-    user_id: str  # 前端传字符串
-):
-    """添加设备到用户账户，并自动后台登录缓存token"""
+async def add_device_api(request: AddDeviceRequest, user_id: str):
+    """Add device to user account with auto-login and token caching"""
     try:
-        # 转换为int
         uid = int(user_id)
-        device_key = add_device_to_db(
-            user_id=uid,
-            platform=request.platform,
-            account=request.account,
-            password=request.password,
-            device_name=request.device_name
-        )
-        
-        # 根据平台类型，立即重新初始化服务以自动登录并缓存token
-        if request.platform == "petkit":
-            try:
-                logger.info(f"检测到 PetKit 设备添加，正在重新初始化服务...")
-                state.petkit = PetKitService(request.account, request.password, user_id=uid)
-                petkit_success = await state.petkit.initialize()
-                if petkit_success:
-                    logger.info("✓ PetKit 服务重新初始化成功，token已缓存")
-                else:
-                    logger.warning("⚠ PetKit 服务初始化失败，请检查账号密码")
-            except Exception as e:
-                logger.error(f"PetKit 重新初始化失败：{e}")
-        
-        elif request.platform == "cloudpets":
-            try:
-                logger.info(f"检测到 CloudPets 设备添加，正在重新初始化服务...")
-                # CloudPets 需要更新全局配置（因为模块级别读取）
-                from .utils.config_manager import set_config_to_db
-                set_config_to_db("account", uid, request.account, is_encrypted=True, platform="cloudpets")
-                set_config_to_db("password", uid, request.password, is_encrypted=True, platform="cloudpets")
-                
-                # 重新加载模块以获取新配置
-                import importlib
-                import backend.app.services.cloudpets_service as cp_module
-                importlib.reload(cp_module)
-                
-                # 创建新的服务实例并传入user_id，保存到state
-                state.cloudpets = cp_module.CloudPetsService(user_id=uid)
-                cloudpets_success = await state.cloudpets.initialize()
-                if cloudpets_success:
-                    logger.info("✓ CloudPets 服务重新初始化成功，token已缓存")
-                else:
-                    logger.warning("⚠ CloudPets 服务初始化失败，请检查账号密码")
-            except Exception as e:
-                logger.error(f"CloudPets 重新初始化失败：{e}")
-        
-        elif request.platform == "xiaomi":
-            try:
-                logger.info(f"检测到 Xiaomi 设备添加，正在重新初始化服务...")
-                # Xiaomi 也需要保存配置
-                from .utils.config_manager import set_config_to_db
-                set_config_to_db("account", uid, request.account, is_encrypted=True, platform="xiaomi")
-                set_config_to_db("password", uid, request.password, is_encrypted=True, platform="xiaomi")
-                
-                xm_success = await xiaomi_service.initialize()
-                if xm_success:
-                    state.xiaomi_initialized = True
-                    logger.info("✓ Xiaomi 服务重新初始化成功，token已缓存")
-                else:
-                    logger.warning("⚠ Xiaomi 服务初始化失败，请检查账号密码")
-            except Exception as e:
-                logger.error(f"Xiaomi 重新初始化失败：{e}")
-        
-        return DeviceResponse(
-            device_key=device_key,
-            device_type=request.device_type,
-            device_name=request.device_name or f"{request.platform}_device",
-            platform=request.platform,
-            status="active"
-        )
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的user_id")
+    try:
+        device_key = await add_device_to_db(user_id=uid, platform=request.platform, account=request.account,
+                                            password=request.password, device_name=request.device_name)
+        await _init_service_for_user(request.platform, uid, request.account, request.password)
+        return DeviceResponse(device_key=device_key, device_type=request.device_type,
+                              device_name=request.device_name or f"{request.platform}_device",
+                              platform=request.platform, status="active")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"添加设备失败：{str(e)}")
 

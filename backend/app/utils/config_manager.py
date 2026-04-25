@@ -3,7 +3,8 @@
 """
 import logging
 import time
-from typing import Optional, List, Dict, Any
+import asyncio
+from typing import Optional, List, Dict, Any, Callable, TypeVar
 from sqlmodel import Session, select
 from ..models.db import engine
 from ..models.models import SystemConfig
@@ -11,8 +12,25 @@ from .config_encryptor import ConfigEncryptor
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar('T')
 
-def get_config_from_db(key: str, user_id: Optional[int] = None, platform: Optional[str] = None, default: Optional[str] = None) -> Optional[str]:
+
+def _get_timestamp_ms() -> int:
+    """获取当前时间戳（毫秒）"""
+    return int(time.time() * 1000)
+
+
+async def _run_db_operation(func: Callable[[], T]) -> T:
+    """
+    在线程池中运行同步数据库操作，避免阻塞事件循环
+    :param func: 同步数据库操作函数
+    :return: 操作结果
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, func)
+
+
+async def get_config_from_db(key: str, user_id: Optional[int] = None, platform: Optional[str] = None, default: Optional[str] = None) -> Optional[str]:
     """
     从数据库获取配置值（自动解密）
     :param key: 配置键（如：account, password, app_version）
@@ -21,11 +39,11 @@ def get_config_from_db(key: str, user_id: Optional[int] = None, platform: Option
     :param default: 默认值
     :return: 配置值或默认值
     """
-    try:
+    def _get() -> Optional[str]:
         with Session(engine) as session:
             statement = select(SystemConfig).where(SystemConfig.key == key)
             
-            if user_id:
+            if user_id is not None:
                 statement = statement.where(SystemConfig.user_id == user_id)
             else:
                 # 未指定user_id，查询全局配置（user_id=0）
@@ -41,12 +59,15 @@ def get_config_from_db(key: str, user_id: Optional[int] = None, platform: Option
                     return ConfigEncryptor.decrypt(config.value)
                 return config.value
             return default
+
+    try:
+        return await _run_db_operation(_get)
     except Exception as e:
         logger.warning(f"Failed to get config {key} from database: {e}")
         return default
 
 
-def set_config_to_db(key: str, user_id: int, value: str, is_encrypted: bool = False, 
+async def set_config_to_db(key: str, user_id: int, value: str, is_encrypted: bool = False, 
                      platform: Optional[str] = None, device_name: Optional[str] = None):
     """
     保存配置到数据库（自动加密）
@@ -57,7 +78,7 @@ def set_config_to_db(key: str, user_id: int, value: str, is_encrypted: bool = Fa
     :param platform: 平台名称（设备配置专用）
     :param device_name: 设备名称（设备配置专用）
     """
-    try:
+    def _set():
         with Session(engine) as session:
             # 查找现有配置
             statement = select(SystemConfig).where(
@@ -72,39 +93,45 @@ def set_config_to_db(key: str, user_id: int, value: str, is_encrypted: bool = Fa
             
             config = session.exec(statement).first()
             
+            processed_value = ConfigEncryptor.encrypt(value) if is_encrypted else value
+            timestamp = _get_timestamp_ms()
+            
             if config:
                 # 更新现有配置
-                config.value = ConfigEncryptor.encrypt(value) if is_encrypted else value
+                config.value = processed_value
                 config.is_encrypted = is_encrypted
-                config.updated_at = int(time.time() * 1000)
+                config.updated_at = timestamp
             else:
                 # 创建新配置
                 config = SystemConfig(
                     user_id=user_id,
                     key=key,
-                    value=ConfigEncryptor.encrypt(value) if is_encrypted else value,
+                    value=processed_value,
                     is_encrypted=is_encrypted,
                     platform=platform,
                     device_name=device_name,
-                    updated_at=int(time.time() * 1000)
+                    updated_at=timestamp
                 )
                 session.add(config)
             
             session.commit()
-            logger.info(f"✓ Config {key} saved for user {user_id}")
+            logger.info(f"Config {key} saved for user {user_id}")
+
+    try:
+        await _run_db_operation(_set)
     except Exception as e:
         logger.error(f"Failed to save config {key} for user {user_id}: {e}")
         raise
 
 
-def get_user_devices(user_id: int, platform: Optional[str] = None) -> List[Dict[str, Any]]:
+async def get_user_devices(user_id: int, platform: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     获取用户的设备列表（从systemconfig表中查询）
     :param user_id: 用户ID
     :param platform: 平台过滤（可选）
     :return: 设备列表，每个设备包含 credentials（account/password）
     """
-    try:
+    def _get_devices() -> List[Dict[str, Any]]:
         with Session(engine) as session:
             statement = select(SystemConfig).where(
                 SystemConfig.user_id == user_id,
@@ -116,10 +143,11 @@ def get_user_devices(user_id: int, platform: Optional[str] = None) -> List[Dict[
             
             configs = session.exec(statement).all()
             
-            # 按 device_name 分组（同一个设备的account/password通过key区分）
+            # 按 (platform, device_name) 分组，避免不同平台同名设备冲突
             devices_dict = {}
             for config in configs:
-                device_key = config.device_name or f"{config.platform}_unknown"
+                # 使用元组作为唯一键，确保不同平台的同名设备不会合并
+                device_key = (config.platform, config.device_name or "unknown")
                 
                 if device_key not in devices_dict:
                     devices_dict[device_key] = {
@@ -136,12 +164,15 @@ def get_user_devices(user_id: int, platform: Optional[str] = None) -> List[Dict[
                     devices_dict[device_key]['credentials'][field_name] = config.value
             
             return list(devices_dict.values())
+
+    try:
+        return await _run_db_operation(_get_devices)
     except Exception as e:
         logger.error(f"Failed to get devices for user {user_id}: {e}")
         return []
 
 
-def add_device(user_id: int, platform: str, account: str, password: str, 
+async def add_device(user_id: int, platform: str, account: str, password: str, 
                device_name: Optional[str] = None) -> str:
     """
     添加设备到用户账户
@@ -152,32 +183,55 @@ def add_device(user_id: int, platform: str, account: str, password: str,
     :param device_name: 设备名称（可选，不传则用platform作为名称）
     :return: 设备标识符（device_name）
     """
-    try:
-        # 如果没有指定设备名称，使用平台名
+    def _add_device() -> str:
         final_device_name = device_name or platform
+        timestamp = _get_timestamp_ms()
         
-        # 保存账号
-        set_config_to_db(
-            key="account",
-            user_id=user_id,
-            value=account,
-            is_encrypted=True,
-            platform=platform,
-            device_name=final_device_name
-        )
-        
-        # 保存密码
-        set_config_to_db(
-            key="password",
-            user_id=user_id,
-            value=password,
-            is_encrypted=True,
-            platform=platform,
-            device_name=final_device_name
-        )
-        
-        logger.info(f"✓ Device {final_device_name} ({platform}) added for user {user_id}")
-        return final_device_name
+        with Session(engine) as session:
+            try:
+                # 准备数据
+                encrypted_account = ConfigEncryptor.encrypt(account)
+                encrypted_password = ConfigEncryptor.encrypt(password)
+                
+                # 辅助函数：保存或更新配置
+                def upsert_config(key: str, val: str):
+                    stmt = select(SystemConfig).where(
+                        SystemConfig.user_id == user_id,
+                        SystemConfig.key == key,
+                        SystemConfig.platform == platform,
+                        SystemConfig.device_name == final_device_name
+                    )
+                    cfg = session.exec(stmt).first()
+                    
+                    if cfg:
+                        cfg.value = val
+                        cfg.is_encrypted = True
+                        cfg.updated_at = timestamp
+                    else:
+                        cfg = SystemConfig(
+                            user_id=user_id,
+                            key=key,
+                            value=val,
+                            is_encrypted=True,
+                            platform=platform,
+                            device_name=final_device_name,
+                            updated_at=timestamp
+                        )
+                        session.add(cfg)
+
+                # 在同一个事务中保存 account 和 password
+                upsert_config("account", encrypted_account)
+                upsert_config("password", encrypted_password)
+                
+                session.commit()
+                logger.info(f"Device {final_device_name} ({platform}) added for user {user_id}")
+                return final_device_name
+            except Exception:
+                session.rollback()
+                raise
+
+    try:
+        return await _run_db_operation(_add_device)
     except Exception as e:
         logger.error(f"Failed to add device for user {user_id}: {e}")
         raise

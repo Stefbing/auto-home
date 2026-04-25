@@ -4,62 +4,71 @@ import os
 import ssl
 import aiohttp
 from pypetkitapi.client import PetKitClient
-from pypetkitapi.command import LitterCommand, DeviceAction, LBCommand, DeviceCommand
-from pypetkitapi.exceptions import PetkitSessionExpiredError
 import logging
 import asyncio
 import json
 import time
+import re
 from sqlmodel import Session, select
 from ..models.db import engine
 from ..models.models import SystemConfig
+from typing import Optional, Dict, Any, List
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# 常量定义
+SESSION_EXPIRY_MS = 30 * 60 * 1000  # 30分钟
+SESSION_REFRESH_THRESHOLD_MIN = 25  # 25分钟
+DEVICE_CACHE_TTL = 30  # 设备数据缓存30秒
+SUPPORTED_DEVICE_TYPES = {'T3', 'T4', 'T5'}
+TOKEN_KEY = "petkit_session_data"
+
+# 预编译正则表达式
+RAW_STATE_PATTERN = re.compile(r'(\w+)=([\w\d\.\-]+)')
+WIFI_PATTERN = re.compile(r'wifi=Wifi\(bssid=\'(.*?)\', rsq=(-?\d+)')
+
 class PetKitService:
     def __init__(self, username=None, password=None, region="CN", timezone="Asia/Shanghai", user_id=None):
-        # 优先使用传入的参数
-        if username and password:
-            self.username = username
-            self.password = password
-        else:
-            # 从数据库获取（支持user_id）
-            from ..utils.config_manager import get_config_from_db
-            self.username = get_config_from_db("account", user_id=user_id, platform="petkit")
-            self.password = get_config_from_db("password", user_id=user_id, platform="petkit")
-        
-        self.user_id = user_id  # 保存user_id用于后续操作
+        self.username = username
+        self.password = password
+        self.user_id = user_id
         self.region = region
         self.timezone = timezone
         self.session = None
         self.client = None
-        self.token_key = "petkit_session_data"  # 数据库存储键名
         self._devices_last_refresh = 0
         self._devices_refresh_lock = asyncio.Lock()
-        
-        # SSL 上下文初始化
         self._ssl_context = None
-        self._init_ssl_context()
+        self._initialized = False
 
+        # 延迟初始化，避免在 __init__ 中执行阻塞操作
         if not self.username or not self.password:
             logger.warning("PetKit credentials not provided, service will not be available")
+
+    async def _get_credentials(self):
+        """异步获取凭证，避免阻塞 __init__"""
+        if not self.username or not self.password:
+            from ..utils.config_manager import get_config_from_db
+            loop = asyncio.get_event_loop()
+            self.username = await loop.run_in_executor(
+                None, lambda: get_config_from_db("account", user_id=self.user_id, platform="petkit")
+            )
+            self.password = await loop.run_in_executor(
+                None, lambda: get_config_from_db("password", user_id=self.user_id, platform="petkit")
+            )
 
     def _init_ssl_context(self):
         """初始化 SSL 上下文，处理证书验证问题"""
         try:
-            # 从数据库读取 SSL 配置（优先）
             from ..utils.config_manager import get_config_from_db
             disable_ssl_str = get_config_from_db("PETKIT_DISABLE_SSL_VERIFY")
-            
-            # 如果数据库中没有配置，默认不禁用
             disable_ssl = disable_ssl_str.lower() == "true" if disable_ssl_str else False
-            
+
             if disable_ssl:
-                logger.warning("SSL verification disabled for PetKit (development mode)")
+                logger.warning("SSL verification disabled for PetKit (development mode only)")
                 self._ssl_context = False
             else:
-                # 使用默认 SSL 上下文
                 self._ssl_context = ssl.create_default_context()
                 logger.info("SSL context created with default verification")
         except Exception as e:
@@ -68,9 +77,23 @@ class PetKitService:
 
     async def initialize(self):
         """Initialize service: load session from DB, or login if missing"""
+        if self._initialized:
+            return True
+        
         logger.info("Initializing PetKit Service...")
+        
+        # 异步获取凭证
+        await self._get_credentials()
+        
+        if not self.username or not self.password:
+            logger.error("PetKit credentials not configured")
+            return False
+        
+        # 初始化 SSL 上下文
+        self._init_ssl_context()
+        
         if not await self._load_session_from_db():
-            logger.info("No session found in DB, attempting initial login...")
+            logger.info("No valid session found, attempting initial login...")
             success = await self._login()
             if success:
                 logger.info("Initial login successful")
@@ -79,35 +102,42 @@ class PetKitService:
             return success
         else:
             logger.info("PetKit session loaded from DB")
+            self._initialized = True
             return True
 
     async def _load_session_from_db(self) -> bool:
         """Try to load the latest session data from database"""
         try:
-            with Session(engine) as session_db:
-                statement = select(SystemConfig).where(
-                    SystemConfig.key == self.token_key,
-                    SystemConfig.user_id == (self.user_id or 0)
-                ).order_by(SystemConfig.id.desc())
-                config = session_db.exec(statement).first()
+            loop = asyncio.get_event_loop()
+            
+            def _load():
+                with Session(engine) as session_db:
+                    statement = select(SystemConfig).where(
+                        SystemConfig.key == TOKEN_KEY,
+                        SystemConfig.user_id == (self.user_id or 0)
+                    ).order_by(SystemConfig.id.desc())
+                    config = session_db.exec(statement).first()
+                    if config:
+                        return config.value
+                return None
+            
+            config_value = await loop.run_in_executor(None, _load)
+            
+            if config_value:
+                session_data = json.loads(config_value)
+                saved_time = session_data.get('timestamp', 0)
+                current_time = int(time.time() * 1000)
                 
-                if config:
-                    # 解析存储的会话数据
-                    session_data = json.loads(config.value)
-
-                    # 检查是否过期（30分钟有效期）
-                    saved_time = session_data.get('timestamp', 0)
-                    current_time = int(time.time() * 1000)
-                    if current_time - saved_time > 30 * 60 * 1000:  # 30分钟
-                        logger.info("PetKit session expired (30min), need re-login")
-                        return False
-
-                    # 恢复会话
-                    await self._restore_session(session_data)
-                    logger.info("Loaded PetKit session from database")
-                    return True
+                if current_time - saved_time > SESSION_EXPIRY_MS:
+                    logger.info("PetKit session expired, need re-login")
+                    return False
+                
+                restored = await self._restore_session(session_data)
+                if restored:
+                    self._initialized = True
+                return restored
         except Exception as e:
-            logger.warning(f"Could not load session from DB (might be first run): {e}")
+            logger.warning(f"Could not load session from DB: {e}")
         return False
 
     async def _save_session_to_db(self):
@@ -116,25 +146,20 @@ class PetKitService:
             if not self.client or not self.session:
                 return
 
-            # 获取会话相关信息
             session_data = {
                 'timestamp': int(time.time() * 1000),
                 'region': self.region,
                 'timezone': self.timezone,
-                'username': self.username,  # 保存用户名用于验证
-                'has_valid_session': True  # 标记有效会话
+                'username': self.username,
+                'has_valid_session': True
             }
 
-            # 尝试获取客户端的认证信息（cookies/headers）
             try:
                 if hasattr(self.client, 'req') and hasattr(self.client.req, 'session'):
-                    # 存储 cookies
                     cookies = self.client.req.session.cookie_jar.filter_cookies()
                     if cookies:
                         session_data['cookies'] = str(cookies)
-                        logger.debug(f"Saved {len(cookies)} cookies")
-                    
-                    # 存储 headers 中的认证信息
+
                     if hasattr(self.client.req, 'headers'):
                         auth_headers = {}
                         for key in ['authorization', 'token', 'x-auth-token', 'session-id']:
@@ -142,50 +167,54 @@ class PetKitService:
                                 auth_headers[key] = self.client.req.headers[key]
                         if auth_headers:
                             session_data['auth_headers'] = auth_headers
-                            logger.debug(f"Saved auth headers: {list(auth_headers.keys())}")
             except Exception as e:
                 logger.debug(f"Could not extract session details: {e}")
 
-            with Session(engine) as session_db:
-                statement = select(SystemConfig).where(
-                    SystemConfig.key == self.token_key,
-                    SystemConfig.user_id == (self.user_id or 0)
-                )
-                config = session_db.exec(statement).first()
-                
-                if not config:
-                    config = SystemConfig(
-                        user_id=self.user_id or 0,
-                        key=self.token_key,
-                        value=json.dumps(session_data)
+            loop = asyncio.get_event_loop()
+            
+            def _save():
+                with Session(engine) as session_db:
+                    statement = select(SystemConfig).where(
+                        SystemConfig.key == TOKEN_KEY,
+                        SystemConfig.user_id == (self.user_id or 0)
                     )
-                    session_db.add(config)
-                else:
-                    config.value = json.dumps(session_data)
-                    config.updated_at = int(time.time() * 1000)
-                    session_db.add(config)
-                session_db.commit()
-                logger.info("Saved PetKit session to database")
+                    config = session_db.exec(statement).first()
+
+                    if not config:
+                        config = SystemConfig(
+                            user_id=self.user_id or 0,
+                            key=TOKEN_KEY,
+                            value=json.dumps(session_data)
+                        )
+                        session_db.add(config)
+                    else:
+                        config.value = json.dumps(session_data)
+                        config.updated_at = int(time.time() * 1000)
+                        session_db.add(config)
+                    session_db.commit()
+            
+            await loop.run_in_executor(None, _save)
+            logger.info("Saved PetKit session to database")
         except Exception as e:
             logger.error(f"Failed to save session to DB: {e}")
 
-    async def _restore_session(self, session_data: dict):
+    async def _restore_session(self, session_data: dict) -> bool:
         """Restore session from stored data"""
         try:
-            # 检查会话是否仍然有效
             saved_time = session_data.get('timestamp', 0)
             current_time = int(time.time() * 1000)
             age_minutes = (current_time - saved_time) / (60 * 1000)
-            
-            # 如果会话超过 25 分钟，直接重新登录（避免边界问题）
-            if age_minutes > 25:
+
+            if age_minutes > SESSION_REFRESH_THRESHOLD_MIN:
                 logger.info(f"Session too old ({age_minutes:.1f}min), will re-login")
                 return False
-            
-            # 创建新的 aiohttp session，配置 SSL 上下文
+
+            # 先关闭旧会话（如果有）
+            await self._close_session()
+
             connector = aiohttp.TCPConnector(ssl=self._ssl_context) if self._ssl_context is not None else None
             self.session = aiohttp.ClientSession(connector=connector)
-            
+
             self.client = PetKitClient(
                 username=self.username,
                 password=self.password,
@@ -194,40 +223,43 @@ class PetKitService:
                 session=self.session,
             )
 
-            # 尝试恢复 cookies
-            if 'cookies' in session_data and hasattr(self.client, 'req') and hasattr(self.client.req, 'session'):
-                try:
-                    # 这里只是记录已保存 cookies，实际 pypetkitapi 会在首次请求时自动处理
-                    logger.debug(f"Restored session with saved cookies")
-                except Exception as e:
-                    logger.debug(f"Could not restore cookies: {e}")
-
-            # 验证会话是否有效：尝试获取设备列表
+            # 验证会话是否有效
             try:
                 await self.client.get_devices_data()
-                logger.info(f"✓ PetKit session restored successfully. Found {len(self.client.petkit_entities)} devices.")
+                logger.info(f"PetKit session restored successfully. Found {len(self.client.petkit_entities)} devices.")
+                self._devices_last_refresh = time.time()
                 return True
             except Exception as e:
                 logger.warning(f"Restored session invalid, need re-login: {e}")
+                await self._close_session()
                 return False
-                
+
         except Exception as e:
             logger.error(f"Failed to restore session: {e}")
+            await self._close_session()
             return False
+
+    async def _close_session(self):
+        """安全关闭会话"""
+        if self.session:
+            try:
+                await self.session.close()
+            except Exception as e:
+                logger.debug(f"Error closing session: {e}")
+            finally:
+                self.session = None
+                self.client = None
 
     async def _login(self) -> bool:
         """
         Login to get new session
         """
         try:
-            # 清理旧会话
-            if self.session:
-                await self.session.close()
-    
-            # 创建新的 aiohttp session，配置 SSL 上下文
+            await self._close_session()
+
             connector = aiohttp.TCPConnector(ssl=self._ssl_context) if self._ssl_context is not None else None
             self.session = aiohttp.ClientSession(connector=connector)
-                
+
             self.client = PetKitClient(
                 username=self.username,
                 password=self.password,
@@ -235,27 +267,25 @@ class PetKitService:
                 timezone=self.timezone,
                 session=self.session,
             )
-    
-            # 登录并获取设备列表
+
             await self.client.get_devices_data()
-            logger.info(f"PetKit 登录成功。共发现 {len(self.client.petkit_entities)} 个设备/实体。")
-    
-            # 保存会话到数据库
+            logger.info(f"PetKit login successful. Found {len(self.client.petkit_entities)} devices.")
+            self._devices_last_refresh = time.time()
+
             await self._save_session_to_db()
+            self._initialized = True
             return True
-    
+
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"PetKit 登录失败：{e}")
-                
+            logger.error(f"PetKit login failed: {e}")
+
             # 如果是 SSL 证书错误，尝试禁用 SSL 验证重试
             if "SSL" in error_msg or "certificate" in error_msg.lower() or "CERTIFICATE_VERIFY_FAILED" in error_msg:
-                logger.warning("检测到 SSL 证书错误，尝试禁用 SSL 验证重试...")
+                logger.warning("SSL certificate error detected, retrying with SSL verification disabled...")
                 try:
-                    if self.session:
-                        await self.session.close()
-                        
-                    # 完全禁用 SSL 验证重试
+                    await self._close_session()
+
                     connector = aiohttp.TCPConnector(ssl=False)
                     self.session = aiohttp.ClientSession(connector=connector)
                     self.client = PetKitClient(
@@ -265,14 +295,16 @@ class PetKitService:
                         timezone=self.timezone,
                         session=self.session,
                     )
-                        
+
                     await self.client.get_devices_data()
-                    logger.warning("PetKit 登录成功（SSL 验证已禁用 - 仅开发环境）")
+                    logger.warning("PetKit login successful (SSL verification disabled - development only)")
+                    self._devices_last_refresh = time.time()
                     await self._save_session_to_db()
+                    self._initialized = True
                     return True
                 except Exception as retry_error:
-                    logger.error(f"禁用 SSL 重试失败：{retry_error}")
-                
+                    logger.error(f"Retry with SSL disabled failed: {retry_error}")
+
             return False
 
     async def start(self):
@@ -281,9 +313,8 @@ class PetKitService:
 
     async def close(self):
         """Close the session"""
-        if self.session:
-            await self.session.close()
-            self.session = None
+        await self._close_session()
+        self._initialized = False
 
     async def get_client_methods(self):
         if not self.client:
@@ -297,64 +328,44 @@ class PetKitService:
 
         return {"methods": [m for m in dir(self.client) if not m.startswith('_')], "constants": constants}
 
-    async def get_devices(self):
-        """Get all devices"""
-        if not self.client:
-            await self.initialize()
-
+    async def _refresh_devices(self):
+        """刷新设备数据"""
         try:
-            # 刷新数据
-            logger.info("正在刷新设备数据...")
             await self.client.get_devices_data()
-            # 更新会话时间戳
+            self._devices_last_refresh = time.time()
             await self._save_session_to_db()
         except Exception as e:
             error_msg = str(e)
-            # 检查是否是 SSL 错误
             is_ssl_error = "SSL" in error_msg or "certificate" in error_msg.lower() or "CERTIFICATE_VERIFY_FAILED" in error_msg
-            
+
             if "Session expired" in error_msg or "401" in error_msg or is_ssl_error:
-                if is_ssl_error:
-                    logger.warning(f"检测到 SSL 错误，尝试重新登录：{e}")
-                else:
-                    logger.warning("Session expired, attempting re-login...")
-                    
+                logger.warning("Session expired, attempting re-login...")
                 if await self._login():
                     await self.client.get_devices_data()
+                    self._devices_last_refresh = time.time()
                 else:
                     raise Exception("Re-login failed")
             else:
                 raise e
 
+    async def get_devices(self):
+        """Get all devices"""
+        if not self.client:
+            await self.initialize()
+
+        await self._refresh_devices_if_needed()
+
         devices = []
         for dev_id, entity in self.client.petkit_entities.items():
-            # 更准确的设备识别逻辑
-            # 1. 排除宠物档案 (有 pet_id)
             if hasattr(entity, 'pet_id'):
                 continue
 
-            # 2. 通过 device_nfo 获取准确的设备类型
-            dev_type = 'Unknown'
-            if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
-                dev_type = entity.device_nfo.device_type
-            else:
-                # 回退到原来的 device_type
-                dev_type = getattr(entity, 'device_type', 'Unknown')
-
-            # 3. 标准化设备类型名称
-            if dev_type.lower() == 't4':
-                dev_type = 'T4'
-            elif dev_type.lower() == 't3':
-                dev_type = 'T3'
-            elif dev_type.lower() == 't5':
-                dev_type = 'T5'
-
-            # 4. 只处理已知的设备类型
-            if dev_type not in ['T3', 'T4', 'T5']:
-                logger.info(f"跳过未知设备类型: {dev_type}")
+            dev_type = self._get_device_type(entity)
+            if dev_type not in SUPPORTED_DEVICE_TYPES:
                 continue
 
-            logger.info(f"处理实体: {getattr(entity, 'name', 'Unknown')} (类型: {dev_type}, ID: {entity.id})")
+            logger.info(f"Processing device: {getattr(entity, 'name', 'Unknown')} (Type: {dev_type}, ID: {entity.id})")
+            
             dev_data = {
                 "id": str(entity.id),
                 "name": getattr(entity, 'name', 'Unknown'),
@@ -362,20 +373,16 @@ class PetKitService:
                 "data": {}
             }
 
-            # 尝试提取更多状态数据
             if hasattr(entity, 'data') and entity.data:
-                # 确保 data 是字典，且值是基本类型
                 try:
                     raw_data = entity.data
                     if isinstance(raw_data, dict):
-                        # 简单过滤，防止包含复杂对象
                         dev_data["data"] = {k: v for k, v in raw_data.items() if isinstance(v, (str, int, float, bool, type(None)))}
                     else:
                         dev_data["data"] = str(raw_data)
-                except:
+                except Exception:
                     dev_data["data"] = {}
 
-            # 提取设备状态信息
             state_summary = {}
             if hasattr(entity, 'state'):
                 state_obj = entity.state
@@ -384,12 +391,10 @@ class PetKitService:
                     if hasattr(state_obj, sattr):
                         state_summary[sattr] = getattr(state_obj, sattr)
 
-                # 从状态字符串提取额外信息
                 raw_state_str = str(state_obj)
                 state_summary['raw_state'] = raw_state_str
                 self._extract_info_from_raw_state(raw_state_str, state_summary)
 
-            # 提取基础设备属性
             interesting_attrs = [
                 'liquid', 'weight', 'times', 'battery', 'connection',
                 'sand_percent', 'deodorant_left_days', 'used_times'
@@ -406,14 +411,12 @@ class PetKitService:
                 elif val is not None:
                     state_summary[attr] = str(val)
 
-            # 添加准确的统计信息
             if hasattr(entity, 'device_stats'):
                 device_stats = entity.device_stats
                 state_summary['today_visits'] = getattr(device_stats, 'times', 0)
                 state_summary['avg_duration'] = getattr(device_stats, 'avg_time', 0)
                 state_summary['total_duration'] = getattr(device_stats, 'total_time', 0)
 
-                # 获取最新的猫咪体重
                 if hasattr(device_stats, 'statistic_info') and device_stats.statistic_info:
                     stat_info = device_stats.statistic_info
                     if stat_info and len(stat_info) > 0:
@@ -432,45 +435,41 @@ class PetKitService:
             await self.initialize()
 
         target_id = None
-        # 如果未指定 ID，找第一个猫厕所 (T3/T4)
         if not device_id:
             for dev_id, entity in self.client.petkit_entities.items():
-                target_type = self._get_device_type(entity)
-                if target_type in ['T3', 'T4', 'T5']:
+                if self._is_supported_device(entity):
                     target_id = dev_id
                     break
         else:
             target_id = int(device_id) if str(device_id).isdigit() else device_id
 
-        if target_id:
-            logger.info(f"Sending clean command to {target_id}")
-            try:
-                from pypetkitapi.command import DeviceCommand, DeviceAction, LBCommand
-                await self.client.send_api_request(
-                    target_id,
-                    DeviceCommand.CONTROL_DEVICE,
-                    {DeviceAction.START: LBCommand.CLEANING}
-                )
-                # 更新会话时间戳
-                await self._save_session_to_db()
-                return {"status": "success", "device_id": str(target_id), "action": "clean"}
-            except Exception as e:
-                if "Session expired" in str(e) or "401" in str(e):
-                    logger.warning("Session expired during clean, re-logging in...")
-                    if await self._login():
-                        # Retry once
-                        await self.client.send_api_request(
-                            target_id,
-                            DeviceCommand.CONTROL_DEVICE,
-                            {DeviceAction.START: LBCommand.CLEANING}
-                        )
-                        await self._save_session_to_db()
-                        return {"status": "success", "device_id": str(target_id), "action": "clean"}
-                    else:
-                        raise Exception("Re-login failed")
-                raise e
+        if not target_id:
+            raise Exception("No litterbox found or invalid device ID")
 
-        raise Exception("No litterbox found or invalid device ID")
+        logger.info(f"Sending clean command to {target_id}")
+        try:
+            from pypetkitapi.command import DeviceCommand, DeviceAction, LBCommand
+            await self.client.send_api_request(
+                target_id,
+                DeviceCommand.CONTROL_DEVICE,
+                {DeviceAction.START: LBCommand.CLEANING}
+            )
+            await self._save_session_to_db()
+            return {"status": "success", "device_id": str(target_id), "action": "clean"}
+        except Exception as e:
+            if "Session expired" in str(e) or "401" in str(e):
+                logger.warning("Session expired during clean, re-logging in...")
+                if await self._login():
+                    await self.client.send_api_request(
+                        target_id,
+                        DeviceCommand.CONTROL_DEVICE,
+                        {DeviceAction.START: LBCommand.CLEANING}
+                    )
+                    await self._save_session_to_db()
+                    return {"status": "success", "device_id": str(target_id), "action": "clean"}
+                else:
+                    raise Exception("Re-login failed")
+            raise e
 
     async def deodorize_litterbox(self, device_id=None):
         """Trigger deodorize (spray) for the first found or specified litterbox"""
@@ -478,49 +477,43 @@ class PetKitService:
             await self.initialize()
 
         target_id = None
-
-        # 如果未指定 ID，找第一个猫厕所 (T3/T4)
         if not device_id:
             for dev_id, entity in self.client.petkit_entities.items():
-                target_type = self._get_device_type(entity)
-                if target_type in ['T3', 'T4', 'T5']:
+                if self._is_supported_device(entity):
                     target_id = dev_id
                     break
         else:
             target_id = int(device_id) if str(device_id).isdigit() else device_id
 
-        if target_id:
-            logger.info(f"Sending deodorize command to {target_id}")
-            try:
-                from pypetkitapi.command import LitterCommand, DeviceAction, LBCommand
-                # 发送除臭指令 (DESODORIZE / SPRAY)
-                await self.client.send_api_request(
-                    target_id,
-                    LitterCommand.CONTROL_DEVICE,
-                    {DeviceAction.START: LBCommand.DESODORIZE}
-                )
-                # 更新会话时间戳
-                await self._save_session_to_db()
-                return {"status": "success", "device_id": str(target_id), "action": "deodorize"}
-            except Exception as e:
-                if "Session expired" in str(e) or "401" in str(e):
-                    logger.warning("Session expired during deodorize, re-logging in...")
-                    if await self._login():
-                        # Retry once
-                        await self.client.send_api_request(
-                            target_id,
-                            LitterCommand.CONTROL_DEVICE,
-                            {DeviceAction.START: LBCommand.DESODORIZE}
-                        )
-                        await self._save_session_to_db()
-                        return {"status": "success", "device_id": str(target_id), "action": "deodorize"}
-                    else:
-                        raise Exception("Re-login failed")
-                raise e
+        if not target_id:
+            raise Exception("No litterbox found or invalid device ID")
 
-        raise Exception("No litterbox found or invalid device ID")
+        logger.info(f"Sending deodorize command to {target_id}")
+        try:
+            from pypetkitapi.command import LitterCommand, DeviceAction, LBCommand
+            await self.client.send_api_request(
+                target_id,
+                LitterCommand.CONTROL_DEVICE,
+                {DeviceAction.START: LBCommand.DESODORIZE}
+            )
+            await self._save_session_to_db()
+            return {"status": "success", "device_id": str(target_id), "action": "deodorize"}
+        except Exception as e:
+            if "Session expired" in str(e) or "401" in str(e):
+                logger.warning("Session expired during deodorize, re-logging in...")
+                if await self._login():
+                    await self.client.send_api_request(
+                        target_id,
+                        LitterCommand.CONTROL_DEVICE,
+                        {DeviceAction.START: LBCommand.DESODORIZE}
+                    )
+                    await self._save_session_to_db()
+                    return {"status": "success", "device_id": str(target_id), "action": "deodorize"}
+                else:
+                    raise Exception("Re-login failed")
+            raise e
 
-    def _get_device_type(self, entity):
+    def _get_device_type(self, entity) -> str:
         """获取设备类型"""
         target_type = 'Unknown'
         if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
@@ -528,30 +521,40 @@ class PetKitService:
         else:
             target_type = getattr(entity, 'device_type', '').upper()
 
-        # 兼容之前的逻辑
-        if target_type == 'UNKNOWN' and hasattr(entity, 'name') and ('MAX' in entity.name or '猫厕所' in entity.name):
-            target_type = 'T4'
+        if target_type == 'UNKNOWN' and hasattr(entity, 'name'):
+            name = entity.name
+            if 'MAX' in name or '猫厕所' in name:
+                target_type = 'T4'
 
         return target_type
+    
+    def _is_supported_device(self, entity) -> bool:
+        """检查是否为支持的設備类型"""
+        dev_type = self._get_device_type(entity)
+        return dev_type in SUPPORTED_DEVICE_TYPES
+    
+    async def _refresh_devices_if_needed(self):
+        """根据缓存时间刷新设备数据"""
+        current_time = time.time()
+        if current_time - self._devices_last_refresh > DEVICE_CACHE_TTL:
+            async with self._devices_refresh_lock:
+                # 双重检查
+                if time.time() - self._devices_last_refresh > DEVICE_CACHE_TTL:
+                    await self._refresh_devices()
 
     def _extract_info_from_raw_state(self, raw_state: str, state_summary: dict):
         """从原始状态字符串中提取关键信息"""
-        # 定义要提取的关键字段
         key_fields = [
             'deodorant_left_days', 'sand_percent', 'sand_weight',
             'used_times', 'frequent_restroom', 'liquid_lack',
             'box_full', 'sand_lack', 'power', 'ota'
         ]
-
-        # 使用正则表达式提取字段值
-        import re
-        for field in key_fields:
-            # 匹配 pattern: field=value 或 field=value,
-            pattern = rf'{field}=([\w\d\.-]+)'
-            match = re.search(pattern, raw_state)
-            if match:
-                value = match.group(1)
-                # 尝试转换为适当的类型
+    
+        for match in RAW_STATE_PATTERN.finditer(raw_state):
+            field = match.group(1)
+            value = match.group(2)
+                
+            if field in key_fields:
                 try:
                     if value.lower() in ['true', 'false']:
                         state_summary[field] = value.lower() == 'true'
@@ -561,49 +564,35 @@ class PetKitService:
                         state_summary[field] = int(value)
                     else:
                         state_summary[field] = value
-                except:
+                except Exception:
                     state_summary[field] = value
-
-        # 特殊处理wifi信息
-        wifi_match = re.search(r'wifi=Wifi\(bssid=\'(.*?)\', rsq=(-?\d+)', raw_state)
+    
+        wifi_match = WIFI_PATTERN.search(raw_state)
         if wifi_match:
             state_summary['wifi_bssid'] = wifi_match.group(1)
             state_summary['wifi_rsq'] = int(wifi_match.group(2))
 
     async def get_device_stats(self, device_id=None, days=7):
-        """获取设备历史统计数据（使用 pypetkitapi 原生方法）"""
+        """获取设备历史统计数据"""
         if not self.client:
             await self.initialize()
 
-        # 刷新设备数据，这会自动调用统计任务
-        await self.client.get_devices_data()
+        await self._refresh_devices_if_needed()
 
         target_entity = None
-
         if device_id:
-            target_entity = self.client.petkit_entities.get(int(device_id))
+            target_entity = self.client.petkit_entities.get(int(device_id) if str(device_id).isdigit() else device_id)
         else:
-            # 找第一个猫厕所
             for entity in self.client.petkit_entities.values():
-                # 使用改进的设备类型识别
-                dev_type = 'Unknown'
-                if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
-                    dev_type = entity.device_nfo.device_type.upper()
-                else:
-                    dev_type = getattr(entity, 'device_type', '').upper()
-
-                if dev_type in ['T3', 'T4', 'T5']:
+                if self._is_supported_device(entity):
                     target_entity = entity
                     break
 
         if not target_entity:
-            return {"error": "未找到设备"}
+            return {"error": "Device not found"}
 
         try:
-            # 使用原生的统计属性
             stats_data = {}
-
-            # 从 LitterStats 获取统计信息
             if hasattr(target_entity, 'stats') and target_entity.stats:
                 stats = target_entity.stats
                 stats_data.update({
@@ -614,7 +603,6 @@ class PetKitService:
                     'pet_ids': getattr(stats, 'pet_ids', [])
                 })
 
-            # 从设备基本属性获取其他信息
             stats_data.update({
                 'device_name': getattr(target_entity, 'name', 'Unknown'),
                 'sand_percent': getattr(target_entity, 'sand_percent', 0),
@@ -624,104 +612,84 @@ class PetKitService:
             })
 
             return stats_data
-
         except Exception as e:
-            logger.warning(f"获取统计信息失败: {e}")
-            return {"error": f"无法获取统计数据: {str(e)}"}
+            logger.warning(f"Failed to get stats: {e}")
+            return {"error": f"Failed to get statistics: {str(e)}"}
 
     async def get_daily_stats(self, device_id=None):
-        """获取今日数据（使用 pypetkitapi 原生统计方法）"""
+        """获取今日数据"""
         if not self.client:
             await self.initialize()
 
-        # 刷新设备数据，确保统计信息是最新的
-        await self.client.get_devices_data()
+        await self._refresh_devices_if_needed()
 
         target_entity = None
-
         if device_id:
-            target_entity = self.client.petkit_entities.get(int(device_id))
+            target_entity = self.client.petkit_entities.get(int(device_id) if str(device_id).isdigit() else device_id)
         else:
-            # 找第一个猫厕所
             for entity in self.client.petkit_entities.values():
-                # 使用改进的设备类型识别
-                dev_type = 'Unknown'
-                if hasattr(entity, 'device_nfo') and hasattr(entity.device_nfo, 'device_type'):
-                    dev_type = entity.device_nfo.device_type.upper()
-                else:
-                    dev_type = getattr(entity, 'device_type', '').upper()
-
-                if dev_type in ['T3', 'T4', 'T5']:
+                if self._is_supported_device(entity):
                     target_entity = entity
                     break
 
-        if target_entity:
-            try:
-                # 使用 pypetkitapi 原生的统计信息
-                result = {
-                    "device_name": getattr(target_entity, 'name', 'Unknown'),
-                    "sand_percent": getattr(target_entity, 'sand_percent', 0),
-                    "deodorant_days": getattr(target_entity, 'deodorant_left_days', 0)
-                }
+        if not target_entity:
+            return {"today_visits": 0, "last_visit": "N/A", "error": "Device not found"}
 
-                # 优先从 device_stats 获取今日统计（更准确）
-                if hasattr(target_entity, 'device_stats'):
-                    device_stats = target_entity.device_stats
-                    result.update({
-                        "today_visits": getattr(device_stats, 'times', 0),
-                        "avg_duration": getattr(device_stats, 'avg_time', 0),
-                        "total_duration": getattr(device_stats, 'total_time', 0),
-                        "statistic_time": getattr(device_stats, 'statistic_time', None)
-                    })
+        try:
+            result = {
+                "device_name": getattr(target_entity, 'name', 'Unknown'),
+                "sand_percent": getattr(target_entity, 'sand_percent', 0),
+                "deodorant_days": getattr(target_entity, 'deodorant_left_days', 0)
+            }
 
-                    # 获取详细的宠物统计信息
-                    if hasattr(device_stats, 'statistic_info'):
-                        stat_info = device_stats.statistic_info
-                        if stat_info and len(stat_info) > 0:
-                            # 获取最新的记录
-                            latest_record = stat_info[-1]
-                            result["last_visit"] = str(getattr(latest_record, 'statistic_date', 'N/A'))
-                            # 获取最新的猫咪体重
-                            latest_weight = getattr(latest_record, 'pet_weight', 0)
-                            if latest_weight > 0:
-                                result["last_pet_weight"] = latest_weight / 1000.0  # 转换为kg
-                        else:
-                            result["last_visit"] = "N/A"
-                    else:
-                        result["last_visit"] = "N/A"
+            if hasattr(target_entity, 'device_stats'):
+                device_stats = target_entity.device_stats
+                result.update({
+                    "today_visits": getattr(device_stats, 'times', 0),
+                    "avg_duration": getattr(device_stats, 'avg_time', 0),
+                    "total_duration": getattr(device_stats, 'total_time', 0),
+                    "statistic_time": getattr(device_stats, 'statistic_time', None)
+                })
 
-                # 回退到 LitterStats
-                elif hasattr(target_entity, 'stats') and target_entity.stats:
-                    stats = target_entity.stats
-                    result.update({
-                        "today_visits": getattr(stats, 'times', 0),
-                        "avg_duration": getattr(stats, 'avg_time', 0),
-                        "total_duration": getattr(stats, 'total_time', 0),
-                        "statistic_time": getattr(stats, 'statistic_time', None)
-                    })
-
-                    # 尝试获取最后一次使用时间
-                    if hasattr(stats, 'statistic_info') and stats.statistic_info:
-                        result["last_visit"] = "从统计信息获取"
+                if hasattr(device_stats, 'statistic_info'):
+                    stat_info = device_stats.statistic_info
+                    if stat_info and len(stat_info) > 0:
+                        latest_record = stat_info[-1]
+                        result["last_visit"] = str(getattr(latest_record, 'statistic_date', 'N/A'))
+                        latest_weight = getattr(latest_record, 'pet_weight', 0)
+                        if latest_weight > 0:
+                            result["last_pet_weight"] = latest_weight / 1000.0
                     else:
                         result["last_visit"] = "N/A"
                 else:
-                    # 如果没有统计信息，使用基本属性作为回退
-                    result.update({
-                        "today_visits": getattr(target_entity, 'used_times', 0),
-                        "last_visit": "N/A",
-                        "warning": "使用累计数据，可能非今日实际次数"
-                    })
-                    logger.warning(f"设备 {target_entity.name} 缺少详细统计信息，使用累计数据")
+                    result["last_visit"] = "N/A"
 
-                return result
+            elif hasattr(target_entity, 'stats') and target_entity.stats:
+                stats = target_entity.stats
+                result.update({
+                    "today_visits": getattr(stats, 'times', 0),
+                    "avg_duration": getattr(stats, 'avg_time', 0),
+                    "total_duration": getattr(stats, 'total_time', 0),
+                    "statistic_time": getattr(stats, 'statistic_time', None)
+                })
 
-            except Exception as e:
-                logger.error(f"处理统计信息时出错: {e}")
-                return {
-                    "today_visits": 0,
+                if hasattr(stats, 'statistic_info') and stats.statistic_info:
+                    result["last_visit"] = "From statistics"
+                else:
+                    result["last_visit"] = "N/A"
+            else:
+                result.update({
+                    "today_visits": getattr(target_entity, 'used_times', 0),
                     "last_visit": "N/A",
-                    "error": f"处理统计信息失败: {str(e)}"
-                }
+                    "warning": "Using cumulative data, may not be today's actual count"
+                })
+                logger.warning(f"Device {target_entity.name} lacks detailed stats, using cumulative data")
 
-        return {"today_visits": 0, "last_visit": "N/A", "error": "未找到设备"}
+            return result
+        except Exception as e:
+            logger.error(f"Error processing stats: {e}")
+            return {
+                "today_visits": 0,
+                "last_visit": "N/A",
+                "error": f"Failed to process statistics: {str(e)}"
+            }

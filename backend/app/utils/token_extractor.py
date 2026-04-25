@@ -30,6 +30,7 @@ from PIL import Image
 if sys.platform != "win32":
     import readline
 
+# 常量定义
 SERVERS = ["cn", "de", "us", "ru", "tw", "sg", "in", "i2"]
 NAME_TO_LEVEL = {
     "CRITICAL": logging.CRITICAL,
@@ -41,6 +42,9 @@ NAME_TO_LEVEL = {
     "DEBUG": logging.DEBUG,
     "NOTSET": logging.NOTSET,
 }
+IMAGE_SERVER_PORT = 31415
+REQUEST_TIMEOUT = 15  # 秒
+LONG_POLLING_TIMEOUT = 10  # 秒
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-ni", "--non_interactive", required=False, help="Non-interactive mode", action="store_true")
@@ -50,8 +54,10 @@ parser.add_argument("-s", "--server", required=False, help="Server", choices=[*S
 parser.add_argument("-l", "--log_level", required=False, help="Log level", default="CRITICAL", choices=list(NAME_TO_LEVEL.keys()))
 parser.add_argument("-o", "--output", required=False, help="Output file")
 parser.add_argument("--host", required=False, help="Host")
-args = parser.parse_args()
-if args.non_interactive and (not args.username or not args.password):
+
+# 仅在作为主脚本运行时解析参数，避免作为模块导入时出错
+args = parser.parse_args() if __name__ == "__main__" else None
+if args and args.non_interactive and (not args.username or not args.password):
     parser.error("You need to specify username and password or run as interactive.")
 
 init(autoreset=True)
@@ -74,7 +80,9 @@ class ColorFormatter(logging.Formatter):
 
 class ColorLogger(logging.Logger):
     def __init__(self, name: str) -> None:
-        level = NAME_TO_LEVEL[args.log_level.upper()]
+        # 如果 args 未初始化（作为模块导入），默认使用 CRITICAL
+        level_name = args.log_level.upper() if args else "CRITICAL"
+        level = NAME_TO_LEVEL.get(level_name, logging.CRITICAL)
         logging.Logger.__init__(self, name, level)
         color_formatter = ColorFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         handler = logging.StreamHandler(sys.stdout)
@@ -102,29 +110,34 @@ class XiaomiCloudConnector(ABC):
     def get_homes(self, country):
         url = self.get_api_url(country) + "/v2/homeroom/gethome"
         params = {
-            "data": '{"fg": true, "fetch_share": true, "fetch_share_dev": true, "limit": 300, "app_ver": 7}'}
+            "data": json.dumps({"fg": True, "fetch_share": True, "fetch_share_dev": True, "limit": 300, "app_ver": 7})
+        }
         return self.execute_api_call_encrypted(url, params)
 
     def get_devices(self, country, home_id, owner_id):
         url = self.get_api_url(country) + "/v2/home/home_device_list"
         params = {
-            "data": '{"home_owner": ' + str(owner_id) +
-            ',"home_id": ' + str(home_id) +
-            ',  "limit": 200,  "get_split_device": true, "support_smart_home": true}'
+            "data": json.dumps({
+                "home_owner": owner_id,
+                "home_id": home_id,
+                "limit": 200,
+                "get_split_device": True,
+                "support_smart_home": True
+            })
         }
         return self.execute_api_call_encrypted(url, params)
 
     def get_dev_cnt(self, country):
         url = self.get_api_url(country) + "/v2/user/get_device_cnt"
         params = {
-            "data": '{ "fetch_own": true, "fetch_share": true}'
+            "data": json.dumps({"fetch_own": True, "fetch_share": True})
         }
         return self.execute_api_call_encrypted(url, params)
 
     def get_beaconkey(self, country, did):
         url = self.get_api_url(country) + "/v2/device/blt_get_beaconkey"
         params = {
-            "data": '{"did":"' + did + '","pdid":1}'
+            "data": json.dumps({"did": did, "pdid": 1})
         }
         return self.execute_api_call_encrypted(url, params)
 
@@ -150,10 +163,15 @@ class XiaomiCloudConnector(ABC):
         nonce = self.generate_nonce(millis)
         signed_nonce = self.signed_nonce(nonce)
         fields = self.generate_enc_params(url, "POST", signed_nonce, nonce, params, self._ssecurity)
-        response = self._session.post(url, headers=headers, cookies=cookies, params=fields)
-        if response.status_code == 200:
-            decoded = self.decrypt_rc4(self.signed_nonce(fields["_nonce"]), response.text)
-            return json.loads(decoded)
+        try:
+            response = self._session.post(url, headers=headers, cookies=cookies, params=fields, timeout=REQUEST_TIMEOUT)
+            if response.status_code == 200:
+                decoded = self.decrypt_rc4(self.signed_nonce(fields["_nonce"]), response.text)
+                return json.loads(decoded)
+        except requests.exceptions.RequestException as e:
+            _LOGGER.error(f"API call failed: {e}")
+        except Exception as e:
+            _LOGGER.error(f"Failed to process API response: {e}")
         return None
 
     @staticmethod
@@ -288,23 +306,26 @@ class PasswordXiaomiCloudConnector(XiaomiCloudConnector):
         cookies = {
             "userId": self._username
         }
-        response = self._session.get(url, headers=headers, cookies=cookies)
-        _LOGGER.debug(response.text)
-        json_resp = self.to_json(response.text)
-        if response.status_code == 200:
-            if "_sign" in json_resp:
-                self._sign = json_resp["_sign"]
-                return True
-            elif "ssecurity" in json_resp:
-                self._ssecurity = json_resp["ssecurity"]
-                self.userId = json_resp["userId"]
-                self._cUserId = json_resp["cUserId"]
-                self._passToken = json_resp["passToken"]
-                self._location = json_resp["location"]
-                self._code = json_resp["code"]
-
-                return True
-
+        try:
+            response = self._session.get(url, headers=headers, cookies=cookies, timeout=REQUEST_TIMEOUT)
+            _LOGGER.debug("login_step_1 response status: %s", response.status_code)
+            json_resp = self.to_json(response.text)
+            if response.status_code == 200:
+                if "_sign" in json_resp:
+                    self._sign = json_resp["_sign"]
+                    return True
+                elif "ssecurity" in json_resp:
+                    self._ssecurity = json_resp["ssecurity"]
+                    self.userId = json_resp["userId"]
+                    self._cUserId = json_resp["cUserId"]
+                    self._passToken = json_resp["passToken"]
+                    self._location = json_resp["location"]
+                    self._code = json_resp["code"]
+                    return True
+        except requests.exceptions.RequestException as e:
+            _LOGGER.error(f"login_step_1 network error: {e}")
+        except Exception as e:
+            _LOGGER.error(f"login_step_1 unexpected error: {e}")
         return False
 
     def login_step_2(self) -> bool:
@@ -380,11 +401,16 @@ class PasswordXiaomiCloudConnector(XiaomiCloudConnector):
             "User-Agent": self._agent,
             "Content-Type": "application/x-www-form-urlencoded"
         }
-        response = self._session.get(self._location, headers=headers)
-        _LOGGER.debug(response.text)
-        if response.status_code == 200:
-            self._serviceToken = response.cookies.get("serviceToken")
-        return response.status_code == 200
+        try:
+            response = self._session.get(self._location, headers=headers, timeout=REQUEST_TIMEOUT)
+            if response.status_code == 200:
+                self._serviceToken = response.cookies.get("serviceToken")
+                return True
+        except requests.exceptions.RequestException as e:
+            _LOGGER.error(f"login_step_3 network error: {e}")
+        except Exception as e:
+            _LOGGER.error(f"login_step_3 unexpected error: {e}")
+        return False
 
     def handle_captcha(self, captcha_url: str) -> str:
         # Full URL in case it's relative
@@ -779,7 +805,7 @@ ___ ____ _  _ ____ _  _ ____    ____ _  _ ___ ____ ____ ____ ___ ____ ____
     """)
 
 
-def start_image_server(image: bytes) -> None:
+def start_image_server(image: bytes) -> HTTPServer:
     class ImgHttpHandler(BaseHTTPRequestHandler):
 
         def do_GET(self) -> None:
@@ -790,13 +816,14 @@ def start_image_server(image: bytes) -> None:
         def log_message(self, msg, *args) -> None:
             _LOGGER.debug(msg, *args)
 
-    httpd = HTTPServer(("", 31415), ImgHttpHandler)
+    httpd = HTTPServer(("", IMAGE_SERVER_PORT), ImgHttpHandler)
     _LOGGER.info("server address: %s", httpd.server_address)
     _LOGGER.info("hostname: %s", socket.gethostname())
 
-    thread = threading.Thread(target = httpd.serve_forever)
+    thread = threading.Thread(target=httpd.serve_forever)
     thread.daemon = True
     thread.start()
+    return httpd
 
 
 def present_image_image(
@@ -805,9 +832,10 @@ def present_image_image(
         message_file_saved: str,
         message_manually_open_file: str,
 ) -> None:
+    httpd = None
     try:
         # Try to serve an image file
-        start_image_server(image_content)
+        httpd = start_image_server(image_content)
         print_if_interactive(message_url)
     except Exception as e1:
         _LOGGER.debug(e1)
@@ -822,6 +850,10 @@ def present_image_image(
         except Exception as e2:
             _LOGGER.debug(e2)
             print_if_interactive(message_manually_open_file.format(tmp_path))
+    finally:
+        # 注意：由于 serve_forever 在后台线程，这里不 shutdown 以便用户有时间查看
+        # 主程序退出时线程会自动结束
+        pass
 
 
 def main() -> None:
