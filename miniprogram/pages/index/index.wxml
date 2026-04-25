@@ -65,7 +65,7 @@
             <navigator wx:if="{{item.device_type === 'feeder'}}" 
                        url="/pages/feeder/feeder" 
                        class="device-card">
-              <view class="card-icon" style="background: linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%);">
+              <view class="card-icon" style="background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);">
                 <text class="icon-text">🍖</text>
               </view>
               <view class="card-info">
@@ -81,7 +81,7 @@
             <navigator wx:if="{{item.device_type === 'litterbox'}}" 
                        url="/pages/litterbox/litterbox" 
                        class="device-card">
-              <view class="card-icon" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%);">
+              <view class="card-icon" style="background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);">
                 <text class="icon-text">🚽</text>
               </view>
               <view class="card-info">
@@ -109,7 +109,7 @@
             <navigator wx:if="{{item.device_type === 'scale'}}" 
                        url="/pages/scale/scale" 
                        class="device-card">
-              <view class="card-icon" style="background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%);">
+              <view class="card-icon" style="background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);">
                 <text class="icon-text">⚖️</text>
               </view>
               <view class="card-info">
@@ -140,17 +140,17 @@
       
       <view class="device-options">
         <view class="option-item" bindtap="selectDeviceType" data-type="feeder" data-platform="cloudpets">
-          <view class="option-icon" style="background: #fff7e6;">🍖</view>
+          <view class="option-icon" style="background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);">🍖</view>
           <text class="option-name">喂食机</text>
         </view>
         
         <view class="option-item" bindtap="selectDeviceType" data-type="litterbox" data-platform="petkit">
-          <view class="option-icon" style="background: #e6f7ff;">🚽</view>
+          <view class="option-icon" style="background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);">🚽</view>
           <text class="option-name">猫厕所</text>
         </view>
         
         <view class="option-item" bindtap="selectDeviceType" data-type="scale" data-platform="xiaomi">
-          <view class="option-icon" style="background: #f6ffed;">⚖️</view>
+          <view class="option-icon" style="background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);">⚖️</view>
           <text class="option-name">体脂秤</text>
         </view>
       </view>
