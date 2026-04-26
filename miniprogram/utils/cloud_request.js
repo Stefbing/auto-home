@@ -12,7 +12,7 @@ const CONFIG = {
   cloudService: 'home',
 
   // 本地调试配置（替换为你的本地后端地址）
-  localBaseUrl: 'http://localhost:8000'
+  localBaseUrl: 'http://192.168.1.4:8000'
 };
 
 let isCloudInitialized = false;

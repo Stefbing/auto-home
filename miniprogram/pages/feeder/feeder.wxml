@@ -2,39 +2,64 @@
   <!-- 顶部导航栏 -->
   <view class="header-section">
     <navigator url="/pages/index/index" class="back-btn">
-      <text class="back-icon">‹</text>
+      <text class="iconfont">&#xe600;</text>
     </navigator>
     <text class="page-title">智能喂食器</text>
     <view class="placeholder"></view>
   </view>
 
+  <!-- Hero卡片 - 设备状态概览 -->
   <view class="hero-card">
-    <view class="hero-label">Feeder Control</view>
-    <view class="hero-title">智能喂食器</view>
-    <view class="hero-desc">把最常用的投喂动作放在前面，计划状态单独展示，页面更清爽也更聚焦。</view>
+    <view class="hero-top">
+      <view class="device-info">
+        <view class="device-icon">🍖</view>
+        <view class="device-text">
+          <text class="device-name">CloudPets 喂食器</text>
+          <view class="device-status">
+            <view class="status-dot online"></view>
+            <text class="status-text">在线</text>
+          </view>
+        </view>
+      </view>
+      <view class="hero-badge">今日已喂 {{todayServings}} 次</view>
+    </view>
   </view>
 
-  <view class="card highlight-card">
-    <view class="card-head">
-      <view>
-        <view class="card-title">快速投喂</view>
-        <view class="card-subtitle">一键执行单次投喂</view>
-      </view>
-      <view class="pill-tag">1 份</view>
+  <!-- 快速投喂卡片 -->
+  <view class="action-card">
+    <view class="card-header">
+      <text class="card-title">快速投喂</text>
+      <text class="card-subtitle">一键执行单次投喂</text>
     </view>
-    <button class="primary-action" bindtap="feedOne" loading="{{actionLoading}}" disabled="{{actionLoading}}">
-      {{actionLoading ? '投喂中' : '立即投喂'}}
-    </button>
+    
+    <view class="feed-control">
+      <view class="amount-selector">
+        <button class="amount-btn {{feedAmount === 1 ? 'active' : ''}}" bindtap="setFeedAmount" data-amount="1">1份</button>
+        <button class="amount-btn {{feedAmount === 2 ? 'active' : ''}}" bindtap="setFeedAmount" data-amount="2">2份</button>
+        <button class="amount-btn {{feedAmount === 3 ? 'active' : ''}}" bindtap="setFeedAmount" data-amount="3">3份</button>
+      </view>
+      
+      <button class="feed-btn {{actionLoading ? 'loading' : ''}}" 
+              bindtap="feedOne" 
+              loading="{{actionLoading}}" 
+              disabled="{{actionLoading}}">
+        <text wx:if="{{!actionLoading}}">立即投喂 {{feedAmount}} 份</text>
+        <text wx:else>投喂中...</text>
+      </button>
+    </view>
   </view>
 
-  <view class="card">
-    <view class="card-head">
+  <!-- 喂食计划卡片 -->
+  <view class="plan-card">
+    <view class="card-header">
       <view>
-        <view class="card-title">喂食计划</view>
-        <view class="card-subtitle">支持实时切换计划启用状态</view>
+        <text class="card-title">喂食计划</text>
+        <text class="card-subtitle">定时自动投喂，支持实时切换</text>
       </view>
+      <navigator url="/pages/feeder/feeder_plans" class="manage-link">管理 ›</navigator>
     </view>
 
+    <!-- 加载骨架屏 -->
     <view wx:if="{{loading}}" class="plan-skeleton">
       <view class="skeleton-item" wx:for="{{[1, 2, 3]}}" wx:key="*this">
         <view class="skeleton-main">
@@ -45,18 +70,26 @@
       </view>
     </view>
 
-    <view wx:elif="{{plans.length > 0}}">
+    <!-- 计划列表 -->
+    <view wx:elif="{{plans.length > 0}}" class="plan-list">
       <view wx:for="{{plans}}" wx:key="index" class="plan-item">
-        <view class="plan-main">
+        <view class="plan-left">
           <view class="plan-time">{{item.time}}</view>
-          <view class="plan-meta">投喂 {{item.amount}} 份</view>
+          <view class="plan-detail">
+            <text class="plan-amount">{{item.amount}} 份</text>
+            <text class="plan-separator">·</text>
+            <text class="plan-status {{item.enabled ? 'enabled' : 'disabled'}}">{{item.enabled ? '启用' : '停用'}}</text>
+          </view>
         </view>
-        <switch color="#2c6ef0" checked="{{item.enabled}}" data-index="{{index}}" bindchange="togglePlan"/>
+        <switch color="#2563EB" checked="{{item.enabled}}" data-index="{{index}}" bindchange="togglePlan"/>
       </view>
     </view>
 
-    <view wx:else class="empty-state">暂无喂食计划</view>
-
-    <button class="ghost-action" bindtap="savePlans" disabled="{{loading}}">保存计划</button>
+    <!-- 空状态 -->
+    <view wx:else class="empty-plan">
+      <view class="empty-icon">📅</view>
+      <text class="empty-text">暂无喂食计划</text>
+      <navigator url="/pages/feeder/feeder_plans" class="add-plan-link">添加计划 ›</navigator>
+    </view>
   </view>
 </view>

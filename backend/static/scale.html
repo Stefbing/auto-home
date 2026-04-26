@@ -3,93 +3,410 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>体脂秤详情</title>
+    <title>智能体脂秤</title>
     <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.2/echarts.min.js"></script>
     <style>
         :root {
-            --primary: #4e8cff;
-            --bg: #f2f4f8;
-            --card-bg: #ffffff;
-            --text-main: #333333;
-            --text-sub: #888888;
-            --success: #52c41a;
-            --warning: #faad14;
-            --danger: #ff4d4f;
+            --primary: #10B981;
+            --primary-light: #D1FAE5;
+            --primary-dark: #059669;
+            --secondary: #3B82F6;
+            --bg: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-primary: #1E293B;
+            --text-secondary: #64748B;
+            --text-muted: #94A3B8;
+            --border: #E2E8F0;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --danger: #EF4444;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
         }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text-main); }
-        .app-container { max-width: 480px; margin: 0 auto; padding: 20px 16px; min-height: 100vh; }
-        header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-        .back-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
-        h1 { font-size: 20px; margin: 0; font-weight: 700; flex: 1; text-align: center; margin-right: 34px; }
+        * { 
+            box-sizing: border-box; 
+            -webkit-tap-highlight-color: transparent;
+            margin: 0;
+            padding: 0;
+        }
         
-        .scale-card { background: white; border-radius: 24px; padding: 24px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.04); margin-bottom: 20px; }
-        .weight-display { font-size: 48px; font-weight: 800; color: var(--primary); margin: 10px 0; }
-        .weight-unit { font-size: 16px; color: var(--text-sub); font-weight: 400; }
-        .bt-status { font-size: 14px; color: var(--text-sub); display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .bt-status.active { color: var(--success); }
+        body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            background: linear-gradient(135deg, #D1FAE5 0%, #F8FAFC 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .app-container { 
+            max-width: 480px; 
+            margin: 0 auto; 
+            padding: 0 0 40px;
+            min-height: 100vh; 
+        }
+        
+        header { 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between; 
+            padding: 20px 24px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .back-btn { 
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px; 
+            color: var(--text-secondary); 
+            cursor: pointer; 
+            transition: all 0.2s;
+        }
 
-        .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
-        .metric-item { background: #f8f9fa; padding: 12px; border-radius: 16px; text-align: center; }
-        .metric-val { font-size: 16px; font-weight: 700; display: block; }
-        .metric-label { font-size: 11px; color: var(--text-sub); }
+        .back-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary-light);
+        }
 
-        .chart-container { background: white; border-radius: 24px; padding: 20px; height: 300px; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.04); }
+        h1 { 
+            font-size: 20px; 
+            margin: 0; 
+            font-weight: 800; 
+            flex: 1; 
+            text-align: center;
+            letter-spacing: -0.3px;
+        }
+        
+        .refresh-btn { 
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px; 
+            color: var(--text-secondary); 
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary-light);
+        }
+        
+        .scale-card { 
+            background: var(--card-bg); 
+            border-radius: var(--radius-xl); 
+            padding: 32px 24px; 
+            text-align: center; 
+            box-shadow: var(--shadow-md);
+            margin: 24px 16px;
+            border: 1px solid var(--border);
+        }
+
+        .scale-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+        }
+        
+        .weight-display { 
+            font-size: 56px; 
+            font-weight: 800; 
+            color: var(--primary); 
+            margin: 16px 0;
+            letter-spacing: -2px;
+        }
+        
+        .weight-unit { 
+            font-size: 18px; 
+            color: var(--text-secondary); 
+            font-weight: 500; 
+        }
+        
+        .bt-status { 
+            font-size: 14px; 
+            color: var(--text-secondary); 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            gap: 8px;
+            font-weight: 500;
+        }
+        
+        .bt-status.active { 
+            color: var(--success); 
+        }
+
+        .metrics-grid { 
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 12px; 
+            margin: 24px 16px;
+        }
+        
+        .metric-item { 
+            background: var(--card-bg); 
+            padding: 16px 12px; 
+            border-radius: var(--radius-lg); 
+            text-align: center;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-sm);
+            transition: all 0.2s;
+        }
+
+        .metric-item:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .metric-value { 
+            font-size: 20px; 
+            font-weight: 800; 
+            display: block;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        
+        .metric-label { 
+            font-size: 11px; 
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .chart-container { 
+            background: var(--card-bg); 
+            border-radius: var(--radius-xl); 
+            padding: 24px; 
+            height: 300px; 
+            margin: 24px 16px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border);
+        }
         
         /* Debug Console */
         .debug-console {
-            background: #1e1e1e; color: #00ff00; border-radius: 16px; padding: 15px;
-            font-family: 'Courier New', Courier, monospace; font-size: 11px;
-            height: 150px; overflow-y: auto; margin-bottom: 20px; border: 4px solid #333;
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            color: #10B981;
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            height: 150px;
+            overflow-y: auto;
+            margin: 0 16px 24px;
+            border: 1px solid #334155;
+            box-shadow: var(--shadow-md);
         }
-        .debug-line { margin-bottom: 4px; border-bottom: 1px solid #333; padding-bottom: 2px; }
-        .debug-ts { color: #888; margin-right: 8px; }
-        .debug-err { color: #ff4d4f; }
+        
+        .debug-line { 
+            margin-bottom: 4px; 
+            border-bottom: 1px solid #334155; 
+            padding-bottom: 2px; 
+        }
+        
+        .debug-ts { 
+            color: #64748B; 
+            margin-right: 8px; 
+        }
+        
+        .debug-err { 
+            color: var(--danger); 
+        }
         
         .btn-connect { 
-            width: 100%; background: var(--primary); color: white; border: none; 
-            padding: 18px; border-radius: 20px; font-size: 16px; font-weight: 700; 
-            cursor: pointer; margin-top: 10px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 10px 20px rgba(78, 140, 255, 0.2);
+            width: calc(100% - 32px);
+            margin: 0 16px 24px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white; 
+            border: none; 
+            padding: 18px; 
+            border-radius: var(--radius-lg); 
+            font-size: 16px; 
+            font-weight: 700; 
+            cursor: pointer; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
-        .btn-connect:active { transform: scale(0.98); }
-        .btn-connect.connected { background: var(--danger); box-shadow: 0 10px 20px rgba(255, 77, 79, 0.2); }
-        .user-selector { margin-bottom: 20px; display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px; }
-        .user-chip { padding: 8px 16px; background: white; border-radius: 20px; font-size: 14px; white-space: nowrap; cursor: pointer; border: 1px solid #eee; }
-        .user-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+        
+        .btn-connect:hover {
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+            transform: translateY(-2px);
+        }
+        
+        .btn-connect:active { 
+            transform: scale(0.98); 
+        }
+        
+        .btn-connect.connected { 
+            background: linear-gradient(135deg, var(--danger) 0%, #DC2626 100%);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+        
+        .user-selector { 
+            margin: 0 16px 20px;
+            display: flex; 
+            gap: 10px; 
+            overflow-x: auto; 
+            padding-bottom: 10px;
+        }
+        
+        .user-chip { 
+            padding: 10px 18px; 
+            background: var(--card-bg); 
+            border-radius: 20px; 
+            font-size: 14px; 
+            white-space: nowrap; 
+            cursor: pointer; 
+            border: 2px solid var(--border);
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        
+        .user-chip:hover {
+            border-color: var(--primary-light);
+        }
+        
+        .user-chip.active { 
+            background: var(--primary); 
+            color: white; 
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
 
-        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 200; opacity: 0; pointer-events: none; transition: all 0.3s; backdrop-filter: blur(4px); }
-        .modal-overlay.show { opacity: 1; pointer-events: auto; }
-        .modal-content { background: white; width: 85%; max-width: 320px; border-radius: 24px; padding: 24px; transform: translateY(20px); transition: all 0.3s; }
-        .modal-overlay.show .modal-content { transform: translateY(0); }
+        .modal-overlay { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            right: 0; 
+            bottom: 0; 
+            background: rgba(15, 23, 42, 0.6); 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            z-index: 200; 
+            opacity: 0; 
+            pointer-events: none; 
+            transition: all 0.3s; 
+            backdrop-filter: blur(8px);
+        }
+        
+        .modal-overlay.show { 
+            opacity: 1; 
+            pointer-events: auto; 
+        }
+        
+        .modal-content { 
+            background: var(--card-bg); 
+            width: 85%; 
+            max-width: 340px; 
+            border-radius: var(--radius-xl); 
+            padding: 32px 24px 24px; 
+            transform: translateY(20px) scale(0.9); 
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border);
+        }
+        
+        .modal-overlay.show .modal-content { 
+            transform: translateY(0) scale(1); 
+        }
 
-        .member-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
+        .member-list { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 12px; 
+            margin: 24px 0; 
+        }
+        
         .member-item { 
-            padding: 16px; background: #f8f9fa; border-radius: 16px; text-align: center; 
-            cursor: pointer; border: 2px solid transparent; transition: all 0.2s;
+            padding: 20px 16px; 
+            background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%); 
+            border-radius: var(--radius-lg); 
+            text-align: center; 
+            cursor: pointer; 
+            border: 2px solid var(--border); 
+            transition: all 0.2s;
         }
-        .member-item.active { border-color: var(--primary); background: #e8f2ff; }
-        .member-item i { font-size: 24px; color: var(--primary); margin-bottom: 8px; display: block; }
-        .member-item span { font-weight: 600; font-size: 14px; }
+        
+        .member-item:hover {
+            border-color: var(--primary-light);
+            transform: translateY(-2px);
+        }
+        
+        .member-item.active { 
+            border-color: var(--primary); 
+            background: linear-gradient(135deg, var(--primary-light) 0%, #C7D2FE 100%);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+        }
+        
+        .member-item i { 
+            font-size: 32px; 
+            color: var(--primary); 
+            margin-bottom: 12px; 
+            display: block; 
+        }
+        
+        .member-item span { 
+            font-weight: 700; 
+            font-size: 14px;
+            color: var(--text-primary);
+        }
     </style>
 </head>
 <body>
     <div class="app-container">
         <header>
-            <button class="back-btn" onclick="location.href='/'"><i class="fas fa-chevron-left"></i></button>
-            <h1>小米体脂秤 2</h1>
-            <button class="refresh-btn" onclick="showMemberModal()"><i class="fas fa-users"></i></button>
+            <button class="back-btn" onclick="location.href='/'">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+            <h1>智能体脂秤</h1>
+            <button class="refresh-btn" onclick="showMemberModal()">
+                <i class="fas fa-users"></i>
+            </button>
         </header>
 
         <div class="scale-card">
-            <div class="bt-status" id="bt-status"><i class="fab fa-bluetooth"></i> <span>等待连接...</span></div>
-            <div class="weight-display" id="current-weight">0.00 <span class="weight-unit">kg</span></div>
-            <div id="impedance-status" style="font-size: 12px; color: var(--text-sub);">站在秤上开始测量体脂</div>
+            <div class="bt-status" id="bt-status">
+                <i class="fab fa-bluetooth"></i> 
+                <span>等待连接...</span>
+            </div>
+            <div class="weight-display" id="current-weight">
+                0.00 <span class="weight-unit">kg</span>
+            </div>
+            <div id="impedance-status" style="font-size: 14px; color: var(--text-secondary); font-weight: 500;">
+                站在秤上开始测量体脂
+            </div>
             <button class="btn-connect" id="btn-scan">开始测量</button>
         </div>
 
-        <div id="active-user-info" style="margin-bottom: 15px; text-align: center; font-weight: 600; color: var(--primary);">
+        <div id="active-user-info" style="margin: 0 16px 20px; text-align: center; font-weight: 700; color: var(--primary); font-size: 16px;">
             <!-- Current user name will show here -->
         </div>
 
@@ -98,12 +415,30 @@
         </div>
 
         <div class="metrics-grid" id="metrics-grid">
-            <div class="metric-item"><span class="metric-val" id="val-bmi">--</span><span class="metric-label">BMI</span></div>
-            <div class="metric-item"><span class="metric-val" id="val-fat">--%</span><span class="metric-label">体脂率</span></div>
-            <div class="metric-item"><span class="metric-val" id="val-muscle">--kg</span><span class="metric-label">肌肉量</span></div>
-            <div class="metric-item"><span class="metric-val" id="val-water">--%</span><span class="metric-label">水分</span></div>
-            <div class="metric-item"><span class="metric-val" id="val-bone">--kg</span><span class="metric-label">骨量</span></div>
-            <div class="metric-item"><span class="metric-val" id="val-visceral">--</span><span class="metric-label">内脏脂肪</span></div>
+            <div class="metric-item">
+                <span class="metric-value" id="val-bmi">--</span>
+                <span class="metric-label">BMI</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value" id="val-fat">--%</span>
+                <span class="metric-label">体脂率</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value" id="val-muscle">--kg</span>
+                <span class="metric-label">肌肉量</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value" id="val-water">--%</span>
+                <span class="metric-label">水分</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value" id="val-bone">--kg</span>
+                <span class="metric-label">骨量</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value" id="val-visceral">--</span>
+                <span class="metric-label">内脏脂肪</span>
+            </div>
         </div>
 
         <div class="chart-container" id="weight-chart"></div>
@@ -111,14 +446,14 @@
 
     <!-- Member Management Modal -->
     <div id="member-modal" class="modal-overlay">
-        <div class="modal-content" style="max-width: 360px; width: 90%;">
-            <h3 style="margin-top:0; text-align: center;">选择成员</h3>
+        <div class="modal-content" style="max-width: 380px; width: 90%;">
+            <h3 style="margin-top:0; text-align: center; font-size: 22px; font-weight: 800;">选择成员</h3>
             <div class="member-list" id="member-options">
                 <!-- Members here -->
             </div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px">
-                <button onclick="showAddUser()" style="padding:12px; border:none; border-radius:12px; background:#f0f2f5;">添加成员</button>
-                <button onclick="closeMemberModal()" style="padding:12px; border:none; border-radius:12px; background:var(--primary); color:white">确定</button>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px">
+                <button onclick="showAddUser()" style="padding:14px; border:none; border-radius:var(--radius-md); background:#F1F5F9; font-weight: 600; cursor: pointer; transition: all 0.2s;">添加成员</button>
+                <button onclick="closeMemberModal()" style="padding:14px; border:none; border-radius:var(--radius-md); background:linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color:white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">确定</button>
             </div>
         </div>
     </div>
@@ -126,19 +461,19 @@
     <!-- Modal for adding user -->
     <div id="user-modal" class="modal-overlay">
         <div class="modal-content">
-            <h3 style="margin-top:0">添加新成员</h3>
-            <input type="text" id="new-user-name" placeholder="姓名" style="width:100%; padding:12px; margin-bottom:12px; border:1px solid #eee; border-radius:12px">
-            <div style="display:flex; gap:10px; margin-bottom:12px">
-                <select id="new-user-gender" style="flex:1; padding:12px; border:1px solid #eee; border-radius:12px">
+            <h3 style="margin-top:0; font-size: 22px; font-weight: 800;">添加新成员</h3>
+            <input type="text" id="new-user-name" placeholder="姓名" style="width:100%; padding:14px; margin-bottom:12px; border:2px solid var(--border); border-radius:var(--radius-md); font-size: 14px; outline: none; transition: all 0.2s;">
+            <div style="display:flex; gap:12px; margin-bottom:12px">
+                <select id="new-user-gender" style="flex:1; padding:14px; border:2px solid var(--border); border-radius:var(--radius-md); font-size: 14px; outline: none;">
                     <option value="male">男</option>
                     <option value="female">女</option>
                 </select>
-                <input type="number" id="new-user-age" placeholder="年龄" style="flex:1; padding:12px; border:1px solid #eee; border-radius:12px">
+                <input type="number" id="new-user-age" placeholder="年龄" style="flex:1; padding:14px; border:2px solid var(--border); border-radius:var(--radius-md); font-size: 14px; outline: none;">
             </div>
-            <input type="number" id="new-user-height" placeholder="身高 (cm)" style="width:100%; padding:12px; margin-bottom:20px; border:1px solid #eee; border-radius:12px">
-            <div style="display:flex; gap:10px">
-                <button onclick="closeAddUserModal()" style="flex:1; padding:12px; border:none; border-radius:12px">取消</button>
-                <button onclick="addUser()" style="flex:1; padding:12px; border:none; border-radius:12px; background:var(--primary); color:white">确定</button>
+            <input type="number" id="new-user-height" placeholder="身高 (cm)" style="width:100%; padding:14px; margin-bottom:24px; border:2px solid var(--border); border-radius:var(--radius-md); font-size: 14px; outline: none;">
+            <div style="display:flex; gap:12px">
+                <button onclick="closeAddUserModal()" style="flex:1; padding:14px; border:none; border-radius:var(--radius-md); font-weight: 600; cursor: pointer;">取消</button>
+                <button onclick="addUser()" style="flex:1; padding:14px; border:none; border-radius:var(--radius-md); background:linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color:white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">确定</button>
             </div>
         </div>
     </div>

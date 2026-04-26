@@ -4,7 +4,31 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>系统配置</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
+        :root {
+            --primary: #6366F1;
+            --primary-light: #E0E7FF;
+            --primary-dark: #4F46E5;
+            --secondary: #8B5CF6;
+            --bg: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-primary: #1E293B;
+            --text-secondary: #64748B;
+            --text-muted: #94A3B8;
+            --border: #E2E8F0;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --danger: #EF4444;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,8 +36,8 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #E0E7FF 0%, #F8FAFC 100%);
             min-height: 100vh;
             padding: 20px;
         }
@@ -21,150 +45,177 @@
         .container {
             max-width: 800px;
             margin: 0 auto;
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            background: var(--card-bg);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-lg);
             overflow: hidden;
+            border: 1px solid var(--border);
         }
 
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
             color: white;
-            padding: 30px;
+            padding: 40px 30px;
             text-align: center;
+            position: relative;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="2" fill="white" opacity="0.1"/></svg>');
+            opacity: 0.3;
         }
 
         .header h1 {
-            font-size: 28px;
-            margin-bottom: 10px;
+            font-size: 32px;
+            margin-bottom: 12px;
+            font-weight: 800;
+            position: relative;
+            z-index: 1;
         }
 
         .header p {
-            opacity: 0.9;
-            font-size: 14px;
+            opacity: 0.95;
+            font-size: 15px;
+            position: relative;
+            z-index: 1;
         }
 
         .content {
-            padding: 30px;
+            padding: 40px 30px;
         }
 
         .alert {
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
+            padding: 16px 20px;
+            border-radius: var(--radius-md);
+            margin-bottom: 24px;
             display: none;
+            font-weight: 500;
         }
 
         .alert.warning {
-            background: #fff3cd;
-            border-left: 4px solid #ffc107;
-            color: #856404;
+            background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+            border-left: 4px solid var(--warning);
+            color: #92400E;
             display: block;
         }
 
         .alert.success {
-            background: #d4edda;
-            border-left: 4px solid #28a745;
-            color: #155724;
+            background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
+            border-left: 4px solid var(--success);
+            color: #065F46;
             display: block;
         }
 
         .alert.error {
-            background: #f8d7da;
-            border-left: 4px solid #dc3545;
-            color: #721c24;
+            background: linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%);
+            border-left: 4px solid var(--danger);
+            color: #991B1B;
             display: block;
         }
 
         .config-section {
-            margin-bottom: 30px;
+            margin-bottom: 36px;
         }
 
         .section-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #667eea;
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 3px solid var(--primary-light);
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
         .config-item {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
         }
 
         .config-label {
             display: block;
-            font-weight: 500;
-            color: #555;
-            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 10px;
             font-size: 14px;
         }
 
         .config-label .required {
-            color: #dc3545;
+            color: var(--danger);
             margin-left: 4px;
         }
 
         .config-input {
             width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
+            padding: 14px 16px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
             font-size: 14px;
             transition: all 0.3s;
+            background: var(--card-bg);
+            font-family: inherit;
         }
 
         .config-input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px var(--primary-light);
         }
 
         .config-input.encrypted {
-            background: #f8f9fa;
+            background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);
         }
 
         .config-hint {
             font-size: 12px;
-            color: #999;
-            margin-top: 5px;
+            color: var(--text-muted);
+            margin-top: 8px;
+            font-weight: 500;
         }
 
         .btn-group {
             display: flex;
-            gap: 10px;
-            margin-top: 30px;
+            gap: 12px;
+            margin-top: 36px;
         }
 
         .btn {
             flex: 1;
-            padding: 14px 24px;
+            padding: 16px 24px;
             border: none;
-            border-radius: 8px;
+            border-radius: var(--radius-md);
             font-size: 16px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
             color: white;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
         }
 
         .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
         }
 
         .btn-secondary {
-            background: #f0f0f0;
-            color: #333;
+            background: linear-gradient(135deg, #F1F5F9 0%, #E2E8F0 100%);
+            color: var(--text-primary);
         }
 
         .btn-secondary:hover {
-            background: #e0e0e0;
+            background: linear-gradient(135deg, #E2E8F0 0%, #CBD5E1 100%);
+            transform: translateY(-2px);
         }
 
         .btn:disabled {
@@ -174,18 +225,18 @@
 
         .loading {
             text-align: center;
-            padding: 40px;
-            color: #999;
+            padding: 60px;
+            color: var(--text-secondary);
         }
 
         .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
+            border: 4px solid var(--border);
+            border-top: 4px solid var(--primary);
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            width: 48px;
+            height: 48px;
             animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
+            margin: 0 auto 24px;
         }
 
         @keyframes spin {
@@ -195,25 +246,27 @@
 
         .nav-link {
             display: inline-block;
-            margin-top: 15px;
+            margin-top: 16px;
             color: white;
             text-decoration: none;
             font-size: 14px;
-            opacity: 0.9;
+            opacity: 0.95;
+            font-weight: 600;
+            transition: all 0.2s;
         }
 
         .nav-link:hover {
             opacity: 1;
-            text-decoration: underline;
+            transform: translateX(-4px);
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>⚙️ 系统配置</h1>
+            <h1><i class="fas fa-cog"></i> 系统配置</h1>
             <p>管理账号和数据库配置信息（敏感信息已加密存储）</p>
-            <a href="/" class="nav-link">← 返回首页</a>
+            <a href="/" class="nav-link"><i class="fas fa-arrow-left"></i> 返回首页</a>
         </div>
 
         <div class="content">
@@ -226,7 +279,10 @@
 
             <form id="configForm" style="display: none;">
                 <div class="config-section">
-                    <div class="section-title">🐱 PetKit / CloudPets 账号</div>
+                    <div class="section-title">
+                        <i class="fas fa-cat" style="color: var(--primary);"></i>
+                        PetKit / CloudPets 账号
+                    </div>
                     
                     <div class="config-item">
                         <label class="config-label">
@@ -248,7 +304,10 @@
                 </div>
 
                 <div class="config-section">
-                    <div class="section-title">🏠 小米账号</div>
+                    <div class="section-title">
+                        <i class="fas fa-home" style="color: var(--primary);"></i>
+                        小米账号
+                    </div>
                     
                     <div class="config-item">
                         <label class="config-label">
@@ -270,7 +329,10 @@
                 </div>
 
                 <div class="config-section">
-                    <div class="section-title">💾 数据库配置</div>
+                    <div class="section-title">
+                        <i class="fas fa-database" style="color: var(--primary);"></i>
+                        数据库配置
+                    </div>
                     
                     <div class="config-item">
                         <label class="config-label">

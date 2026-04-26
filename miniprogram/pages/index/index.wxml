@@ -7,13 +7,13 @@
         <text class="brand-title">我的智能家</text>
         <text class="brand-desc">智能家居控制中心</text>
       </view>
-      
+
       <view class="login-form">
         <view class="input-wrapper">
-          <input 
-            class="phone-input" 
-            type="number" 
-            placeholder="请输入手机号" 
+          <input
+            class="phone-input"
+            type="number"
+            placeholder="请输入手机号"
             value="{{phoneNumber}}"
             bindinput="onPhoneInput"
             bindconfirm="onLogin"
@@ -21,13 +21,13 @@
             focus="{{true}}"
           />
         </view>
-        
-        <button class="login-btn {{phoneNumber.length === 11 ? 'active' : ''}}" 
-                bindtap="onLogin" 
+
+        <button class="login-btn {{phoneNumber.length === 11 ? 'active' : ''}}"
+                bindtap="onLogin"
                 disabled="{{phoneNumber.length !== 11}}">
           登录 / 注册
         </button>
-        
+
         <text class="login-tip">演示账号：任意11位手机号</text>
       </view>
     </view>
@@ -35,12 +35,22 @@
 
   <!-- 已登录 - 设备列表 -->
   <view wx:else class="device-page">
-    <!-- 顶部导航 -->
+    <!-- 顶部导航栏 -->
     <view class="page-header">
-      <text class="page-title">我的设备</text>
-      <button class="add-btn" bindtap="showAddDeviceModal">
-        <text class="icon">+</text>
-      </button>
+      <view class="header-left">
+        <text class="user-name">{{userInfo.nickname || '用户'}}，{{greeting}}！</text>
+      </view>
+      <view class="header-right">
+        <button class="icon-btn config-btn" bindtap="goToConfig">
+          <text class="btn-icon">⚙️</text>
+        </button>
+        <button class="icon-btn add-btn" bindtap="showAddDeviceModal">
+          <text class="btn-icon">➕</text>
+        </button>
+        <button class="icon-btn logout-btn" bindtap="logout">
+          <text class="btn-icon">👋</text>
+        </button>
+      </view>
     </view>
 
     <!-- 空状态 -->
@@ -48,107 +58,99 @@
       <view class="empty-icon">📱</view>
       <text class="empty-title">暂无设备</text>
       <text class="empty-desc">点击右上角 + 添加你的第一个智能设备</text>
-      <button class="add-device-btn" bindtap="showAddDeviceModal">添加设备</button>
+      <button class="add-device-main-btn" bindtap="showAddDeviceModal">添加设备</button>
     </view>
 
     <!-- 设备分组列表 -->
-    <scroll-view wx:else class="device-scroll" scroll-y>
+    <scroll-view wx:else class="device-scroll" scroll-y enable-flex>
       <!-- 宠物生活 -->
       <view wx:if="{{petDevices.length > 0}}" class="device-section">
         <view class="section-header">
           <text class="section-icon">🐾</text>
           <text class="section-name">宠物生活</text>
         </view>
-        
+
         <view class="device-cards">
           <block wx:for="{{petDevices}}" wx:key="device_key">
-            <navigator wx:if="{{item.device_type === 'feeder'}}" 
-                       url="/pages/feeder/feeder" 
-                       class="device-card">
-              <view class="card-icon" style="background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);">
-                <text class="icon-text">🍖</text>
-              </view>
-              <view class="card-info">
-                <text class="card-name">{{item.device_name || '喂食机'}}</text>
-                <view class="card-status">
-                  <view class="status-dot {{item.status === 'active' ? 'online' : 'offline'}}"></view>
-                  <text class="status-text">{{item.status === 'active' ? '在线' : '待配置'}}</text>
+            <!-- 喂食机卡片 -->
+            <navigator wx:if="{{item.device_type === 'feeder'}}"
+                       url="/pages/feeder/feeder"
+                       class="device-card feeder-card">
+              <view class="card-left">
+                <view class="card-icon-wrapper feeder">
+                  <text class="card-icon">🍖</text>
+                  <view class="status-indicator {{item.status === 'active' ? 'online' : 'offline'}}"></view>
+                </view>
+                <view class="card-info">
+                  <text class="card-name">{{item.device_name || '喂食机'}}</text>
+                  <view class="card-status">
+                    <text class="status-text">{{item.status === 'active' ? '在线' : '待配置'}}</text>
+                  </view>
                 </view>
               </view>
-              <text class="card-arrow">›</text>
+
+              <view class="card-stats">
+                <view class="stat-item">
+                  <text class="stat-value">{{item.today_servings || '--'}}</text>
+                  <text class="stat-label">今日投喂</text>
+                </view>
+                <view class="stat-item">
+                  <text class="stat-value">{{item.remaining_plans || '--'}}</text>
+                  <text class="stat-label">计划剩余</text>
+                </view>
+              </view>
             </navigator>
 
-            <navigator wx:if="{{item.device_type === 'litterbox'}}" 
-                       url="/pages/litterbox/litterbox" 
-                       class="device-card">
-              <view class="card-icon" style="background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);">
-                <text class="icon-text">🚽</text>
-              </view>
-              <view class="card-info">
-                <text class="card-name">{{item.device_name || '猫厕所'}}</text>
-                <view class="card-status">
-                  <view class="status-dot {{item.status === 'active' ? 'online' : 'offline'}}"></view>
-                  <text class="status-text">{{item.status === 'active' ? '在线' : '待配置'}}</text>
+            <!-- 猫厕所卡片 -->
+            <navigator wx:if="{{item.device_type === 'litterbox'}}"
+                       url="/pages/litterbox/litterbox"
+                       class="device-card litterbox-card">
+              <view class="card-left">
+                <view class="card-icon-wrapper litterbox">
+                  <text class="card-icon">🚽</text>
+                  <view class="status-indicator {{item.status === 'active' ? 'online' : 'offline'}}"></view>
+                </view>
+                <view class="card-info">
+                  <text class="card-name">{{item.device_name || '猫厕所'}}</text>
+                  <view class="card-status">
+                    <text class="status-text">{{item.status === 'active' ? '在线' : '待配置'}}</text>
+                  </view>
                 </view>
               </view>
-              <text class="card-arrow">›</text>
-            </navigator>
-          </block>
-        </view>
-      </view>
 
-      <!-- 健康与体质 -->
-      <view wx:if="{{healthDevices.length > 0}}" class="device-section">
-        <view class="section-header">
-          <text class="section-icon">❤️</text>
-          <text class="section-name">健康与体质</text>
-        </view>
-        
-        <view class="device-cards">
-          <block wx:for="{{healthDevices}}" wx:key="device_key">
-            <navigator wx:if="{{item.device_type === 'scale'}}" 
-                       url="/pages/scale/scale" 
-                       class="device-card">
-              <view class="card-icon" style="background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);">
-                <text class="icon-text">⚖️</text>
-              </view>
-              <view class="card-info">
-                <text class="card-name">{{item.device_name || '体脂秤'}}</text>
-                <view class="card-status">
-                  <view class="status-dot offline"></view>
-                  <text class="status-text">蓝牙连接</text>
+              <view class="card-stats">
+                <view class="stat-item">
+                  <text class="stat-value">{{item.today_visits || '--'}}</text>
+                  <text class="stat-label">今日如厕</text>
+                </view>
+                <view class="stat-item">
+                  <text class="stat-value">{{item.sand_level || '--'}}%</text>
+                  <text class="stat-label">猫砂余量</text>
                 </view>
               </view>
-              <text class="card-arrow">›</text>
             </navigator>
           </block>
         </view>
       </view>
     </scroll-view>
-
-    <!-- 用户信息 -->
-    <view class="user-footer">
-      <text class="user-phone">{{userInfo.phone_number}}</text>
-      <button class="logout-link" bindtap="logout">退出</button>
-    </view>
   </view>
 
   <!-- 添加设备弹窗 -->
   <view wx:if="{{showAddDeviceDialog}}" class="modal-mask" bindtap="closeAddDeviceModal">
     <view class="modal-box" catchtap="stopPropagation">
       <view class="modal-title">选择设备类型</view>
-      
+
       <view class="device-options">
         <view class="option-item" bindtap="selectDeviceType" data-type="feeder" data-platform="cloudpets">
           <view class="option-icon" style="background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);">🍖</view>
           <text class="option-name">喂食机</text>
         </view>
-        
+
         <view class="option-item" bindtap="selectDeviceType" data-type="litterbox" data-platform="petkit">
           <view class="option-icon" style="background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);">🚽</view>
           <text class="option-name">猫厕所</text>
         </view>
-        
+
         <view class="option-item" bindtap="selectDeviceType" data-type="scale" data-platform="xiaomi">
           <view class="option-icon" style="background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);">⚖️</view>
           <text class="option-name">体脂秤</text>
@@ -161,24 +163,24 @@
   <view wx:if="{{showDeviceConfigDialog}}" class="modal-mask" bindtap="closeDeviceConfigModal">
     <view class="modal-box modal-form" catchtap="stopPropagation">
       <view class="modal-title">配置{{selectedDeviceTypeText}}</view>
-      
+
       <view class="form-group">
         <text class="form-label">设备账号</text>
-        <input class="form-input" 
-               placeholder="请输入账号" 
+        <input class="form-input"
+               placeholder="请输入账号"
                value="{{deviceAccount}}"
                bindinput="onAccountInput" />
       </view>
-      
+
       <view class="form-group">
         <text class="form-label">密码</text>
-        <input class="form-input" 
-               type="password" 
-               placeholder="请输入密码" 
+        <input class="form-input"
+               type="password"
+               placeholder="请输入密码"
                value="{{devicePassword}}"
                bindinput="onPasswordInput" />
       </view>
-      
+
       <button class="submit-btn" bindtap="onSubmitDeviceConfig">确认添加</button>
     </view>
   </view>

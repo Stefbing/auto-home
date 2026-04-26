@@ -4,14 +4,45 @@ Page({
   data: {
     plans: [],
     loading: true,
-    actionLoading: false
+    actionLoading: false,
+    feedAmount: 1, // 投喂份量
+    todayServings: 0 // 今日已喂次数
   },
 
   onLoad() {
     this.fetchPlans();
+    this.fetchTodayServings();
+  },
+
+  onShow() {
+    // 页面显示时刷新数据
+    this.fetchTodayServings();
+  },
+
+  // 设置投喂份量
+  setFeedAmount(e) {
+    const amount = parseInt(e.currentTarget.dataset.amount);
+    this.setData({ feedAmount: amount });
+  },
+
+  // 获取今日喂食次数
+  fetchTodayServings() {
+    cloudRequest.callContainer({
+      path: '/api/cloudpets/servings_today',
+      method: 'GET',
+      success: res => {
+        if (res && typeof res === 'number') {
+          this.setData({ todayServings: res });
+        }
+      },
+      fail: err => {
+        console.error('获取今日喂食次数失败:', err);
+      }
+    });
   },
 
   feedOne() {
+    const { feedAmount } = this.data;
     this.setData({ actionLoading: true });
     wx.showLoading({
       title: '正在投喂...'
@@ -20,15 +51,16 @@ Page({
     cloudRequest.callContainer({
       path: '/api/cloudpets/feed',
       method: 'POST',
-      data: { amount: 1 },
+      data: { amount: feedAmount },
       success: res => {
         wx.hideLoading();
         this.setData({ actionLoading: false });
-        // callContainer 已返回业务数据，直接显示成功
         wx.showToast({
-          title: '已投喂 1 份',
+          title: `已投喂 ${feedAmount} 份`,
           icon: 'success'
         });
+        // 刷新今日喂食次数
+        this.fetchTodayServings();
       },
       fail: err => {
         wx.hideLoading();

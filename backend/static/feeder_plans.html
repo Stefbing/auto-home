@@ -7,120 +7,456 @@
     <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --primary: #FF9800;
-            --primary-dark: #F57C00;
-            --bg: #f2f4f8;
-            --card-bg: #ffffff;
-            --text-main: #333333;
-            --text-sub: #888888;
-            --danger: #ff4d4f;
+            --primary: #F59E0B;
+            --primary-light: #FEF3C7;
+            --primary-dark: #D97706;
+            --secondary: #F97316;
+            --bg: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-primary: #1E293B;
+            --text-secondary: #64748B;
+            --text-muted: #94A3B8;
+            --border: #E2E8F0;
+            --danger: #EF4444;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
         }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text-main); }
-        .app-container { max-width: 480px; margin: 0 auto; padding: 20px 16px; min-height: 100vh; }
+        * { 
+            box-sizing: border-box; 
+            -webkit-tap-highlight-color: transparent;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            background: linear-gradient(135deg, #FEF3C7 0%, #F8FAFC 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .app-container { 
+            max-width: 480px; 
+            margin: 0 auto; 
+            padding: 0 0 40px;
+            min-height: 100vh; 
+        }
 
-        header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-        .back-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
-        h1 { font-size: 20px; margin: 0; font-weight: 700; flex: 1; text-align: center; }
-        .add-btn { background: none; border: none; font-size: 20px; color: var(--primary); cursor: pointer; padding: 8px; }
+        header { 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between; 
+            padding: 20px 24px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .back-btn { 
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px; 
+            color: var(--text-secondary); 
+            cursor: pointer; 
+            transition: all 0.2s;
+        }
 
-        .plan-list { display: flex; flex-direction: column; gap: 12px; }
+        .back-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary-light);
+        }
+
+        h1 { 
+            font-size: 20px; 
+            margin: 0; 
+            font-weight: 800; 
+            flex: 1; 
+            text-align: center;
+            letter-spacing: -0.3px;
+        }
+        
+        .add-btn { 
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px; 
+            color: var(--text-secondary); 
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .add-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary-light);
+        }
+
+        .plan-list { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 16px;
+            padding: 24px 16px;
+        }
+        
         .plan-item {
-            background: white; border-radius: 16px; padding: 16px 20px;
-            display: flex; align-items: center; justify-content: space-between;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.02);
-            transition: transform 0.2s; cursor: pointer;
+            background: var(--card-bg); 
+            border-radius: var(--radius-lg); 
+            padding: 20px 24px;
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            border: 1px solid var(--border);
         }
-        .plan-item:active { transform: scale(0.99); background: #fafafa; }
+        
+        .plan-item:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+            border-color: var(--primary-light);
+        }
+        
+        .plan-item:active { 
+            transform: scale(0.98); 
+        }
 
-        .plan-info { flex: 1; }
-        .plan-time { font-size: 24px; font-weight: 700; color: var(--text-main); line-height: 1.2; }
+        .plan-info { 
+            flex: 1;
+        }
+        
+        .plan-time { 
+            font-size: 28px; 
+            font-weight: 800; 
+            color: var(--text-primary); 
+            line-height: 1.2;
+            letter-spacing: -0.5px;
+        }
+        
         .plan-amount-tag {
-            font-size: 13px; font-weight: 600; color: var(--primary);
-            background: #fff7e6; padding: 2px 8px; border-radius: 6px;
-            margin-left: 8px; vertical-align: middle;
+            font-size: 14px; 
+            font-weight: 700; 
+            color: var(--primary);
+            background: var(--primary-light); 
+            padding: 4px 12px; 
+            border-radius: 20px;
+            margin-left: 12px;
+            vertical-align: middle;
         }
-        .plan-detail { font-size: 14px; color: var(--text-sub); margin-top: 6px; }
+        
+        .plan-detail { 
+            font-size: 14px; 
+            color: var(--text-secondary); 
+            margin-top: 8px;
+            font-weight: 500;
+        }
 
-        .plan-actions-right { display: flex; align-items: center; gap: 16px; }
+        .plan-actions-right { 
+            display: flex; 
+            align-items: center; 
+            gap: 16px;
+        }
+        
         .plan-delete-icon {
-            color: #ffccc7; font-size: 18px; padding: 8px;
-            transition: color 0.2s;
+            color: #FECACA; 
+            font-size: 20px; 
+            padding: 8px;
+            transition: all 0.2s;
+            cursor: pointer;
         }
-        .plan-delete-icon:active { color: var(--danger); }
+        
+        .plan-delete-icon:hover { 
+            color: var(--danger);
+            transform: scale(1.1);
+        }
 
-        .plan-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
-        .plan-switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #e0e0e0; transition: .4s; border-radius: 34px; }
-        .slider:before { position: absolute; content: ""; height: 22px; width: 22px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: var(--primary); }
-        input:checked + .slider:before { transform: translateX(22px); }
+        .plan-switch { 
+            position: relative; 
+            display: inline-block; 
+            width: 52px; 
+            height: 32px; 
+        }
+        
+        .plan-switch input { 
+            opacity: 0; 
+            width: 0; 
+            height: 0; 
+        }
+        
+        .slider { 
+            position: absolute; 
+            cursor: pointer; 
+            top: 0; 
+            left: 0; 
+            right: 0; 
+            bottom: 0; 
+            background-color: var(--border); 
+            transition: .4s; 
+            border-radius: 34px;
+        }
+        
+        .slider:before { 
+            position: absolute; 
+            content: ""; 
+            height: 24px; 
+            width: 24px; 
+            left: 4px; 
+            bottom: 4px; 
+            background-color: white; 
+            transition: .4s; 
+            border-radius: 50%;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        input:checked + .slider { 
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+        }
+        
+        input:checked + .slider:before { 
+            transform: translateX(20px); 
+        }
 
         /* Add/Edit Plan Modal (Center) */
         .center-modal-overlay {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.5); z-index: 300;
-            display: flex; align-items: center; justify-content: center;
-            opacity: 0; pointer-events: none; transition: opacity 0.3s;
-            backdrop-filter: blur(4px);
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            right: 0; 
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.6);
+            z-index: 300;
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            opacity: 0; 
+            pointer-events: none; 
+            transition: opacity 0.3s;
+            backdrop-filter: blur(8px);
         }
-        .center-modal-overlay.show { opacity: 1; pointer-events: auto; }
+        
+        .center-modal-overlay.show { 
+            opacity: 1; 
+            pointer-events: auto; 
+        }
+        
         .center-modal {
-            background: white; width: 90%; max-width: 340px; border-radius: 24px; padding: 24px;
-            transform: scale(0.9); transition: transform 0.3s; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            background: var(--card-bg); 
+            width: 90%; 
+            max-width: 360px; 
+            border-radius: var(--radius-xl); 
+            padding: 32px 24px 24px;
+            transform: scale(0.9) translateY(20px); 
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border);
         }
-        .center-modal-overlay.show .center-modal { transform: scale(1); }
+        
+        .center-modal-overlay.show .center-modal { 
+            transform: scale(1) translateY(0); 
+        }
 
-        .form-group { margin-bottom: 20px; }
-        .form-label { display: block; font-size: 14px; color: var(--text-sub); margin-bottom: 8px; }
+        .form-group { 
+            margin-bottom: 24px; 
+        }
+        
+        .form-label { 
+            display: block; 
+            font-size: 14px; 
+            color: var(--text-secondary); 
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        
         .form-input {
-            width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 12px;
-            font-size: 16px; outline: none; transition: border-color 0.2s; background: #f9f9f9;
+            width: 100%; 
+            padding: 14px; 
+            border: 2px solid var(--border); 
+            border-radius: var(--radius-md);
+            font-size: 16px; 
+            outline: none; 
+            transition: all 0.2s;
+            background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);
         }
-        .form-input:focus { border-color: var(--primary); background: white; }
+        
+        .form-input:focus { 
+            border-color: var(--primary); 
+            background: var(--card-bg);
+            box-shadow: 0 0 0 4px var(--primary-light);
+        }
 
-        .week-selector { display: flex; justify-content: space-between; margin-top: 10px; }
+        .week-selector { 
+            display: flex; 
+            justify-content: space-between; 
+            margin-top: 12px; 
+        }
+        
         .week-day {
-            width: 32px; height: 32px; border-radius: 50%; background: #f0f2f5;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 12px; color: var(--text-sub); cursor: pointer; transition: all 0.2s;
+            width: 36px; 
+            height: 36px; 
+            border-radius: 50%; 
+            background: linear-gradient(135deg, #F1F5F9 0%, #E2E8F0 100%);
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            font-size: 13px; 
+            color: var(--text-secondary); 
+            cursor: pointer; 
+            transition: all 0.2s;
+            font-weight: 600;
         }
-        .week-day.active { background: var(--primary); color: white; transform: scale(1.1); }
+        
+        .week-day:hover {
+            background: var(--primary-light);
+            transform: scale(1.05);
+        }
+        
+        .week-day.active { 
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white; 
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        }
 
-        .feed-amount-selector { display: flex; gap: 10px; margin: 20px 0; justify-content: center; }
+        .feed-amount-selector { 
+            display: flex; 
+            gap: 12px; 
+            margin: 24px 0; 
+            justify-content: center; 
+        }
+        
         .amount-chip {
-            width: 40px; height: 40px; border-radius: 50%; border: 1px solid #eee;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: 700; color: var(--text-sub); cursor: pointer;
+            width: 48px; 
+            height: 48px; 
+            border-radius: var(--radius-md); 
+            border: 2px solid var(--border);
+            background: var(--card-bg);
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            font-weight: 700; 
+            font-size: 18px;
+            color: var(--text-secondary); 
+            cursor: pointer;
+            transition: all 0.2s;
         }
-        .amount-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+        
+        .amount-chip:hover {
+            border-color: var(--primary-light);
+            background: var(--primary-light);
+        }
+        
+        .amount-chip.active { 
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white; 
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+            transform: scale(1.05);
+        }
 
-        .btn { border: none; padding: 14px; border-radius: 14px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; }
-        .btn-primary { background: var(--primary); color: white; margin-bottom: 12px; }
-        .btn-secondary { background: #f0f2f5; color: #666; }
+        .btn { 
+            border: none; 
+            padding: 16px; 
+            border-radius: var(--radius-md); 
+            font-size: 15px; 
+            font-weight: 700; 
+            cursor: pointer; 
+            width: 100%;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary { 
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white; 
+            margin-bottom: 12px;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary { 
+            background: linear-gradient(135deg, #F1F5F9 0%, #E2E8F0 100%);
+            color: var(--text-secondary);
+        }
+
+        .btn-secondary:hover {
+            background: linear-gradient(135deg, #E2E8F0 0%, #CBD5E1 100%);
+        }
 
         .loading-mask {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(255,255,255,0.8); z-index: 99;
-            display: flex; justify-content: center; align-items: center;
-            backdrop-filter: blur(2px);
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            right: 0; 
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            z-index: 99;
+            display: flex; 
+            justify-content: center; 
+            align-items: center;
+            backdrop-filter: blur(4px);
         }
-        .hidden { display: none !important; }
+        
+        .hidden { 
+            display: none !important; 
+        }
 
         .toast {
-            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
-            background: rgba(0,0,0,0.8); color: white; padding: 12px 24px; border-radius: 30px;
-            font-size: 14px; opacity: 0; transition: all 0.3s; pointer-events: none; z-index: 400;
+            position: fixed; 
+            bottom: 32px; 
+            left: 50%; 
+            transform: translateX(-50%) translateY(100px);
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            color: white; 
+            padding: 14px 28px; 
+            border-radius: var(--radius-xl);
+            font-size: 14px;
+            font-weight: 600;
+            opacity: 0; 
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            pointer-events: none; 
+            z-index: 400;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
         }
-        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        
+        .toast.show { 
+            opacity: 1; 
+            transform: translateX(-50%) translateY(0); 
+        }
     </style>
 </head>
 <body>
     <div class="app-container">
         <header>
-            <button class="back-btn" onclick="location.href='/feeder'"><i class="fas fa-chevron-left"></i></button>
+            <button class="back-btn" onclick="location.href='/feeder'">
+                <i class="fas fa-chevron-left"></i>
+            </button>
             <h1>喂食计划</h1>
-            <button class="add-btn" onclick="openEditPlan()"><i class="fas fa-plus"></i></button>
+            <button class="add-btn" onclick="openEditPlan()">
+                <i class="fas fa-plus"></i>
+            </button>
         </header>
 
         <div class="plan-list" id="plan-list-container">
@@ -131,7 +467,7 @@
     <!-- Edit Plan Modal -->
     <div id="edit-plan-modal" class="center-modal-overlay">
         <div class="center-modal">
-            <h3 style="margin-top:0; margin-bottom:20px; text-align:center;" id="edit-modal-title">添加计划</h3>
+            <h3 style="margin-top:0; margin-bottom:24px; text-align:center; font-size: 22px; font-weight: 800;" id="edit-modal-title">添加计划</h3>
 
             <div class="form-group">
                 <label class="form-label">时间</label>
@@ -162,20 +498,32 @@
                 </div>
             </div>
 
-            <button class="btn btn-primary" onclick="savePlan()">保存</button>
-            <button class="btn btn-secondary" onclick="closeEditPlan()">取消</button>
+            <button class="btn btn-primary" onclick="savePlan()">
+                <i class="fas fa-check"></i>
+                <span>保存</span>
+            </button>
+            <button class="btn btn-secondary" onclick="closeEditPlan()">
+                <i class="fas fa-times"></i>
+                <span>取消</span>
+            </button>
         </div>
     </div>
 
     <!-- Delete Confirm Modal -->
     <div id="confirm-modal" class="center-modal-overlay">
         <div class="center-modal" style="text-align: center;">
-            <i class="fas fa-exclamation-circle" style="font-size: 48px; color: var(--danger); margin-bottom: 16px;"></i>
-            <h3 style="margin: 0 0 12px; color: var(--text-main);">确认删除？</h3>
-            <p style="margin: 0 0 24px; color: var(--text-sub); font-size: 14px;">此操作无法撤销，确定要删除该喂食计划吗？</p>
+            <i class="fas fa-exclamation-circle" style="font-size: 56px; color: var(--danger); margin-bottom: 20px;"></i>
+            <h3 style="margin: 0 0 12px; color: var(--text-primary); font-size: 22px; font-weight: 800;">确认删除？</h3>
+            <p style="margin: 0 0 28px; color: var(--text-secondary); font-size: 14px; line-height: 1.6;">此操作无法撤销，确定要删除该喂食计划吗？</p>
             <div style="display: flex; gap: 12px;">
-                <button class="btn btn-secondary" onclick="closeConfirmModal()">取消</button>
-                <button class="btn btn-primary" style="background: var(--danger); margin-bottom: 0;" onclick="doDeletePlan()">确认删除</button>
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">
+                    <i class="fas fa-times"></i>
+                    <span>取消</span>
+                </button>
+                <button class="btn btn-primary" style="background: linear-gradient(135deg, var(--danger) 0%, #DC2626 100%); margin-bottom: 0; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);" onclick="doDeletePlan()">
+                    <i class="fas fa-trash-alt"></i>
+                    <span>确认删除</span>
+                </button>
             </div>
         </div>
     </div>

@@ -3,175 +3,575 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>云宠智能喂食机</title>
+    <title>喂食机</title>
     <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --primary: #FF9800; /* Orange for feeder */
-            --primary-dark: #F57C00;
-            --bg: #f2f4f8;
-            --card-bg: #ffffff;
-            --text-main: #333333;
-            --text-sub: #888888;
-            --success: #52c41a;
-            --warning: #faad14;
-            --danger: #ff4d4f;
+            --primary: #F59E0B;
+            --primary-light: #FEF3C7;
+            --primary-dark: #D97706;
+            --secondary: #F97316;
+            --bg: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-primary: #1E293B;
+            --text-secondary: #64748B;
+            --text-muted: #94A3B8;
+            --border: #E2E8F0;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --danger: #EF4444;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
         }
 
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text-main); }
-        
-        .app-container { max-width: 480px; margin: 0 auto; padding: 20px 16px; min-height: 100vh; }
-        
-        header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-        .back-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
-        h1 { font-size: 20px; margin: 0; font-weight: 700; flex: 1; text-align: center; margin-right: 34px; }
-        .refresh-btn { background: none; border: none; font-size: 18px; color: var(--primary); cursor: pointer; padding: 8px; }
-        
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #FEF3C7 0%, #F8FAFC 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .app-container {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 0 0 40px;
+            min-height: 100vh;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .back-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .back-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary-light);
+        }
+
+        h1 {
+            font-size: 20px;
+            margin: 0;
+            font-weight: 800;
+            flex: 1;
+            text-align: center;
+            letter-spacing: -0.3px;
+        }
+
+        .refresh-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary-light);
+        }
+
         .device-card {
             background: var(--card-bg);
-            border-radius: 20px;
-            padding: 24px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.04);
-            margin-bottom: 20px;
+            border-radius: var(--radius-xl);
+            padding: 28px 24px;
+            box-shadow: var(--shadow-md);
+            margin: 24px 16px;
             position: relative;
             overflow: hidden;
+            border: 1px solid var(--border);
         }
 
-        .device-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-        .device-name { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-        .device-type { font-size: 12px; color: var(--text-sub); background: #f0f2f5; padding: 2px 8px; border-radius: 6px; display: inline-block; }
-        
-        .status-tag {
-            font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 20px;
-            display: flex; align-items: center; gap: 6px;
+        .device-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
         }
-        .status-idle { background: #fff7e6; color: var(--primary); }
-        .status-working { background: #fffbe6; color: var(--warning); }
-        .status-error { background: #fff1f0; color: var(--danger); }
 
-        .main-stats { display: flex; justify-content: space-between; margin-bottom: 24px; }
-        .stat-block { text-align: center; flex: 1; }
-        .stat-icon { font-size: 24px; margin-bottom: 8px; color: var(--primary); opacity: 0.8; }
-        .stat-val { font-size: 20px; font-weight: 700; color: var(--text-main); }
-        .stat-label { font-size: 12px; color: var(--text-sub); margin-top: 4px; }
-
-        .detail-grid {
-            display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
-            background: #f8f9fa; border-radius: 16px; padding: 16px; margin-bottom: 24px;
+        .device-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 28px;
         }
-        .detail-item { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-sub); }
-        .detail-item i { width: 16px; text-align: center; }
-        .detail-item.alert { color: var(--danger); font-weight: 600; }
 
-        .action-area { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .device-title-section {
+            flex: 1;
+        }
+
+        .device-name {
+            font-size: 24px;
+            font-weight: 800;
+            margin-bottom: 6px;
+            letter-spacing: -0.5px;
+        }
+
+        .device-badge {
+            font-size: 12px;
+            color: var(--primary);
+            background: var(--primary-light);
+            padding: 4px 12px;
+            border-radius: 20px;
+            display: inline-block;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            font-size: 13px;
+            font-weight: 600;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .status-online {
+            background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
+            color: #059669;
+        }
+
+        .status-working {
+            background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+            color: #D97706;
+        }
+
+        .status-error {
+            background: linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%);
+            color: #DC2626;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .stat-card {
+            text-align: center;
+            background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);
+            padding: 20px 12px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 12px;
+            border-radius: var(--radius-md);
+            background: linear-gradient(135deg, var(--primary-light) 0%, #FDE68A 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: var(--primary);
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            letter-spacing: -0.5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 28px;
+            border: 1px solid var(--border);
+        }
+
+        .info-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            padding: 8px;
+        }
+
+        .info-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-sm);
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+            font-size: 16px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .info-content {
+            flex: 1;
+        }
+
+        .info-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 2px;
+            font-weight: 500;
+        }
+
+        .info-value {
+            font-size: 14px;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .info-item.alert {
+            color: var(--danger);
+        }
+
+        .info-item.alert .info-value {
+            color: var(--danger);
+        }
+
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
         .btn {
-            border: none; padding: 14px; border-radius: 14px; font-size: 15px; font-weight: 600;
-            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
-            transition: transform 0.1s;
+            border: none;
+            padding: 16px;
+            border-radius: var(--radius-md);
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .btn:active { transform: scale(0.98); }
-        .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3); }
-        .btn-secondary { background: #fff7e6; color: var(--primary); }
-        
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: var(--primary);
+            border: 2px solid var(--primary-light);
+        }
+
+        .btn-secondary:hover {
+            background: var(--primary-light);
+            border-color: var(--primary);
+        }
+
         /* Loading & Toast */
         .loading-mask {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(255,255,255,0.8); z-index: 99;
-            display: flex; justify-content: center; align-items: center;
-            backdrop-filter: blur(2px);
-        }
-        .hidden { display: none !important; }
-
-        .toast {
-            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
-            background: rgba(0,0,0,0.8); color: white; padding: 12px 24px; border-radius: 30px;
-            font-size: 14px; opacity: 0; transition: all 0.3s; pointer-events: none; z-index: 100;
-        }
-        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-
-        /* Feed Modal Chips */
-        .center-modal-overlay {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.5); z-index: 300;
-            display: flex; align-items: center; justify-content: center;
-            opacity: 0; pointer-events: none; transition: opacity 0.3s;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            z-index: 99;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             backdrop-filter: blur(4px);
         }
-        .center-modal-overlay.show { opacity: 1; pointer-events: auto; }
-        .center-modal {
-            background: white; width: 90%; max-width: 340px; border-radius: 24px; padding: 24px;
-            transform: scale(0.9); transition: transform 0.3s; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-        }
-        .center-modal-overlay.show .center-modal { transform: scale(1); }
 
-        .feed-amount-selector { display: flex; gap: 10px; margin: 20px 0; justify-content: center; }
-        .amount-chip { 
-            width: 40px; height: 40px; border-radius: 50%; border: 1px solid #eee; 
-            display: flex; align-items: center; justify-content: center; 
-            font-weight: 700; color: var(--text-sub); cursor: pointer;
+        .hidden {
+            display: none !important;
         }
-        .amount-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+        .toast {
+            position: fixed;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            color: white;
+            padding: 14px 28px;
+            border-radius: var(--radius-xl);
+            font-size: 14px;
+            font-weight: 600;
+            opacity: 0;
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            pointer-events: none;
+            z-index: 100;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Feed Modal */
+        .center-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.6);
+            z-index: 300;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            backdrop-filter: blur(8px);
+        }
+
+        .center-modal-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .center-modal {
+            background: white;
+            width: 90%;
+            max-width: 360px;
+            border-radius: var(--radius-xl);
+            padding: 32px 24px 24px;
+            transform: scale(0.9) translateY(20px);
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border);
+        }
+
+        .center-modal-overlay.show .center-modal {
+            transform: scale(1) translateY(0);
+        }
+
+        .modal-header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .modal-title {
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .modal-subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .feed-amount-selector {
+            display: flex;
+            gap: 12px;
+            margin: 24px 0;
+            justify-content: center;
+        }
+
+        .amount-chip {
+            width: 48px;
+            height: 48px;
+            border-radius: var(--radius-md);
+            border: 2px solid var(--border);
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .amount-chip:hover {
+            border-color: var(--primary-light);
+            background: var(--primary-light);
+        }
+
+        .amount-chip.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+            transform: scale(1.05);
+        }
     </style>
 </head>
 <body>
     <div class="app-container">
         <header>
-            <button class="back-btn" onclick="location.href='/'"><i class="fas fa-chevron-left"></i></button>
-            <h1>喂食机详情</h1>
-            <button class="refresh-btn" onclick="forceRefreshData()"><i class="fas fa-sync-alt"></i></button>
+            <button class="back-btn" onclick="location.href='/'">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+            <h1>喂食机</h1>
+            <button class="refresh-btn" onclick="forceRefreshData()">
+                <i class="fas fa-sync-alt"></i>
+            </button>
         </header>
 
         <div class="device-card">
-            <div class="device-top">
-                <div>
+            <div class="device-header">
+                <div class="device-title-section">
                     <div class="device-name">云宠智能喂食机</div>
-                    <div class="device-type">Feeder</div>
+                    <div class="device-badge">Feeder Pro</div>
                 </div>
-                <div class="status-tag status-idle">
-                    <i class="fas fa-check-circle"></i> 在线
+                <div class="status-badge status-online">
+                    <i class="fas fa-check-circle"></i>
+                    <span>在线</span>
                 </div>
             </div>
 
-            <div class="main-stats">
-                <div class="stat-block">
-                    <div class="stat-icon"><i class="fas fa-cookie-bite"></i></div>
-                    <div class="stat-val" id="servings-today">--</div>
-                    <div class="stat-label">今日投喂(次)</div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-cookie-bite"></i>
+                    </div>
+                    <div class="stat-value" id="servings-today">--</div>
+                    <div class="stat-label">今日投喂</div>
                 </div>
-                <div class="stat-block">
-                    <div class="stat-icon"><i class="fas fa-list-ol"></i></div>
-                    <div class="stat-val" id="plans-remaining">--</div>
-                    <div class="stat-label">计划剩余(次)</div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-list-ol"></i>
+                    </div>
+                    <div class="stat-value" id="plans-remaining">--</div>
+                    <div class="stat-label">计划剩余</div>
                 </div>
-                <div class="stat-block">
-                    <div class="stat-icon"><i class="fas fa-signal"></i></div>
-                    <div class="stat-val">良好</div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-signal"></i>
+                    </div>
+                    <div class="stat-value">良好</div>
                     <div class="stat-label">网络状态</div>
                 </div>
             </div>
 
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <i class="fas fa-clock"></i> 上次投喂: <span id="last-feed-time">--:--</span>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="info-content">
+                        <div class="info-label">上次投喂</div>
+                        <div class="info-value" id="last-feed-time">--:--</div>
+                    </div>
                 </div>
-                <div class="detail-item">
-                    <i class="fas fa-box"></i> 粮桶状态: <span id="food-status">未知</span>
+                <div class="info-item">
+                    <div class="info-icon">
+                        <i class="fas fa-box"></i>
+                    </div>
+                    <div class="info-content">
+                        <div class="info-label">粮桶状态</div>
+                        <div class="info-value" id="food-status">未知</div>
+                    </div>
                 </div>
-                <div class="detail-item">
-                    <i class="fas fa-battery-full"></i> 电池电量: <span id="battery-level">--%</span>
+                <div class="info-item">
+                    <div class="info-icon">
+                        <i class="fas fa-battery-full"></i>
+                    </div>
+                    <div class="info-content">
+                        <div class="info-label">电池电量</div>
+                        <div class="info-value" id="battery-level">--%</div>
+                    </div>
                 </div>
-                <div class="detail-item">
-                    <i class="fas fa-wifi"></i> 连接信号: <span id="connection-status">未知</span>
+                <div class="info-item">
+                    <div class="info-icon">
+                        <i class="fas fa-wifi"></i>
+                    </div>
+                    <div class="info-content">
+                        <div class="info-label">连接信号</div>
+                        <div class="info-value" id="connection-status">未知</div>
+                    </div>
                 </div>
             </div>
 
-            <div class="action-area">
+            <div class="action-buttons">
                 <button class="btn btn-secondary" onclick="location.href='/feeder/plans'">
-                    <i class="fas fa-list-ul"></i> 喂食计划
+                    <i class="fas fa-list-ul"></i>
+                    <span>喂食计划</span>
                 </button>
                 <button class="btn btn-primary" onclick="showFeedModal()">
-                    <i class="fas fa-utensils"></i> 立即投喂
+                    <i class="fas fa-utensils"></i>
+                    <span>立即投喂</span>
                 </button>
             </div>
         </div>
@@ -197,8 +597,10 @@
     <!-- Feed Modal -->
     <div id="feed-modal" class="center-modal-overlay">
         <div class="center-modal">
-            <h3 style="margin-top:0; text-align: center;">立即喂食</h3>
-            <p style="text-align:center; color:#666; font-size:14px;">选择投喂份数 (每份约 5-10g)</p>
+            <div class="modal-header">
+                <div class="modal-title">立即喂食</div>
+                <div class="modal-subtitle">选择投喂份数（每份约 5-10g）</div>
+            </div>
             <div class="feed-amount-selector">
                 <div class="amount-chip active" onclick="selectFeedAmount(1)">1</div>
                 <div class="amount-chip" onclick="selectFeedAmount(2)">2</div>
@@ -206,8 +608,14 @@
                 <div class="amount-chip" onclick="selectFeedAmount(4)">4</div>
                 <div class="amount-chip" onclick="selectFeedAmount(5)">5</div>
             </div>
-            <button class="btn btn-primary" onclick="doFeed()" style="width:100%; margin-bottom: 12px;">确定投喂</button>
-            <button class="btn btn-secondary" onclick="closeFeedModal()" style="width:100%; background: #f0f2f5; color: #666;">取消</button>
+            <button class="btn btn-primary" onclick="doFeed()" style="width:100%; margin-bottom: 12px;">
+                <i class="fas fa-check"></i>
+                <span>确定投喂</span>
+            </button>
+            <button class="btn btn-secondary" onclick="closeFeedModal()" style="width:100%;">
+                <i class="fas fa-times"></i>
+                <span>取消</span>
+            </button>
         </div>
     </div>
 
@@ -232,7 +640,7 @@
         }
 
         fetchData();
-        
+
         async function forceRefreshData() {
             showLoading(true);
             try {
@@ -265,21 +673,21 @@
                 if (data.code === 200) {
                     document.getElementById('servings-today').innerText = data.result || 0;
                 }
-                        
+
                 // 2. 喂食计划（仅用于计算剩余次数）
                 log('Fetching plans...');
                 const resPlans = await fetch('/api/cloudpets/plans');
                 plans = await resPlans.json();
                 log('Plans data:', plans);
                 updateRemaining();
-                        
+
                 // 3. 设备实时状态（使用 CloudPets 真实数据）
                 log('Fetching feeder status from CloudPets...');
                 try {
                     const statusRes = await fetch('/api/cloudpets/feeder/status');
                     const statusData = await statusRes.json();
                     log('Feeder status:', statusData);
-                    
+
                     if (statusData.code === 200 && statusData.result) {
                         updateDeviceStatus(statusData.result);
                     } else {
@@ -291,9 +699,9 @@
                     // 使用默认值
                     updateDeviceStatus({});
                 }
-                        
-            } catch(e) { 
-                log('Fetch error:', e.message); 
+
+            } catch(e) {
+                log('Fetch error:', e.message);
             } finally {
                 showLoading(false);
             }
@@ -313,14 +721,14 @@
             }
             document.getElementById('plans-remaining').innerText = remaining;
         }
-        
+
         function updateDeviceStatus(statusData) {
             // 更新设备状态信息 - 使用 CloudPets 真实数据
             if (statusData && Object.keys(statusData).length > 0) {
                 // 电池电量
                 const battery = statusData.batteryPercentage || '100';
                 document.getElementById('battery-level').innerText = battery + '%';
-                
+
                 // 工作状态
                 const feedState = statusData.feedState || 'standby';
                 const stateMap = {
@@ -329,7 +737,7 @@
                     'fault': '故障'
                 };
                 document.getElementById('connection-status').innerText = stateMap[feedState] || '正常';
-                
+
                 // 充电状态
                 const chargeState = statusData.chargeState === 'true';
                 if (chargeState) {
@@ -337,7 +745,7 @@
                 } else {
                     document.getElementById('food-status').innerText = '充足';
                 }
-                
+
                 // 故障提示
                 if (statusData.fault && statusData.fault !== '0.0' && statusData.fault !== '0') {
                     document.getElementById('food-status').innerText = '故障 ' + statusData.fault;
@@ -367,38 +775,38 @@
             // 找到立即投喂按钮并获取状态标签
             const feedBtn = document.querySelector("button[onclick='showFeedModal()']");
             if (!feedBtn) return;
-                    
+
             const card = feedBtn.closest('.device-card');
             const statusTag = card.querySelector('.status-tag');
             const originalStatusHTML = statusTag.innerHTML;
             const originalStatusClass = statusTag.className;
-                    
+
             // 更改状态为工作中并禁用按钮
             statusTag.className = 'status-tag status-working';
             statusTag.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 指令发送中...';
             feedBtn.disabled = true;
-                    
+
             showLoading(true);
             log('Sending feed request...', {amount: feedAmount});
             try {
                 const res = await fetch(`/api/cloudpets/feed?amount=${feedAmount}`, { method: 'POST' });
-                        
+
                 let data = {};
                 try { data = await res.json(); } catch(e) { console.error('JSON parse error', e); }
-                        
+
                 log('Feed Response:', {status: res.status, data: data});
-                        
+
                 showLoading(false);
-                        
+
                 // Looser check: code 200 OR 0 OR missing code but HTTP 200
                 if (res.ok && (data.code === 200 || data.code === 0 || !data.code)) {
                     showToast('投喂指令已发送');
                     closeFeedModal();
                     document.getElementById('last-feed-time').innerText = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
-                            
+
                     // 更新状态为工作中
                     statusTag.innerHTML = '<i class="fas fa-cog fa-spin"></i> 正在投喂...';
-                            
+
                     // 定时刷新数据
                     setTimeout(fetchData, 2000);
                     setTimeout(fetchData, 5000);
@@ -409,11 +817,11 @@
                     statusTag.className = originalStatusClass;
                     statusTag.innerHTML = originalStatusHTML;
                 }
-            } catch(e) { 
+            } catch(e) {
                 console.error(e);
                 log('Feed error:', e.message);
                 showLoading(false);
-                showToast('网络错误'); 
+                showToast('网络错误');
                 // 恢复原始状态
                 statusTag.className = originalStatusClass;
                 statusTag.innerHTML = originalStatusHTML;

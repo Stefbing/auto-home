@@ -17,10 +17,8 @@ class XiaomiCloudService:
 
     def __init__(self):
         # 优先从数据库获取，其次从环境变量
-        from ..utils.config_manager import get_config_from_db
-        # 从数据库读取配置（不再使用环境变量）
-        self.username = get_config_from_db("XIAOMI_ACCOUNT")
-        self.password = get_config_from_db("XIAOMI_PASSWORD")
+        self.username = None
+        self.password = None
         self._session = requests.session()
         self._ssecurity = None
         self.userId = None
@@ -46,6 +44,12 @@ class XiaomiCloudService:
     async def initialize(self) -> bool:
         """初始化服务：从数据库加载 Token 或登录"""
         logger.info("Initializing Xiaomi Cloud Service...")
+
+        # 从数据库加载凭证
+        if not self.username or not self.password:
+            from ..utils.config_manager import get_config_from_db
+            self.username = await get_config_from_db("XIAOMI_ACCOUNT")
+            self.password = await get_config_from_db("XIAOMI_PASSWORD")
 
         if not await self._load_token_from_db():
             logger.info("No token found in DB, attempting login...")

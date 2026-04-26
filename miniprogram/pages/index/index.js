@@ -14,17 +14,42 @@ Page({
     selectedPlatform: '',
     selectedDeviceTypeText: '',
     deviceAccount: '',
-    devicePassword: ''
+    devicePassword: '',
+    greeting: ''
   },
   
   onLoad: function () {
+    this.updateGreeting()
     this.checkLoginStatus()
   },
   
   onShow: function() {
+    this.updateGreeting()
     if (this.data.userInfo) {
       this.loadUserDevices()
     }
+  },
+  
+  // 更新时间问候语
+  updateGreeting() {
+    const hour = new Date().getHours()
+    let greeting = ''
+    
+    if (hour >= 5 && hour < 9) {
+      greeting = '早上好'
+    } else if (hour >= 9 && hour < 12) {
+      greeting = '上午好'
+    } else if (hour >= 12 && hour < 14) {
+      greeting = '中午好'
+    } else if (hour >= 14 && hour < 18) {
+      greeting = '下午好'
+    } else if (hour >= 18 && hour < 22) {
+      greeting = '晚上好'
+    } else {
+      greeting = '晚上好'
+    }
+    
+    this.setData({ greeting })
   },
   
   // 检查登录状态
@@ -195,6 +220,13 @@ Page({
 
   // 阻止事件冒泡
   stopPropagation() {},
+
+  // 跳转到配置页面
+  goToConfig() {
+    wx.navigateTo({
+      url: '/pages/config/config'
+    })
+  },
 
   // 退出登录
   logout() {

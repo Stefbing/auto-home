@@ -118,7 +118,7 @@ Page({
 
           stats = {
             ...stats,
-            device_name: firstDevice.name || stats.device_name || '猫砂盆',
+            device_name: firstDevice.name || stats.device_name || '猫厕所',
             today_visits: stateSummary.today_visits ?? stats.today_visits,
             avg_duration: stateSummary.avg_duration ?? stats.avg_duration,
             last_pet_weight: stateSummary.last_pet_weight ?? stats.last_pet_weight,

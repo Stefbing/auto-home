@@ -50,19 +50,14 @@ class PetKitService:
         """异步获取凭证，避免阻塞 __init__"""
         if not self.username or not self.password:
             from ..utils.config_manager import get_config_from_db
-            loop = asyncio.get_event_loop()
-            self.username = await loop.run_in_executor(
-                None, lambda: get_config_from_db("account", user_id=self.user_id, platform="petkit")
-            )
-            self.password = await loop.run_in_executor(
-                None, lambda: get_config_from_db("password", user_id=self.user_id, platform="petkit")
-            )
+            self.username = await get_config_from_db("account", user_id=self.user_id, platform="petkit")
+            self.password = await get_config_from_db("password", user_id=self.user_id, platform="petkit")
 
-    def _init_ssl_context(self):
+    async def _init_ssl_context(self):
         """初始化 SSL 上下文，处理证书验证问题"""
         try:
             from ..utils.config_manager import get_config_from_db
-            disable_ssl_str = get_config_from_db("PETKIT_DISABLE_SSL_VERIFY")
+            disable_ssl_str = await get_config_from_db("PETKIT_DISABLE_SSL_VERIFY")
             disable_ssl = disable_ssl_str.lower() == "true" if disable_ssl_str else False
 
             if disable_ssl:
@@ -90,7 +85,7 @@ class PetKitService:
             return False
         
         # 初始化 SSL 上下文
-        self._init_ssl_context()
+        await self._init_ssl_context()
         
         if not await self._load_session_from_db():
             logger.info("No valid session found, attempting initial login...")
