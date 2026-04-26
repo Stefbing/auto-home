@@ -1,0 +1,110 @@
+<view class="page">
+  <!-- Hero卡片 -->
+  <view class="hero-card">
+    <view class="hero-icon">⚙️</view>
+    <text class="hero-title">系统配置</text>
+    <text class="hero-desc">管理设备账号与平台凭证</text>
+  </view>
+
+  <!-- CloudPets 配置 -->
+  <view class="config-section">
+    <view class="section-header">
+      <text class="section-icon">🍖</text>
+      <text class="section-name">CloudPets 喂食器</text>
+    </view>
+
+    <view class="config-card">
+      <view class="form-group">
+        <text class="form-label">账号</text>
+        <input class="form-input"
+               placeholder="请输入 CloudPets 账号"
+               value="{{cloudpetsAccount}}"
+               bindinput="onCloudpetsAccountInput" />
+      </view>
+
+      <view class="form-group">
+        <text class="form-label">密码</text>
+        <input class="form-input"
+               type="password"
+               placeholder="请输入 CloudPets 密码"
+               value="{{cloudpetsPassword}}"
+               bindinput="onCloudpetsPasswordInput" />
+      </view>
+
+      <button class="save-btn {{cloudpetsSaving ? 'loading' : ''}}"
+              bindtap="saveCloudpetsConfig"
+              disabled="{{cloudpetsSaving}}">
+        <text wx:if="{{!cloudpetsSaving}}">保存配置</text>
+        <text wx:else>保存中...</text>
+      </button>
+    </view>
+  </view>
+
+  <!-- PetKit 配置 -->
+  <view class="config-section">
+    <view class="section-header">
+      <text class="section-icon">🚽</text>
+      <text class="section-name">PetKit 宠物设备</text>
+    </view>
+
+    <view class="config-card">
+      <view class="form-group">
+        <text class="form-label">账号</text>
+        <input class="form-input"
+               placeholder="请输入 PetKit 账号（手机号/邮箱）"
+               value="{{petkitAccount}}"
+               bindinput="onPetkitAccountInput" />
+      </view>
+
+      <view class="form-group">
+        <text class="form-label">密码</text>
+        <input class="form-input"
+               type="password"
+               placeholder="请输入 PetKit 密码"
+               value="{{petkitPassword}}"
+               bindinput="onPetkitPasswordInput" />
+      </view>
+
+      <button class="save-btn {{petkitSaving ? 'loading' : ''}}"
+              bindtap="savePetkitConfig"
+              disabled="{{petkitSaving}}">
+        <text wx:if="{{!petkitSaving}}">保存配置</text>
+        <text wx:else>保存中...</text>
+      </button>
+    </view>
+  </view>
+
+  <!-- Xiaomi 配置 -->
+  <view class="config-section">
+    <view class="section-header">
+      <text class="section-icon">⚖️</text>
+      <text class="section-name">小米体脂秤</text>
+    </view>
+
+    <view class="config-card">
+      <view class="form-group">
+        <text class="form-label">小米账号</text>
+        <input class="form-input"
+               placeholder="请输入小米账号（手机号/邮箱）"
+               value="{{xiaomiAccount}}"
+               bindinput="onXiaomiAccountInput" />
+      </view>
+
+      <view class="form-group">
+        <text class="form-label">密码</text>
+        <input class="form-input"
+               type="password"
+               placeholder="请输入小米密码"
+               value="{{xiaomiPassword}}"
+               bindinput="onXiaomiPasswordInput" />
+      </view>
+
+      <button class="save-btn {{xiaomiSaving ? 'loading' : ''}}"
+              bindtap="saveXiaomiConfig"
+              disabled="{{xiaomiSaving}}">
+        <text wx:if="{{!xiaomiSaving}}">保存配置</text>
+        <text wx:else>保存中...</text>
+      </button>
+    </view>
+  </view>
+</view>

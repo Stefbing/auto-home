@@ -91,13 +91,17 @@
 
               <view class="card-stats">
                 <view class="stat-item">
-                  <text class="stat-value">{{item.today_servings || '--'}}</text>
+                  <text class="stat-value">{{item.today_servings !== undefined ? item.today_servings : '--'}}</text>
                   <text class="stat-label">今日投喂</text>
                 </view>
                 <view class="stat-item">
-                  <text class="stat-value">{{item.remaining_plans || '--'}}</text>
+                  <text class="stat-value">{{item.remaining_plans !== undefined ? item.remaining_plans : '--'}}</text>
                   <text class="stat-label">计划剩余</text>
                 </view>
+              </view>
+
+              <view class="card-chevron">
+                <text class="chevron-icon">›</text>
               </view>
             </navigator>
 
@@ -120,13 +124,17 @@
 
               <view class="card-stats">
                 <view class="stat-item">
-                  <text class="stat-value">{{item.today_visits || '--'}}</text>
+                  <text class="stat-value">{{item.today_visits !== undefined ? item.today_visits : '--'}}</text>
                   <text class="stat-label">今日如厕</text>
                 </view>
                 <view class="stat-item">
-                  <text class="stat-value">{{item.sand_level || '--'}}%</text>
+                  <text class="stat-value">{{item.sand_level !== undefined ? item.sand_level + '%' : '--'}}</text>
                   <text class="stat-label">猫砂余量</text>
                 </view>
+              </view>
+
+              <view class="card-chevron">
+                <text class="chevron-icon">›</text>
               </view>
             </navigator>
           </block>

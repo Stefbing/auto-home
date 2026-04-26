@@ -9,60 +9,34 @@ page {
   box-sizing: border-box;
 }
 
-/* ========== 顶部导航栏 ========== */
-.header-section {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(20rpx);
-  padding: 24rpx 32rpx;
+/* ========== Hero卡片 - 设备状态 ========== */
+.hero-card {
+  margin: 24rpx 32rpx;
+  padding: 32rpx;
+  background: linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%);
+  border-radius: 24rpx;
+  box-shadow: 0 4rpx 16rpx rgba(16, 185, 129, 0.08),
+              0 0 0 1rpx rgba(255, 255, 255, 0.5) inset;
+}
+
+.device-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);
-}
-
-.back-btn {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 50%;
-  background: #F1F5F9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.back-btn:active {
-  transform: scale(0.92);
-  background: #E2E8F0;
-}
-
-.iconfont {
-  font-size: 36rpx;
-  color: #2563EB;
-  font-weight: 600;
-}
-
-.page-title {
-  font-size: 34rpx;
-  font-weight: 700;
-  color: #1E293B;
-  letter-spacing: 0.5rpx;
 }
 
 .refresh-btn {
-  padding: 0 24rpx;
-  height: 64rpx;
-  line-height: 64rpx;
-  border-radius: 16rpx;
+  padding: 0 20rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 14rpx;
   background: rgba(37, 99, 235, 0.08);
   color: #2563EB;
-  font-size: 26rpx;
+  font-size: 24rpx;
   font-weight: 600;
   border: none;
   transition: all 0.3s;
+  flex-shrink: 0;
 }
 
 .refresh-btn::after {
@@ -92,12 +66,15 @@ page {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16rpx;
 }
 
 .device-info {
   display: flex;
   align-items: center;
   gap: 20rpx;
+  flex: 1;
+  min-width: 0;
 }
 
 .device-icon {

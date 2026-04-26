@@ -281,14 +281,14 @@ async def get_dashboard_data():
         dashboard_data['litterbox_stats'] = litterbox_stats
         
         cloudpets_servings = await cache_manager.get('cloudpets_servings')
-        if not cloudpets_servings:
-            cloudpets_servings = await cloudpets_service.get_servings_today()
+        if not cloudpets_servings and state.cloudpets:
+            cloudpets_servings = await state.cloudpets.get_servings_today()
             await cache_manager.set('cloudpets_servings', cloudpets_servings, ttl=120)
-        dashboard_data['cloudpets_servings'] = cloudpets_servings
+        dashboard_data['cloudpets_servings'] = cloudpets_servings or {}
         
         cloudpets_plans = await cache_manager.get('cloudpets_plans')
-        if not cloudpets_plans:
-            cloudpets_plans = await cloudpets_service.get_feeding_plans()
+        if not cloudpets_plans and state.cloudpets:
+            cloudpets_plans = await state.cloudpets.get_feeding_plans()
             await cache_manager.set('cloudpets_plans', cloudpets_plans, ttl=300)
         dashboard_data['cloudpets_plans'] = cloudpets_plans or []
         
@@ -771,29 +771,6 @@ class DeviceResponse(BaseModel):
     platform: str
     status: str
 
-@app.get("/api/devices", response_model=List[DeviceResponse])
-async def get_user_devices_api(user_id: str):
-    """Get user's device list (no credentials)"""
-    try:
-        uid = int(user_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="无效的user_id")
-    try:
-        devices = await get_user_devices(uid)
-        platform_to_type = {'cloudpets': 'feeder', 'petkit': 'litterbox', 'xiaomi': 'scale'}
-        result = []
-        for idx, device in enumerate(devices):
-            platform = device.get('platform', '')
-            device_type = platform_to_type.get(platform, 'unknown')
-            result.append(DeviceResponse(device_key=f"device_{idx}", device_type=device_type,
-                                         device_name=device.get('device_name') or f"{platform}_device",
-                                         platform=platform, status='active'))
-        return result
-    except Exception as e:
-        import traceback
-        logger.error(f"获取设备列表失败: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"获取设备列表失败：{str(e)}")
-
 @app.post("/api/devices/add", response_model=DeviceResponse)
 async def add_device_api(request: AddDeviceRequest, user_id: str):
     """Add device to user account with auto-login and token caching"""
@@ -810,4 +787,84 @@ async def add_device_api(request: AddDeviceRequest, user_id: str):
                               platform=request.platform, status="active")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"添加设备失败：{str(e)}")
+
+# --- System Config APIs ---
+from .utils.config_manager import get_config_from_db, set_config_to_db
+
+class SystemConfigRequest(BaseModel):
+    platform: str
+    account: str
+    password: str
+
+class SystemConfigResponse(BaseModel):
+    cloudpets_account: Optional[str] = None
+    cloudpets_password: Optional[str] = None
+    petkit_account: Optional[str] = None
+    petkit_password: Optional[str] = None
+    xiaomi_account: Optional[str] = None
+    xiaomi_password: Optional[str] = None
+
+@app.get("/api/system/config", response_model=SystemConfigResponse)
+async def get_system_config():
+    """Get system configuration (passwords masked)"""
+    try:
+        # Get first user ID for each platform
+        cp_user = await _get_first_user_with_platform("cloudpets")
+        pk_user = await _get_first_user_with_platform("petkit")
+        xm_user = await _get_first_user_with_platform("xiaomi")
+        
+        config = SystemConfigResponse()
+        
+        if cp_user:
+            config.cloudpets_account = await get_config_from_db("account", user_id=cp_user, platform="cloudpets")
+            has_pwd = await get_config_from_db("password", user_id=cp_user, platform="cloudpets")
+            config.cloudpets_password = "********" if has_pwd else None
+        
+        if pk_user:
+            config.petkit_account = await get_config_from_db("account", user_id=pk_user, platform="petkit")
+            has_pwd = await get_config_from_db("password", user_id=pk_user, platform="petkit")
+            config.petkit_password = "********" if has_pwd else None
+        
+        if xm_user:
+            config.xiaomi_account = await get_config_from_db("account", user_id=xm_user, platform="xiaomi")
+            has_pwd = await get_config_from_db("password", user_id=xm_user, platform="xiaomi")
+            config.xiaomi_password = "********" if has_pwd else None
+        
+        return config
+    except Exception as e:
+        logger.error(f"Failed to get config: {e}")
+        raise HTTPException(status_code=500, detail=f"获取配置失败：{str(e)}")
+
+@app.post("/api/system/config")
+async def save_system_config(request: SystemConfigRequest):
+    """Save system configuration for a platform"""
+    try:
+        # Find or create user for this platform
+        user_id = await _get_first_user_with_platform(request.platform)
+        if not user_id:
+            # Create a default user if none exists
+            from .models.models import User
+            from .models.db import engine
+            from sqlmodel import Session
+            loop = asyncio.get_running_loop()
+            def _create_user():
+                with Session(engine) as session:
+                    user = User(phone_number="00000000000", nickname="系统用户")
+                    session.add(user)
+                    session.commit()
+                    session.refresh(user)
+                    return user.id
+            user_id = await loop.run_in_executor(None, _create_user)
+        
+        # Save config
+        await set_config_to_db("account", user_id, request.account, is_encrypted=True, platform=request.platform)
+        await set_config_to_db("password", user_id, request.password, is_encrypted=True, platform=request.platform)
+        
+        # Re-initialize service
+        await _init_service_for_user(request.platform, user_id, request.account, request.password)
+        
+        return {"message": "配置保存成功", "platform": request.platform}
+    except Exception as e:
+        logger.error(f"Failed to save config: {e}")
+        raise HTTPException(status_code=500, detail=f"保存配置失败：{str(e)}")
 

@@ -1,28 +1,20 @@
 <view class="page">
-  <!-- 顶部导航栏 -->
-  <view class="header-section">
-    <navigator url="/pages/index/index" class="back-btn">
-      <text class="iconfont">&#xe600;</text>
-    </navigator>
-    <text class="page-title">智能猫砂盆</text>
-    <button class="refresh-btn {{refreshing ? 'loading' : ''}}" bindtap="refreshData" loading="{{refreshing}}" disabled="{{refreshing}}">
-      <text wx:if="{{!refreshing}}">刷新</text>
-    </button>
-  </view>
-
   <!-- Hero卡片 - 设备状态概览 -->
   <view class="hero-card">
     <view class="device-header">
       <view class="device-info">
         <view class="device-icon">🚽</view>
         <view class="device-text">
-          <text class="device-name">{{stats.device_name || 'PetKit 猫厕所'}}</text>
+          <text class="device-name">{{stats.device_name || 'PetKit猫厕所'}}</text>
           <view class="device-status">
             <view class="status-dot online"></view>
             <text class="status-text">在线</text>
           </view>
         </view>
       </view>
+      <button class="refresh-btn {{refreshing ? 'loading' : ''}}" bindtap="refreshData" loading="{{refreshing}}" disabled="{{refreshing}}">
+        <text wx:if="{{!refreshing}}">刷新</text>
+      </button>
     </view>
   </view>
 

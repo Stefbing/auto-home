@@ -1,20 +1,11 @@
 <view class="page">
-  <!-- 顶部导航栏 -->
-  <view class="header-section">
-    <navigator url="/pages/index/index" class="back-btn">
-      <text class="iconfont">&#xe600;</text>
-    </navigator>
-    <text class="page-title">智能喂食器</text>
-    <view class="placeholder"></view>
-  </view>
-
   <!-- Hero卡片 - 设备状态概览 -->
   <view class="hero-card">
     <view class="hero-top">
       <view class="device-info">
         <view class="device-icon">🍖</view>
         <view class="device-text">
-          <text class="device-name">CloudPets 喂食器</text>
+          <text class="device-name">{{deviceName || '云宠喂食器'}}</text>
           <view class="device-status">
             <view class="status-dot online"></view>
             <text class="status-text">在线</text>
@@ -54,9 +45,10 @@
     <view class="card-header">
       <view>
         <text class="card-title">喂食计划</text>
-        <text class="card-subtitle">定时自动投喂，支持实时切换</text>
       </view>
-      <navigator url="/pages/feeder/feeder_plans" class="manage-link">管理 ›</navigator>
+      <button class="add-plan-btn" bindtap="showAddPlanModal">
+        <text class="iconfont">+</text>
+      </button>
     </view>
 
     <!-- 加载骨架屏 -->
@@ -72,7 +64,7 @@
 
     <!-- 计划列表 -->
     <view wx:elif="{{plans.length > 0}}" class="plan-list">
-      <view wx:for="{{plans}}" wx:key="index" class="plan-item">
+      <view wx:for="{{plans}}" wx:key="id" class="plan-item">
         <view class="plan-left">
           <view class="plan-time">{{item.time}}</view>
           <view class="plan-detail">
@@ -81,7 +73,12 @@
             <text class="plan-status {{item.enabled ? 'enabled' : 'disabled'}}">{{item.enabled ? '启用' : '停用'}}</text>
           </view>
         </view>
-        <switch color="#2563EB" checked="{{item.enabled}}" data-index="{{index}}" bindchange="togglePlan"/>
+        <view class="plan-actions">
+          <switch color="#F59E0B" checked="{{item.enabled}}" data-index="{{index}}" bindchange="togglePlan"/>
+          <view class="delete-plan-btn" data-id="{{item.id}}" bindtap="deletePlan">
+            <text class="iconfont">🗑️</text>
+          </view>
+        </view>
       </view>
     </view>
 
@@ -89,7 +86,30 @@
     <view wx:else class="empty-plan">
       <view class="empty-icon">📅</view>
       <text class="empty-text">暂无喂食计划</text>
-      <navigator url="/pages/feeder/feeder_plans" class="add-plan-link">添加计划 ›</navigator>
+      <button class="add-plan-link" bindtap="showAddPlanModal">添加计划</button>
+    </view>
+  </view>
+
+  <!-- 添加计划弹窗 -->
+  <view wx:if="{{showAddPlanDialog}}" class="modal-mask" bindtap="closeAddPlanModal">
+    <view class="modal-box modal-form" catchtap="stopPropagation">
+      <view class="modal-title">添加喂食计划</view>
+
+      <view class="form-group">
+        <text class="form-label">时间</text>
+        <picker mode="time" value="{{planTime}}" bindchange="onPlanTimeChange">
+          <view class="picker-value">{{planTime || '请选择时间'}}</view>
+        </picker>
+      </view>
+
+      <view class="form-group">
+        <text class="form-label">份量</text>
+        <picker mode="selector" range="{{[1, 2, 3, 4, 5]}}" value="{{planAmountIndex}}" bindchange="onPlanAmountChange">
+          <view class="picker-value">{{planAmount || 1}} 份</view>
+        </picker>
+      </view>
+
+      <button class="submit-btn" bindtap="submitPlan">确认添加</button>
     </view>
   </view>
 </view>

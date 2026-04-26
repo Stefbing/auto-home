@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/config/config",
     "pages/feeder/feeder",
     "pages/litterbox/litterbox",
     "pages/scale/scale"

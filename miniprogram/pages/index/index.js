@@ -115,21 +115,117 @@ Page({
     if (!this.data.userInfo || !this.data.userInfo.user_id) return
     
     try {
-      const devices = await cloudRequest.callContainer({
-        path: `/api/devices?user_id=${this.data.userInfo.user_id}`,
+      // 获取仪表板数据（包含设备和实时统计）
+      const dashboardData = await cloudRequest.callContainer({
+        path: '/api/dashboard/data',
         method: 'GET'
       })
       
-      const petDevices = devices.filter(d => d.device_type === 'feeder' || d.device_type === 'litterbox')
-      const healthDevices = devices.filter(d => d.device_type === 'scale')
+      // 从 dashboardData 构建设备列表
+      const petDevices = []
+      const healthDevices = []
+      const userDevices = []
+      
+      // 处理 CloudPets 喂食机
+      if (dashboardData.cloudpets_servings !== undefined) {
+        const feederDevice = {
+          device_key: 'device_feeder',
+          device_type: 'feeder',
+          device_name: 'cloudpets',
+          platform: 'cloudpets',
+          status: 'active'
+        }
+        // 解析今日投喂次数 - 使用 result 字段
+        const servingsData = dashboardData.cloudpets_servings
+        if (servingsData && typeof servingsData === 'object') {
+          feederDevice.today_servings = servingsData.result || 0
+        } else if (typeof servingsData === 'number') {
+          feederDevice.today_servings = servingsData
+        } else {
+          feederDevice.today_servings = 0
+        }
+        
+        // 计算计划剩余数量 - 只计算当前时间之后的启用计划
+        const plans = dashboardData.cloudpets_plans || []
+        if (Array.isArray(plans)) {
+          // 获取当前时间 HH:mm
+          const now = new Date()
+          const currentMinutes = now.getHours() * 60 + now.getMinutes()
+          
+          let remaining = 0
+          plans.forEach(p => {
+            // 确保 plan 结构中有 time 且 enabled
+            if (p.time && p.enabled !== false && p.enabled !== 0 && p.enabled !== '0') {
+              const [h, m] = p.time.split(':').map(Number)
+              const planMinutes = h * 60 + m
+              if (planMinutes > currentMinutes) {
+                remaining++
+              }
+            }
+          })
+          
+          feederDevice.remaining_plans = remaining
+        } else {
+          feederDevice.remaining_plans = 0
+        }
+        
+        petDevices.push(feederDevice)
+        userDevices.push(feederDevice)
+      }
+      
+      // 处理 PetKit 猫厕所
+      const petkitDevices = dashboardData.petkit_devices || []
+      if (petkitDevices.length > 0) {
+        const litterboxDevice = {
+          device_key: 'device_litterbox',
+          device_type: 'litterbox',
+          device_name: 'petkit',
+          platform: 'petkit',
+          status: 'active'
+        }
+        const litterboxStats = dashboardData.litterbox_stats || {}
+        
+        // 查找第一个猫厕所设备（与Web端一致）
+        const litterboxPetkitDevice = petkitDevices.find(d => {
+          if (!d || !d.type) return false
+          const name = d.name || ''
+          return ['T3', 'T4', 'T4 Pura MAX', 'T5'].includes(d.type) || name.includes('MAX')
+        })
+        
+        if (litterboxPetkitDevice) {
+          // 优先使用缓存的统计数据（与Web端一致）
+          let stats = {}
+          if (litterboxStats[litterboxPetkitDevice.id]) {
+            stats = litterboxStats[litterboxPetkitDevice.id]
+          } else if (litterboxPetkitDevice.state_summary) {
+            stats = litterboxPetkitDevice.state_summary
+          }
+          
+          // 今日如厕次数
+          litterboxDevice.today_visits = stats.today_visits || stats.used_times || 0
+          
+          // 猫砂余量百分比
+          litterboxDevice.sand_level = stats.sand_percent || 0
+        } else {
+          litterboxDevice.today_visits = 0
+          litterboxDevice.sand_level = 0
+        }
+        
+        petDevices.push(litterboxDevice)
+        userDevices.push(litterboxDevice)
+      }
       
       this.setData({
-        userDevices: devices,
+        userDevices,
         petDevices,
         healthDevices
       })
     } catch (err) {
       console.error('加载设备列表失败:', err)
+      wx.showToast({ 
+        title: '加载失败，请重试', 
+        icon: 'none' 
+      })
     }
   },
   
