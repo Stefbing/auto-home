@@ -9,7 +9,7 @@ const CONFIG = {
 
   // 云托管配置
   cloudEnv: 'prod-d5g0so0137afcfdd5',
-  cloudService: 'flask-3uxy',
+  cloudService: 'auto-home',
 
   // 本地调试配置（替换为你的本地后端地址）
   localBaseUrl: 'http://192.168.1.4:8000'
