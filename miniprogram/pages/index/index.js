@@ -131,9 +131,10 @@ Page({
                                  Object.keys(dashboardData.cloudpets_servings).length > 0
       if (hasCloudPetsConfig) {
         const feederDevice = {
-          device_key: 'device_feeder',
+          device_key: 'cloudpets_cloudpets',
           device_type: 'feeder',
           device_name: 'cloudpets',
+          display_name: '喂食机',
           platform: 'cloudpets',
           status: 'active'
         }
@@ -179,9 +180,10 @@ Page({
       const petkitDevices = dashboardData.petkit_devices || []
       if (petkitDevices.length > 0) {
         const litterboxDevice = {
-          device_key: 'device_litterbox',
+          device_key: 'petkit_petkit',
           device_type: 'litterbox',
           device_name: 'petkit',
+          display_name: '猫厕所',
           platform: 'petkit',
           status: 'active'
         }
@@ -215,6 +217,21 @@ Page({
         
         petDevices.push(litterboxDevice)
         userDevices.push(litterboxDevice)
+      }
+      
+      // 处理小米体脂秤（检查是否有配置）
+      const hasXiaomiConfig = dashboardData.xiaomi_config || false
+      if (hasXiaomiConfig) {
+        const scaleDevice = {
+          device_key: 'xiaomi_xiaomi',
+          device_type: 'scale',
+          device_name: 'xiaomi',
+          display_name: '小米体脂秤',
+          platform: 'xiaomi',
+          status: 'active'
+        }
+        healthDevices.push(scaleDevice)
+        userDevices.push(scaleDevice)
       }
       
       this.setData({
@@ -304,6 +321,11 @@ Page({
         }
       })
       
+      // 如果是体脂秤，自动初始化“自己”成员
+      if (selectedDeviceType === 'scale') {
+        await this.initScaleSelfMember()
+      }
+      
       wx.hideLoading()
       wx.showToast({ title: '添加成功', icon: 'success' })
       
@@ -316,6 +338,40 @@ Page({
     }
   },
 
+  // 初始化体脂秤的“自己”成员
+  async initScaleSelfMember() {
+    try {
+      // 先检查是否已有“自己”成员
+      const res = await cloudRequest.callContainer({
+        path: `/api/family-members?user_id=${this.data.userInfo.user_id}`,
+        method: 'GET'
+      })
+      
+      const members = Array.isArray(res.data) ? res.data : (Array.isArray(res) ? res : [])
+      const hasSelf = members.some(m => m.relationship === 'self')
+      
+      // 如果没有“自己”成员，创建默认成员
+      if (!hasSelf) {
+        await cloudRequest.callContainer({
+          path: `/api/family-members?user_id=${this.data.userInfo.user_id}`,
+          method: 'POST',
+          data: {
+            name: this.data.userInfo.nickname || this.data.userInfo.phone_number || '我',
+            gender: '',
+            age: 0,
+            height: 0,
+            avatar_color: '',
+            relationship: 'self'
+          }
+        })
+        console.log('✓ 已自动初始化体脂秤“自己”成员')
+      }
+    } catch (err) {
+      console.error('初始化体脂秤成员失败:', err)
+      // 不阻断流程，仅记录错误
+    }
+  },
+
   // 阻止事件冒泡
   stopPropagation() {},
 
@@ -324,6 +380,51 @@ Page({
     wx.navigateTo({
       url: '/pages/config/config'
     })
+  },
+
+  // 长按设备卡片 - 删除确认
+  onLongPressDevice(e) {
+    const deviceKey = e.currentTarget.dataset.deviceKey
+    const deviceName = e.currentTarget.dataset.deviceName
+    
+    wx.showModal({
+      title: '删除设备',
+      content: `确定要删除“${deviceName}”吗？\n删除后需要重新配置账号密码。`,
+      confirmText: '删除',
+      confirmColor: '#ff4d4f',
+      cancelText: '取消',
+      success: (res) => {
+        if (res.confirm) {
+          this.deleteDevice(deviceKey, deviceName)
+        }
+      }
+    })
+  },
+
+  // 删除设备
+  async deleteDevice(deviceKey, deviceName) {
+    wx.showLoading({ title: '删除中...' })
+    
+    try {
+      await cloudRequest.callContainer({
+        path: `/api/devices/${deviceKey}?user_id=${this.data.userInfo.user_id}`,
+        method: 'DELETE'
+      })
+      
+      wx.hideLoading()
+      wx.showToast({ title: '删除成功', icon: 'success' })
+      
+      // 刷新设备列表
+      await this.loadUserDevices()
+    } catch (err) {
+      wx.hideLoading()
+      console.error('删除设备失败:', err)
+      wx.showToast({ 
+        title: err.errMsg || '删除失败', 
+        icon: 'error',
+        duration: 2000
+      })
+    }
   },
 
   // 退出登录

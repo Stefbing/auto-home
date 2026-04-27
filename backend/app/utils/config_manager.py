@@ -41,7 +41,10 @@ async def get_config_from_db(key: str, user_id: Optional[int] = None, platform: 
     """
     def _get() -> Optional[str]:
         with Session(engine) as session:
-            statement = select(SystemConfig).where(SystemConfig.key == key)
+            statement = select(SystemConfig).where(
+                SystemConfig.key == key,
+                SystemConfig.is_active == True  # 只查询未删除的配置
+            )
             
             if user_id is not None:
                 statement = statement.where(SystemConfig.user_id == user_id)
@@ -135,7 +138,8 @@ async def get_user_devices(user_id: int, platform: Optional[str] = None) -> List
         with Session(engine) as session:
             statement = select(SystemConfig).where(
                 SystemConfig.user_id == user_id,
-                SystemConfig.platform.isnot(None)  # 只查询有platform的配置（即设备配置）
+                SystemConfig.platform.isnot(None),  # 只查询有platform的配置（即设备配置）
+                SystemConfig.is_active == True  # 只查询未删除的配置
             )
             
             if platform:
@@ -204,8 +208,10 @@ async def add_device(user_id: int, platform: str, account: str, password: str,
                     cfg = session.exec(stmt).first()
                     
                     if cfg:
+                        # 如果配置存在（包括已删除的），更新它
                         cfg.value = val
                         cfg.is_encrypted = True
+                        cfg.is_active = True  # 恢复激活状态
                         cfg.updated_at = timestamp
                     else:
                         cfg = SystemConfig(
@@ -215,6 +221,7 @@ async def add_device(user_id: int, platform: str, account: str, password: str,
                             is_encrypted=True,
                             platform=platform,
                             device_name=final_device_name,
+                            is_active=True,
                             updated_at=timestamp
                         )
                         session.add(cfg)
@@ -234,5 +241,55 @@ async def add_device(user_id: int, platform: str, account: str, password: str,
         return await _run_db_operation(_add_device)
     except Exception as e:
         logger.error(f"Failed to add device for user {user_id}: {e}")
+        raise
+
+
+async def delete_device(user_id: int, device_key: str) -> bool:
+    """
+    删除用户的设备（软删除，设置is_active=False）
+    :param user_id: 用户ID
+    :param device_key: 设备标识符（格式：platform_device_name）
+    :return: 是否删除成功
+    """
+    def _delete_device() -> bool:
+        # 解析 device_key: "cloudpets_cloudpets"
+        parts = device_key.split('_', 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid device_key format: {device_key}")
+        
+        platform, device_name = parts
+        
+        with Session(engine) as session:
+            try:
+                # 查询该设备的所有配置（account、password等）
+                stmt = select(SystemConfig).where(
+                    SystemConfig.user_id == user_id,
+                    SystemConfig.platform == platform,
+                    SystemConfig.device_name == device_name,
+                    SystemConfig.is_active == True  # 只查询未删除的配置
+                )
+                configs = session.exec(stmt).all()
+                
+                if not configs:
+                    logger.warning(f"Device {device_key} not found for user {user_id}")
+                    return False
+                
+                # 软删除：设置is_active=False
+                timestamp = _get_timestamp_ms()
+                for config in configs:
+                    config.is_active = False
+                    config.updated_at = timestamp
+                
+                session.commit()
+                logger.info(f"Device {device_key} soft-deleted for user {user_id} ({len(configs)} configs marked as inactive)")
+                return True
+            except Exception:
+                session.rollback()
+                raise
+
+    try:
+        return await _run_db_operation(_delete_device)
+    except Exception as e:
+        logger.error(f"Failed to delete device {device_key} for user {user_id}: {e}")
         raise
 

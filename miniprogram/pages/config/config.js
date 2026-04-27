@@ -25,20 +25,18 @@ Page({
   // 加载配置
   async loadConfig() {
     try {
-      const res = await cloudRequest.callContainer({
+      const config = await cloudRequest.callContainer({
         path: '/api/system/config',
         method: 'GET'
       });
-
-      if (res && res.data) {
-        const config = res.data;
+      if (config) {
         this.setData({
           cloudpetsAccount: config.cloudpets_account || '',
-          cloudpetsPassword: config.cloudpets_password ? '********' : '',
+          cloudpetsPassword: config.cloudpets_password || '',
           petkitAccount: config.petkit_account || '',
-          petkitPassword: config.petkit_password ? '********' : '',
+          petkitPassword: config.petkit_password || '',
           xiaomiAccount: config.xiaomi_account || '',
-          xiaomiPassword: config.xiaomi_password ? '********' : ''
+          xiaomiPassword: config.xiaomi_password || ''
         });
       }
     } catch (err) {

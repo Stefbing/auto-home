@@ -1,12 +1,15 @@
 /* 全局页面样式 - UI/UX Pro Max 设计系统 */
 page {
   background: linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%);
+  overflow: hidden;
 }
 
 .page {
-  min-height: 100vh;
+  height: 100vh;
   padding-bottom: 40rpx;
   box-sizing: border-box;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ========== Hero卡片 - 设备状态 ========== */

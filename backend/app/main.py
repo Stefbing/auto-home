@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 from .services.petkit_service import PetKitService
 from .services.cloudpets_service import cloudpets_service, FeedingPlan as CloudPetsPlan
 from .services.xiaomi_service import xiaomi_service
-from .models.models import User, WeightRecord, SystemConfig
+from .models.models import User, WeightRecord, SystemConfig, FamilyMember
 from .models.db import get_session, init_db
 from .utils.cache_manager import cache_manager
 from .utils.config_encryptor import ConfigEncryptor
@@ -317,6 +317,8 @@ async def get_dashboard_data(user_id: Optional[int] = None):
             from .utils.config_manager import get_config_from_db
             account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
             password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+            
+            # 只有当配置存在时才尝试获取数据
             if account and password:
                 # Initialize or use existing service
                 if not state.cloudpets or getattr(state.cloudpets, 'user_id', None) != user_id:
@@ -329,15 +331,30 @@ async def get_dashboard_data(user_id: Optional[int] = None):
                 else:
                     cloudpets_servings = await state.cloudpets.get_servings_today()
                     await cache_manager.set(f'{cache_prefix}_cloudpets_servings', cloudpets_servings, ttl=120)
+            else:
+                # 没有配置，返回空数据
+                cloudpets_servings = {}
         dashboard_data['cloudpets_servings'] = cloudpets_servings or {}
         
         # CloudPets plans
         cloudpets_plans = await cache_manager.get(f'{cache_prefix}_cloudpets_plans')
         if not cloudpets_plans:
-            if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+            # 检查是否有配置
+            account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+            password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+            
+            if account and password and state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
                 cloudpets_plans = await state.cloudpets.get_feeding_plans()
                 await cache_manager.set(f'{cache_prefix}_cloudpets_plans', cloudpets_plans, ttl=300)
+            else:
+                cloudpets_plans = []
         dashboard_data['cloudpets_plans'] = cloudpets_plans or []
+        
+        # Xiaomi scale config check
+        from .utils.config_manager import get_config_from_db
+        xiaomi_account = await get_config_from_db("account", user_id=user_id, platform="xiaomi")
+        xiaomi_password = await get_config_from_db("password", user_id=user_id, platform="xiaomi")
+        dashboard_data['xiaomi_config'] = bool(xiaomi_account and xiaomi_password)
         
         await cache_manager.set(f'{cache_prefix}_dashboard_combined_data', dashboard_data, ttl=60)
         return dashboard_data
@@ -824,6 +841,35 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
             record.visceral_fat = metrics["visceral_fat"]
             record.bone_mass = metrics["bone_mass"]
             record.bmr = metrics["bmr"]
+    
+    # If member_id is not provided, try to find or create default member
+    if not record.member_id:
+        stmt = select(FamilyMember).where(
+            FamilyMember.user_id == record.user_id,
+            FamilyMember.is_active == True
+        ).order_by(FamilyMember.sort_order).limit(1)
+        default_member = session.exec(stmt).first()
+        
+        if not default_member:
+            # Create default member (current user)
+            user = session.get(User, record.user_id)
+            if user:
+                default_member = FamilyMember(
+                    user_id=record.user_id,
+                    name=user.nickname or f"用户{user.phone_number[-4:]}",
+                    gender=user.gender,
+                    age=user.age,
+                    height=float(user.height),
+                    relationship="self",
+                    sort_order=0
+                )
+                session.add(default_member)
+                session.commit()
+                session.refresh(default_member)
+        
+        if default_member:
+            record.member_id = default_member.id
+    
     session.add(record)
     session.commit()
     session.refresh(record)
@@ -960,7 +1006,7 @@ class ConfigListResponse(BaseModel):
 def get_config_list(session: Session = Depends(get_session)):
     """Get all config items (encrypted fields return empty string)"""
     try:
-        configs = session.exec(select(SystemConfig)).all()
+        configs = session.exec(select(SystemConfig).where(SystemConfig.is_active == True)).all()
         config_list = []
         for config in configs:
             config_list.append({"key": config.key, "value": config.value if not config.is_encrypted else "",
@@ -973,7 +1019,10 @@ def get_config_list(session: Session = Depends(get_session)):
 def get_config_value(key: str, session: Session = Depends(get_session)):
     """Get single config value (auto-decrypt)"""
     try:
-        stmt = select(SystemConfig).where(SystemConfig.key == key).order_by(SystemConfig.id.desc())
+        stmt = select(SystemConfig).where(
+            SystemConfig.key == key,
+            SystemConfig.is_active == True  # 只查询未删除的配置
+        ).order_by(SystemConfig.id.desc())
         config = session.exec(stmt).first()
         if not config:
             raise HTTPException(status_code=404, detail=f"配置项 {key} 不存在")
@@ -993,7 +1042,10 @@ def save_config(config_item: ConfigItem, session: Session = Depends(get_session)
         sensitive_keys = ["ACCOUNT", "PASSWORD", "XIAOMI_ACCOUNT", "XIAOMI_PASSWORD"]
         should_encrypt = config_item.key in sensitive_keys or config_item.is_encrypted
         value_to_store = ConfigEncryptor.encrypt(config_item.value) if should_encrypt and config_item.value else config_item.value
-        stmt = select(SystemConfig).where(SystemConfig.key == config_item.key)
+        stmt = select(SystemConfig).where(
+            SystemConfig.key == config_item.key,
+            SystemConfig.is_active == True  # 只查询未删除的配置
+        )
         existing_config = session.exec(stmt).first()
         if existing_config:
             existing_config.value = value_to_store
@@ -1001,7 +1053,7 @@ def save_config(config_item: ConfigItem, session: Session = Depends(get_session)
             existing_config.updated_at = int(time.time() * 1000)
         else:
             new_config = SystemConfig(key=config_item.key, value=value_to_store,
-                                      is_encrypted=should_encrypt, updated_at=int(time.time() * 1000))
+                                      is_encrypted=should_encrypt, is_active=True, updated_at=int(time.time() * 1000))
             session.add(new_config)
         session.commit()
         logger.info(f"Config saved: {config_item.key} (encrypted={should_encrypt})")
@@ -1012,13 +1064,18 @@ def save_config(config_item: ConfigItem, session: Session = Depends(get_session)
 
 @app.delete("/api/config/{key}")
 def delete_config(key: str, session: Session = Depends(get_session)):
-    """Delete config item"""
+    """Delete config item (soft delete)"""
     try:
-        stmt = select(SystemConfig).where(SystemConfig.key == key)
+        stmt = select(SystemConfig).where(
+            SystemConfig.key == key,
+            SystemConfig.is_active == True  # 只查询未删除的配置
+        )
         config = session.exec(stmt).first()
         if not config:
             raise HTTPException(status_code=404, detail=f"配置项 {key} 不存在")
-        session.delete(config)
+        # 软删除：设置is_active=False
+        config.is_active = False
+        config.updated_at = int(time.time() * 1000)
         session.commit()
         return {"status": "success", "message": f"配置 {key} 已删除"}
     except HTTPException:
@@ -1055,7 +1112,7 @@ async def _safe_create_push_task(record: WeightRecord, user: Optional[User] = No
     except Exception as e:
         logger.error(f"Background push task failed: {e}")
 # --- Device Management APIs ---
-from .utils.config_manager import get_user_devices, add_device as add_device_to_db
+from .utils.config_manager import get_user_devices, add_device as add_device_to_db, delete_device
 
 class AddDeviceRequest(BaseModel):
     device_type: str
@@ -1082,11 +1139,43 @@ async def add_device_api(request: AddDeviceRequest, user_id: str):
         device_key = await add_device_to_db(user_id=uid, platform=request.platform, account=request.account,
                                             password=request.password, device_name=request.device_name)
         await _init_service_for_user(request.platform, uid, request.account, request.password)
+        
+        # Clear dashboard cache for this user
+        cache_prefix = f'user_{uid}'
+        await cache_manager.delete(f'{cache_prefix}_dashboard_combined_data')
+        logger.info(f"Cleared dashboard cache for user {uid}")
+        
         return DeviceResponse(device_key=device_key, device_type=request.device_type,
                               device_name=request.device_name or f"{request.platform}_device",
                               platform=request.platform, status="active")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"添加设备失败：{str(e)}")
+
+@app.delete("/api/devices/{device_key}")
+async def delete_device_api(device_key: str, user_id: str):
+    """Delete device from user account (with confirmation)"""
+    try:
+        uid = int(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    try:
+        success = await delete_device(uid, device_key)
+        if not success:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        
+        # Clear all dashboard caches for this user
+        cache_prefix = f'user_{uid}'
+        await cache_manager.delete(f'{cache_prefix}_dashboard_combined_data')
+        await cache_manager.delete(f'{cache_prefix}_cloudpets_servings')
+        await cache_manager.delete(f'{cache_prefix}_cloudpets_plans')
+        await cache_manager.delete(f'{cache_prefix}_petkit_devices')
+        logger.info(f"Cleared all caches for user {uid} after device deletion")
+        
+        return {"status": "success", "message": "设备删除成功", "device_key": device_key}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除设备失败：{str(e)}")
 
 # --- System Config APIs ---
 from .utils.config_manager import get_config_from_db, set_config_to_db
@@ -1167,4 +1256,184 @@ async def save_system_config(request: SystemConfigRequest):
     except Exception as e:
         logger.error(f"Failed to save config: {e}")
         raise HTTPException(status_code=500, detail=f"保存配置失败：{str(e)}")
+
+# --- Family Member APIs ---
+class FamilyMemberRequest(BaseModel):
+    name: str
+    gender: str = ""
+    age: int = 0
+    height: float = 0
+    avatar_color: str = ""
+    relationship: str = ""
+
+class FamilyMemberResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    gender: str
+    age: int
+    height: float
+    avatar_color: str
+    relationship: str
+    sort_order: int
+    is_active: bool
+    created_at: int
+    updated_at: int
+
+@app.get("/api/family-members", response_model=List[FamilyMemberResponse])
+async def get_family_members(user_id: str, session: Session = Depends(get_session)):
+    """Get all family members for a user"""
+    try:
+        uid = int(user_id)
+        stmt = select(FamilyMember).where(
+            FamilyMember.user_id == uid,
+            FamilyMember.is_active == True
+        ).order_by(FamilyMember.sort_order, FamilyMember.created_at)
+        members = session.exec(stmt).all()
+        return members
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取家庭成员失败：{str(e)}")
+
+@app.post("/api/family-members", response_model=FamilyMemberResponse)
+async def add_family_member(request: FamilyMemberRequest, user_id: str, session: Session = Depends(get_session)):
+    """Add a new family member"""
+    try:
+        uid = int(user_id)
+        
+        # Get max sort_order
+        stmt = select(FamilyMember.sort_order).where(
+            FamilyMember.user_id == uid
+        ).order_by(FamilyMember.sort_order.desc()).limit(1)
+        result = session.exec(stmt).first()
+        max_sort = result if result is not None else 0
+        
+        member = FamilyMember(
+            user_id=uid,
+            name=request.name,
+            gender=request.gender,
+            age=request.age,
+            height=request.height,
+            avatar_color=request.avatar_color,
+            relationship=request.relationship,
+            sort_order=max_sort + 1
+        )
+        session.add(member)
+        session.commit()
+        session.refresh(member)
+        
+        logger.info(f"Added family member {request.name} for user {uid}")
+        return member
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"添加家庭成员失败：{str(e)}")
+
+@app.put("/api/family-members/{member_id}", response_model=FamilyMemberResponse)
+async def update_family_member(member_id: int, request: FamilyMemberRequest, user_id: str, session: Session = Depends(get_session)):
+    """Update a family member"""
+    try:
+        uid = int(user_id)
+        member = session.get(FamilyMember, member_id)
+        
+        if not member:
+            raise HTTPException(status_code=404, detail="家庭成员不存在")
+        
+        if member.user_id != uid:
+            raise HTTPException(status_code=403, detail="无权操作此家庭成员")
+        
+        member.name = request.name
+        member.gender = request.gender
+        member.age = request.age
+        member.height = request.height
+        member.avatar_color = request.avatar_color
+        member.relationship = request.relationship
+        member.updated_at = int(time.time() * 1000)
+        
+        session.add(member)
+        session.commit()
+        session.refresh(member)
+        
+        logger.info(f"Updated family member {member_id} for user {uid}")
+        return member
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"更新家庭成员失败：{str(e)}")
+
+@app.delete("/api/family-members/{member_id}")
+async def delete_family_member(member_id: int, user_id: str, session: Session = Depends(get_session)):
+    """Delete (deactivate) a family member"""
+    try:
+        uid = int(user_id)
+        member = session.get(FamilyMember, member_id)
+        
+        if not member:
+            raise HTTPException(status_code=404, detail="家庭成员不存在")
+        
+        if member.user_id != uid:
+            raise HTTPException(status_code=403, detail="无权操作此家庭成员")
+        
+        # Soft delete: set is_active to False
+        member.is_active = False
+        member.updated_at = int(time.time() * 1000)
+        
+        session.add(member)
+        session.commit()
+        
+        logger.info(f"Deleted family member {member_id} for user {uid}")
+        return {"status": "success", "message": "删除成功"}
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"删除家庭成员失败：{str(e)}")
+
+@app.get("/api/family-members/{member_id}/history")
+async def get_member_history(member_id: int, user_id: str, limit: int = 30, session: Session = Depends(get_session)):
+    """Get weight history for a family member"""
+    try:
+        uid = int(user_id)
+        
+        # Verify member belongs to user
+        member = session.get(FamilyMember, member_id)
+        if not member or member.user_id != uid:
+            raise HTTPException(status_code=403, detail="无权访问此成员数据")
+        
+        # Query weight records
+        stmt = select(WeightRecord).where(
+            WeightRecord.member_id == member_id
+        ).order_by(WeightRecord.timestamp.desc()).limit(limit)
+        records = session.exec(stmt).all()
+        
+        history = []
+        for record in records:
+            history.append({
+                "id": record.id,
+                "weight": record.weight,
+                "bmi": record.bmi,
+                "body_fat": record.body_fat,
+                "water": record.water,
+                "timestamp": record.timestamp
+            })
+        
+        return {
+            "member_id": member_id,
+            "member_name": member.name,
+            "total_records": len(history),
+            "history": history
+        }
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的user_id")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取历史记录失败：{str(e)}")
 

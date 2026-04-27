@@ -140,7 +140,8 @@ class CloudPetsService:
                 with Session(engine) as session:
                     statement = select(SystemConfig).where(
                         SystemConfig.key == "cloudpets_token",
-                        SystemConfig.user_id == (self.user_id or 0)
+                        SystemConfig.user_id == (self.user_id or 0),
+                        SystemConfig.is_active == True  # 只查询未删除的配置
                     ).order_by(SystemConfig.id.desc())
                     config = session.exec(statement).first()
                     if config:
@@ -165,7 +166,8 @@ class CloudPetsService:
                 with Session(engine) as session:
                     statement = select(SystemConfig).where(
                         SystemConfig.key == "cloudpets_token",
-                        SystemConfig.user_id == (self.user_id or 0)
+                        SystemConfig.user_id == (self.user_id or 0),
+                        SystemConfig.is_active == True  # 只查询未删除的配置
                     )
                     config = session.exec(statement).first()
                     
@@ -173,7 +175,8 @@ class CloudPetsService:
                         config = SystemConfig(
                             user_id=self.user_id or 0,
                             key="cloudpets_token",
-                            value=token
+                            value=token,
+                            is_active=True
                         )
                         session.add(config)
                     else:

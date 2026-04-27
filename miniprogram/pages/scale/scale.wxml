@@ -1,52 +1,169 @@
 <view class="page">
-  <!-- 顶部导航栏 -->
-  <view class="header-section">
-    <navigator url="/pages/index/index" class="back-btn">
-      <text class="back-icon">‹</text>
-    </navigator>
-    <text class="page-title">智能体重秤</text>
-    <view class="placeholder"></view>
-  </view>
-
+  <!-- Hero卡片 - 设备状态 -->
   <view class="hero-card">
-    <view class="hero-label">Live Weight</view>
-    <view class="hero-title">智能体重秤</view>
-    <view class="hero-desc">实时读取体重，稳定后可直接归属到用户并上传记录。</view>
-  </view>
-
-  <view class="status-card">
-    <view class="status-label">{{isStabilized ? '数据已稳定' : '等待稳定读数'}}</view>
-    <view class="weight-display">{{weight}}<text class="unit"> kg</text></view>
-    <view class="status-text">{{scanning ? '蓝牙扫描中' : '尚未开始扫描'}}</view>
-    <view class="device-chip" wx:if="{{device}}">{{device}}</view>
-  </view>
-
-  <view class="card">
-    <view class="section-title">设备连接</view>
-    <view class="button-stack">
-      <button class="primary-action" bindtap="startScan" loading="{{scanning}}">
-        {{scanning ? '扫描中' : '开始连接体重秤'}}
+    <view class="device-header">
+      <view class="device-info">
+        <view class="device-icon">⚖️</view>
+        <view class="device-text">
+          <text class="device-name">智能体脂秤</text>
+          <view class="device-status">
+            <view class="status-dot {{device ? 'online' : 'offline'}}"></view>
+            <text class="status-text">{{device ? '已连接' : '未连接'}}</text>
+          </view>
+        </view>
+      </view>
+      <button class="refresh-btn {{scanning ? 'loading' : ''}}" bindtap="startScan" loading="{{scanning}}" disabled="{{scanning}}">
+        <text wx:if="{{!scanning}}">扫描</text>
+        <text wx:else>扫描中</text>
       </button>
-      <button class="secondary-action" bindtap="stopScan" wx:if="{{scanning}}">停止扫描</button>
     </view>
   </view>
 
-  <view class="card">
-    <view class="section-title">用户归属</view>
-    <view class="current-user">
-      <text class="user-label">当前用户：</text>
-      <text class="user-name">{{userInfo.nickname || userInfo.phone_number}}</text>
+  <!-- 实时体重显示 -->
+  <view class="weight-hero" wx:if="{{weight > 0}}">
+    <view class="weight-value">{{weight}}</view>
+    <view class="weight-unit">kg</view>
+    <view class="weight-status {{isStabilized ? 'stabilized' : ''}}">
+      <text class="status-icon">{{isStabilized ? '✓' : '○'}}</text>
+      <text class="status-text">{{isStabilized ? '数据已稳定' : '等待稳定'}}</text>
     </view>
-    <button class="upload-action" bindtap="uploadData" disabled="{{!isStabilized}}">
-      上传数据
+  </view>
+
+  <!-- 家庭成员选择 -->
+  <view class="member-section">
+    <view class="section-header">
+      <text class="section-title">家庭成员</text>
+      <button class="add-member-btn" bindtap="showAddMemberModal">
+        <text class="iconfont">+</text>
+      </button>
+    </view>
+
+    <scroll-view class="member-list" scroll-x>
+      <view wx:for="{{members}}" wx:key="id" 
+            class="member-card {{selectedMemberId === item.id ? 'active' : ''}}"
+            bindtap="selectMember" 
+            bindlongpress="onLongPressMember"
+            data-id="{{item.id}}"
+            data-name="{{item.name}}">
+        <view class="member-avatar" style="background: {{item.avatarColor}}">
+          <text class="avatar-text">{{item.name[0]}}</text>
+        </view>
+        <text class="member-name">{{item.name}}</text>
+        
+        <!-- 基本信息 -->
+        <view class="member-info" wx:if="{{item.age || item.height}}">
+          <text class="info-item" wx:if="{{item.age}}">{{item.age}}岁</text>
+          <text class="info-divider" wx:if="{{item.age && item.height}}">|</text>
+          <text class="info-item" wx:if="{{item.height}}">{{item.height}}cm</text>
+        </view>
+        
+        <!-- 最新体重 -->
+        <view class="member-stats" wx:if="{{item.lastWeight}}">
+          <text class="member-weight">{{item.lastWeight}}kg</text>
+        </view>
+        
+        <!-- 历史数据趋势图标 -->
+        <view class="member-trend" wx:if="{{item.weightHistory && item.weightHistory.length > 1}}">
+          <text class="trend-icon">📈</text>
+          <text class="trend-count">{{item.weightHistory.length}}次</text>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <!-- 健康数据统计 -->
+  <view class="stats-grid" wx:if="{{currentMember}}">
+    <view class="stat-card">
+      <view class="stat-icon">⚖️</view>
+      <view class="stat-content">
+        <text class="stat-label">当前体重</text>
+        <view class="stat-value">
+          <text class="stat-number">{{currentMember.lastWeight || '--'}}</text>
+          <text class="stat-unit">kg</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="stat-card">
+      <view class="stat-icon">📊</view>
+      <view class="stat-content">
+        <text class="stat-label">BMI指数</text>
+        <view class="stat-value">
+          <text class="stat-number">{{currentMember.bmi || '--'}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="stat-card">
+      <view class="stat-icon">💪</view>
+      <view class="stat-content">
+        <text class="stat-label">体脂率</text>
+        <view class="stat-value">
+          <text class="stat-number">{{currentMember.bodyFat || '--'}}</text>
+          <text class="stat-unit">%</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="stat-card">
+      <view class="stat-icon">💧</view>
+      <view class="stat-content">
+        <text class="stat-label">水分</text>
+        <view class="stat-value">
+          <text class="stat-number">{{currentMember.water || '--'}}</text>
+          <text class="stat-unit">%</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 上传按钮 -->
+  <view class="action-card" wx:if="{{weight > 0 && isStabilized}}">
+    <button class="upload-btn" bindtap="uploadData">
+      <text class="upload-icon">↑</text>
+      <text class="upload-text">上传到 {{currentMember ? currentMember.name : '当前用户'}}</text>
     </button>
   </view>
 
-  <view class="card">
-    <view class="section-title">设备日志</view>
-    <view wx:if="{{logs.length > 0}}">
-      <view wx:for="{{logs}}" wx:key="index" class="log-item">{{item}}</view>
+  <!-- 健康建议 -->
+  <view class="advice-card" wx:if="{{currentMember && currentMember.advice}}">
+    <view class="card-header">
+      <text class="card-title">健康建议</text>
     </view>
-    <view wx:else class="empty-log">暂无日志</view>
+    <view class="advice-content">
+      <text class="advice-text">{{currentMember.advice}}</text>
+    </view>
+  </view>
+
+  <!-- 添加/编辑成员弹窗 -->
+  <view wx:if="{{showAddMemberDialog}}" class="modal-mask" bindtap="closeAddMemberModal">
+    <view class="modal-box modal-form" catchtap="stopPropagation">
+      <view class="modal-title">{{editingMemberId ? '编辑成员' : '添加家庭成员'}}</view>
+
+      <view class="form-group">
+        <text class="form-label">姓名</text>
+        <input class="form-input" placeholder="请输入姓名" value="{{newMemberName}}" bindinput="onMemberNameInput" />
+      </view>
+
+      <view class="form-row">
+        <view class="form-group half">
+          <text class="form-label">年龄</text>
+          <input class="form-input" type="number" placeholder="年龄" value="{{newMemberAge}}" bindinput="onMemberAgeInput" />
+        </view>
+        <view class="form-group half">
+          <text class="form-label">身高(cm)</text>
+          <input class="form-input" type="number" placeholder="身高" value="{{newMemberHeight}}" bindinput="onMemberHeightInput" />
+        </view>
+      </view>
+
+      <view class="form-group">
+        <text class="form-label">性别</text>
+        <picker mode="selector" range="{{['男', '女']}}" value="{{newMemberGenderIndex}}" bindchange="onMemberGenderChange">
+          <view class="picker-value">{{newMemberGender || '请选择性别'}}</view>
+        </picker>
+      </view>
+
+      <button class="submit-btn" bindtap="submitAddMember">{{editingMemberId ? '保存修改' : '确认添加'}}</button>
+    </view>
   </view>
 </view>

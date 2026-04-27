@@ -109,7 +109,8 @@ class PetKitService:
                 with Session(engine) as session_db:
                     statement = select(SystemConfig).where(
                         SystemConfig.key == TOKEN_KEY,
-                        SystemConfig.user_id == (self.user_id or 0)
+                        SystemConfig.user_id == (self.user_id or 0),
+                        SystemConfig.is_active == True  # 只查询未删除的配置
                     ).order_by(SystemConfig.id.desc())
                     config = session_db.exec(statement).first()
                     if config:
@@ -171,7 +172,8 @@ class PetKitService:
                 with Session(engine) as session_db:
                     statement = select(SystemConfig).where(
                         SystemConfig.key == TOKEN_KEY,
-                        SystemConfig.user_id == (self.user_id or 0)
+                        SystemConfig.user_id == (self.user_id or 0),
+                        SystemConfig.is_active == True  # 只查询未删除的配置
                     )
                     config = session_db.exec(statement).first()
 
@@ -179,7 +181,8 @@ class PetKitService:
                         config = SystemConfig(
                             user_id=self.user_id or 0,
                             key=TOKEN_KEY,
-                            value=json.dumps(session_data)
+                            value=json.dumps(session_data),
+                            is_active=True
                         )
                         session_db.add(config)
                     else:

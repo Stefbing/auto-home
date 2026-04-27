@@ -360,6 +360,10 @@
   background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);
 }
 
+.card-icon-wrapper.scale {
+  background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
+}
+
 .card-icon {
   font-size: 48rpx;
   filter: drop-shadow(0 2rpx 4rpx rgba(0, 0, 0, 0.1));

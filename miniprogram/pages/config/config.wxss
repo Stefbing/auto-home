@@ -1,7 +1,9 @@
 .page {
-  min-height: 100vh;
+  height: 100vh;
   background: linear-gradient(135deg, #F8FAFC 0%, #E0E7FF 100%);
   padding-bottom: 40rpx;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Hero卡片 */

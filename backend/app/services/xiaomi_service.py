@@ -68,7 +68,8 @@ class XiaomiCloudService:
         try:
             with Session(engine) as session:
                 statement = select(SystemConfig).where(
-                    SystemConfig.key == self._token_key
+                    SystemConfig.key == self._token_key,
+                    SystemConfig.is_active == True  # 只查询未删除的配置
                 ).order_by(SystemConfig.id.desc())
                 config = session.exec(statement).first()
                 
@@ -103,12 +104,13 @@ class XiaomiCloudService:
 
             with Session(engine) as session:
                 statement = select(SystemConfig).where(
-                    SystemConfig.key == self._token_key
+                    SystemConfig.key == self._token_key,
+                    SystemConfig.is_active == True  # 只查询未删除的配置
                 )
                 config = session.exec(statement).first()
                 
                 if not config:
-                    config = SystemConfig(key=self._token_key, value=json.dumps(token_data))
+                    config = SystemConfig(key=self._token_key, value=json.dumps(token_data), is_active=True)
                     session.add(config)
                 else:
                     config.value = json.dumps(token_data)

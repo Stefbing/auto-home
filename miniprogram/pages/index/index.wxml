@@ -28,7 +28,7 @@
           登录 / 注册
         </button>
 
-        <text class="login-tip">演示账号：任意11位手机号</text>
+        <text class="login-tip">演示账号：18021518830</text>
       </view>
     </view>
   </view>
@@ -75,7 +75,10 @@
             <!-- 喂食机卡片 -->
             <navigator wx:if="{{item.device_type === 'feeder'}}"
                        url="/pages/feeder/feeder"
-                       class="device-card feeder-card">
+                       class="device-card feeder-card"
+                       bindlongpress="onLongPressDevice"
+                       data-device-key="{{item.device_key}}"
+                       data-device-name="{{item.display_name || item.device_name || '喂食机'}}">
               <view class="card-left">
                 <view class="card-icon-wrapper feeder">
                   <text class="card-icon">🍖</text>
@@ -110,7 +113,10 @@
             <!-- 猫厕所卡片 -->
             <navigator wx:if="{{item.device_type === 'litterbox'}}"
                        url="/pages/litterbox/litterbox"
-                       class="device-card litterbox-card">
+                       class="device-card litterbox-card"
+                       bindlongpress="onLongPressDevice"
+                       data-device-key="{{item.device_key}}"
+                       data-device-name="{{item.display_name || item.device_name || '猫厕所'}}">
               <view class="card-left">
                 <view class="card-icon-wrapper litterbox">
                   <text class="card-icon">🚽</text>
@@ -134,6 +140,43 @@
                   <text class="stat-value">{{item.sand_level !== undefined ? item.sand_level : '--'}}</text>
                   <text wx:if="{{item.sand_level !== undefined && item.sand_level !== '--'}}" class="stat-unit">%</text>
                   <text class="stat-label">猫砂余量</text>
+                </view>
+              </view>
+
+              <view class="card-chevron">
+                <text class="chevron-icon">›</text>
+              </view>
+            </navigator>
+          </block>
+        </view>
+      </view>
+
+      <!-- 健康与体质 -->
+      <view wx:if="{{healthDevices.length > 0}}" class="device-section">
+        <view class="section-header">
+          <text class="section-icon">⚖️</text>
+          <text class="section-name">健康与体质</text>
+        </view>
+
+        <view class="device-cards">
+          <block wx:for="{{healthDevices}}" wx:key="device_key">
+            <!-- 体脂秤卡片 -->
+            <navigator wx:if="{{item.device_type === 'scale'}}"
+                       url="/pages/scale/scale"
+                       class="device-card scale-card"
+                       bindlongpress="onLongPressDevice"
+                       data-device-key="{{item.device_key}}"
+                       data-device-name="{{item.display_name || (item.device_name === 'xiaomi' ? '小米体脂秤' : '体脂秤')}}">
+              <view class="card-left">
+                <view class="card-icon-wrapper scale">
+                  <text class="card-icon">⚖️</text>
+                  <view class="status-indicator {{item.status === 'active' ? 'online' : 'offline'}}"></view>
+                </view>
+                <view class="card-info">
+                  <text class="card-name">{{item.device_name === 'xiaomi' ? '小米体脂秤' : '体脂秤'}}</text>
+                  <view class="card-status">
+                    <text class="status-text">{{item.status === 'active' ? '在线' : '待配置'}}</text>
+                  </view>
                 </view>
               </view>
 
