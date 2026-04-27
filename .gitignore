@@ -4,6 +4,7 @@ __pycache__/
 venv/
 env/
 .env
+.venv
 *.db
 *.log
 uv.lock
@@ -23,4 +24,4 @@ miniprogram_npm/
 
 # Vercel
 .vercel/
-/.lingma/
+.lingma/
