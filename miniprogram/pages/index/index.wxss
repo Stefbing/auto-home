@@ -193,8 +193,8 @@
 }
 
 .icon-btn.add-btn {
-  background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
-  box-shadow: 0 4rpx 12rpx rgba(59, 130, 246, 0.25);
+  background: linear-gradient(135deg, #E0F2FE 0%, #BAE6FD 100%);
+  box-shadow: 0 4rpx 12rpx rgba(14, 165, 233, 0.15);
 }
 
 .icon-btn.logout-btn {
@@ -427,8 +427,18 @@
   font-weight: 700;
   color: #1F2937;
   line-height: 1.2;
-  display: block;
+  display: inline-block;
   letter-spacing: -0.5rpx;
+}
+
+.stat-unit {
+  display: inline-block;
+  font-size: 20rpx;
+  color: #9CA3AF;
+  font-weight: 500;
+  line-height: 1;
+  vertical-align: baseline;
+  margin-left: 5rpx;
 }
 
 .stat-label {

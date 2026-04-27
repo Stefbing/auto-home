@@ -47,7 +47,7 @@
     "disableSWC": true
   },
   "compileType": "miniprogram",
-  "libVersion": "2.19.4",
+  "libVersion": "3.15.0",
   "appid": "wxa5e716fb0093a6c1",
   "projectname": "auto-home",
   "condition": {},

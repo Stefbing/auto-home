@@ -26,7 +26,9 @@ page {
 }
 
 .refresh-btn {
-  padding: 0 20rpx;
+  padding: 0 8rpx;
+  min-width: 64rpx;
+  max-width: 120rpx;
   height: 56rpx;
   line-height: 56rpx;
   border-radius: 14rpx;
