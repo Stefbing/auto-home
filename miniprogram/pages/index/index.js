@@ -117,7 +117,7 @@ Page({
     try {
       // 获取仪表板数据（包含设备和实时统计）
       const dashboardData = await cloudRequest.callContainer({
-        path: '/api/dashboard/data',
+        path: `/api/dashboard/data?user_id=${this.data.userInfo.user_id}`,
         method: 'GET'
       })
       
@@ -126,8 +126,10 @@ Page({
       const healthDevices = []
       const userDevices = []
       
-      // 处理 CloudPets 喂食机
-      if (dashboardData.cloudpets_servings !== undefined) {
+      // 处理 CloudPets 喂食机（仅当有实际配置数据时显示）
+      const hasCloudPetsConfig = dashboardData.cloudpets_servings && 
+                                 Object.keys(dashboardData.cloudpets_servings).length > 0
+      if (hasCloudPetsConfig) {
         const feederDevice = {
           device_key: 'device_feeder',
           device_type: 'feeder',

@@ -32,11 +32,16 @@ Page({
 
   // 获取今日喂食次数
   fetchTodayServings() {
+    const userInfo = wx.getStorageSync('userInfo');
+    if (!userInfo || !userInfo.user_id) return;
+    
     cloudRequest.callContainer({
-      path: '/api/cloudpets/servings_today',
+      path: `/api/cloudpets/servings_today?user_id=${userInfo.user_id}`,
       method: 'GET',
       success: res => {
-        if (res && typeof res === 'number') {
+        if (res && typeof res === 'object' && res.result !== undefined) {
+          this.setData({ todayServings: res.result });
+        } else if (typeof res === 'number') {
           this.setData({ todayServings: res });
         }
       },
@@ -48,13 +53,19 @@ Page({
 
   feedOne() {
     const { feedAmount } = this.data;
+    const userInfo = wx.getStorageSync('userInfo');
+    if (!userInfo || !userInfo.user_id) {
+      wx.showToast({ title: '请先登录', icon: 'none' });
+      return;
+    }
+    
     this.setData({ actionLoading: true });
     wx.showLoading({
       title: '正在投喂...'
     });
 
     cloudRequest.callContainer({
-      path: '/api/cloudpets/feed',
+      path: `/api/cloudpets/feed?user_id=${userInfo.user_id}`,
       method: 'POST',
       data: { amount: feedAmount },
       success: res => {
@@ -100,9 +111,12 @@ Page({
   },
 
   fetchPlans() {
+    const userInfo = wx.getStorageSync('userInfo');
+    if (!userInfo || !userInfo.user_id) return;
+    
     this.setData({ loading: true });
     cloudRequest.callContainer({
-      path: '/api/cloudpets/plans',
+      path: `/api/cloudpets/plans?user_id=${userInfo.user_id}`,
       success: res => {
         // callContainer 已返回业务数据
         this.setData({
@@ -153,7 +167,7 @@ Page({
     this.setData({ plans });
 
     cloudRequest.callContainer({
-      path: `/api/cloudpets/plans/${plan.id}`,
+      path: `/api/cloudpets/plans/${plan.id}?user_id=${wx.getStorageSync('userInfo').user_id}`,
       method: 'PUT',
       data: plan,
       success: () => {
@@ -256,7 +270,7 @@ Page({
     };
 
     cloudRequest.callContainer({
-      path: '/api/cloudpets/plans',
+      path: `/api/cloudpets/plans?user_id=${wx.getStorageSync('userInfo').user_id}`,
       method: 'POST',
       data: newPlan,
       success: () => {
@@ -301,7 +315,7 @@ Page({
           wx.showLoading({ title: '删除中...' });
 
           cloudRequest.callContainer({
-            path: `/api/cloudpets/plans/${planId}`,
+            path: `/api/cloudpets/plans/${planId}?user_id=${wx.getStorageSync('userInfo').user_id}`,
             method: 'DELETE',
             success: () => {
               wx.hideLoading();

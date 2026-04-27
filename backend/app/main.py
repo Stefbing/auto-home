@@ -253,81 +253,189 @@ async def force_refresh_cache():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"刷新失败: {str(e)}")
 
-@app.get("/api/dashboard/data")
-async def get_dashboard_data():
-    """Get aggregated dashboard data (cached)"""
+@app.post("/api/cache/clear")
+async def clear_all_cache():
+    """Clear all cached data (for debugging)"""
     try:
-        cached_data = await cache_manager.get('dashboard_combined_data')
+        await cache_manager.clear()
+        logger.info("All cache cleared")
+        return {"status": "success", "message": "缓存已清空"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"清理缓存失败: {str(e)}")
+
+@app.get("/api/dashboard/data")
+async def get_dashboard_data(user_id: Optional[int] = None):
+    """Get aggregated dashboard data (cached, user-specific)"""
+    try:
+        # If no user_id provided, try to get from first configured user
+        if not user_id:
+            user_id = await _get_first_user_with_platform("cloudpets") or await _get_first_user_with_platform("petkit")
+            if not user_id:
+                return {"petkit_devices": [], "litterbox_stats": {}, "cloudpets_servings": {}, "cloudpets_plans": []}
+        
+        cache_prefix = f'user_{user_id}'
+        cached_data = await cache_manager.get(f'{cache_prefix}_dashboard_combined_data')
         if cached_data:
             return cached_data
         
         dashboard_data = {}
-        petkit_devices = await cache_manager.get('petkit_devices')
-        if not petkit_devices and state.petkit:
+        
+        # PetKit devices (user-specific)
+        petkit_devices = await cache_manager.get(f'{cache_prefix}_petkit_devices')
+        if not petkit_devices and state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
             petkit_devices = await state.petkit.get_devices()
-            await cache_manager.set('petkit_devices', petkit_devices, ttl=300)
+            await cache_manager.set(f'{cache_prefix}_petkit_devices', petkit_devices, ttl=300)
+        elif not petkit_devices:
+            # Try to initialize service for this user
+            from .utils.config_manager import get_config_from_db
+            username = await get_config_from_db("account", user_id=user_id, platform="petkit")
+            password = await get_config_from_db("password", user_id=user_id, platform="petkit")
+            if username and password:
+                temp_service = PetKitService(username, password, user_id=user_id)
+                await temp_service.initialize()
+                petkit_devices = await temp_service.get_devices()
+                await cache_manager.set(f'{cache_prefix}_petkit_devices', petkit_devices, ttl=300)
+                await temp_service.close()
         dashboard_data['petkit_devices'] = petkit_devices or []
         
+        # Litterbox stats
         litterbox_stats = {}
         if petkit_devices:
             for device in petkit_devices:
                 if hasattr(device, 'id'):
-                    cache_key = f'petkit_stats_{device.id}'
+                    cache_key = f'{cache_prefix}_petkit_stats_{device.id}'
                     stats = await cache_manager.get(cache_key)
-                    if not stats and state.petkit:
+                    if not stats and state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
                         stats = await state.petkit.get_daily_stats(device.id)
                         await cache_manager.set(cache_key, stats, ttl=180)
                     litterbox_stats[device.id] = stats or {}
         dashboard_data['litterbox_stats'] = litterbox_stats
         
-        cloudpets_servings = await cache_manager.get('cloudpets_servings')
-        if not cloudpets_servings and state.cloudpets:
-            cloudpets_servings = await state.cloudpets.get_servings_today()
-            await cache_manager.set('cloudpets_servings', cloudpets_servings, ttl=120)
+        # CloudPets servings (user-specific)
+        cloudpets_servings = await cache_manager.get(f'{cache_prefix}_cloudpets_servings')
+        if not cloudpets_servings:
+            from .utils.config_manager import get_config_from_db
+            account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+            password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+            if account and password:
+                # Initialize or use existing service
+                if not state.cloudpets or getattr(state.cloudpets, 'user_id', None) != user_id:
+                    import backend.app.services.cloudpets_service as cp_module
+                    temp_service = cp_module.CloudPetsService(user_id=user_id)
+                    await temp_service.initialize()
+                    cloudpets_servings = await temp_service.get_servings_today()
+                    await cache_manager.set(f'{cache_prefix}_cloudpets_servings', cloudpets_servings, ttl=120)
+                    await temp_service.close()
+                else:
+                    cloudpets_servings = await state.cloudpets.get_servings_today()
+                    await cache_manager.set(f'{cache_prefix}_cloudpets_servings', cloudpets_servings, ttl=120)
         dashboard_data['cloudpets_servings'] = cloudpets_servings or {}
         
-        cloudpets_plans = await cache_manager.get('cloudpets_plans')
-        if not cloudpets_plans and state.cloudpets:
-            cloudpets_plans = await state.cloudpets.get_feeding_plans()
-            await cache_manager.set('cloudpets_plans', cloudpets_plans, ttl=300)
+        # CloudPets plans
+        cloudpets_plans = await cache_manager.get(f'{cache_prefix}_cloudpets_plans')
+        if not cloudpets_plans:
+            if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+                cloudpets_plans = await state.cloudpets.get_feeding_plans()
+                await cache_manager.set(f'{cache_prefix}_cloudpets_plans', cloudpets_plans, ttl=300)
         dashboard_data['cloudpets_plans'] = cloudpets_plans or []
         
-        await cache_manager.set('dashboard_combined_data', dashboard_data, ttl=60)
+        await cache_manager.set(f'{cache_prefix}_dashboard_combined_data', dashboard_data, ttl=60)
         return dashboard_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取仪表板数据失败：{str(e)}")
 # --- PetKit APIs ---
 @app.get("/api/petkit/devices")
-async def petkit_devices(service: PetKitService = Depends(get_petkit)):
-    if not service or not service.username or not service.password:
-        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
+async def petkit_devices(user_id: Optional[int] = None):
+    """Get PetKit devices for specific user"""
     try:
-        cached_devices = await cache_manager.get('petkit_devices')
+        if not user_id:
+            user_id = await _get_first_user_with_platform("petkit")
+            if not user_id:
+                return []
+        
+        cache_key = f'user_{user_id}_petkit_devices'
+        cached_devices = await cache_manager.get(cache_key)
         if cached_devices:
             return cached_devices
-        devices = await service.get_devices()
-        await cache_manager.set('petkit_devices', devices, ttl=300)
+        
+        # Initialize service for this user if needed
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="petkit")
+        password = await get_config_from_db("password", user_id=user_id, platform="petkit")
+        
+        if not username or not password:
+            return []
+        
+        # Use existing service or create temp one
+        if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
+            devices = await state.petkit.get_devices()
+        else:
+            temp_service = PetKitService(username, password, user_id=user_id)
+            await temp_service.initialize()
+            devices = await temp_service.get_devices()
+            await temp_service.close()
+        
+        await cache_manager.set(cache_key, devices, ttl=300)
         return devices
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch devices: {str(e)}")
+        logger.error(f"Failed to fetch PetKit devices: {e}")
+        return []
 
 @app.post("/api/petkit/clean")
-async def petkit_clean(service: PetKitService = Depends(get_petkit)):
-    """Clean litterbox (auto-select first device)"""
-    if not service or not service.username or not service.password:
-        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
+async def petkit_clean(user_id: Optional[int] = None):
+    """Clean litterbox for specific user"""
     try:
-        return await service.clean_litterbox(None)
+        if not user_id:
+            user_id = await _get_first_user_with_platform("petkit")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="PetKit service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="petkit")
+        password = await get_config_from_db("password", user_id=user_id, platform="petkit")
+        
+        if not username or not password:
+            raise HTTPException(status_code=503, detail="PetKit credentials missing")
+        
+        if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
+            return await state.petkit.clean_litterbox(None)
+        else:
+            temp_service = PetKitService(username, password, user_id=user_id)
+            await temp_service.initialize()
+            result = await temp_service.clean_litterbox(None)
+            await temp_service.close()
+            return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Action failed: {str(e)}")
 
 @app.post("/api/petkit/deodorize")
-async def petkit_deodorize(service: PetKitService = Depends(get_petkit)):
-    """Deodorize litterbox (auto-select first device)"""
-    if not service or not service.username or not service.password:
-        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
+async def petkit_deodorize(user_id: Optional[int] = None):
+    """Deodorize litterbox for specific user"""
     try:
-        return await service.deodorize_litterbox(None)
+        if not user_id:
+            user_id = await _get_first_user_with_platform("petkit")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="PetKit service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="petkit")
+        password = await get_config_from_db("password", user_id=user_id, platform="petkit")
+        
+        if not username or not password:
+            raise HTTPException(status_code=503, detail="PetKit credentials missing")
+        
+        if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
+            return await state.petkit.deodorize_litterbox(None)
+        else:
+            temp_service = PetKitService(username, password, user_id=user_id)
+            await temp_service.initialize()
+            result = await temp_service.deodorize_litterbox(None)
+            await temp_service.close()
+            return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -393,46 +501,238 @@ async def petkit_devices_with_stats(service: PetKitService = Depends(get_petkit)
 
 # --- CloudPets APIs ---
 @app.get("/api/cloudpets/servings_today")
-async def cloudpets_servings_today():
-    if not state.cloudpets:
-        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
-    return await state.cloudpets.get_servings_today()
+async def cloudpets_servings_today(user_id: Optional[int] = None):
+    """Get today's servings for specific user"""
+    try:
+        if not user_id:
+            # Fallback to first configured user
+            user_id = await _get_first_user_with_platform("cloudpets")
+            if not user_id:
+                return {"result": 0}
+        
+        cache_key = f'user_{user_id}_cloudpets_servings'
+        cached = await cache_manager.get(cache_key)
+        if cached:
+            return cached
+        
+        # Initialize service for this user if needed
+        from .utils.config_manager import get_config_from_db
+        account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+        password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+        
+        if not account or not password:
+            return {"result": 0}
+        
+        # Use existing service or create temp one
+        if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+            result = await state.cloudpets.get_servings_today()
+        else:
+            import backend.app.services.cloudpets_service as cp_module
+            temp_service = cp_module.CloudPetsService(user_id=user_id)
+            await temp_service.initialize()
+            result = await temp_service.get_servings_today()
+            await temp_service.close()
+        
+        await cache_manager.set(cache_key, result, ttl=120)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get servings: {e}")
+        return {"result": 0}
 
 @app.post("/api/cloudpets/feed")
-async def cloudpets_manual_feed(amount: int = 1):
-    if not state.cloudpets:
-        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
-    return await state.cloudpets.manual_feed(amount)
+async def cloudpets_manual_feed(amount: int = 1, user_id: Optional[int] = None):
+    """Manual feed for specific user"""
+    try:
+        if not user_id:
+            user_id = await _get_first_user_with_platform("cloudpets")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="CloudPets service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+        password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+        
+        if not account or not password:
+            raise HTTPException(status_code=503, detail="CloudPets credentials missing")
+        
+        # Use existing service or create temp one
+        if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+            return await state.cloudpets.manual_feed(amount)
+        else:
+            import backend.app.services.cloudpets_service as cp_module
+            temp_service = cp_module.CloudPetsService(user_id=user_id)
+            await temp_service.initialize()
+            result = await temp_service.manual_feed(amount)
+            await temp_service.close()
+            return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Feed failed: {str(e)}")
 
 @app.get("/api/cloudpets/plans", response_model=List[CloudPetsPlan])
-async def cloudpets_get_plans():
-    if not state.cloudpets:
-        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
-    return await state.cloudpets.get_feeding_plans()
+async def cloudpets_get_plans(user_id: Optional[int] = None):
+    """Get feeding plans for specific user"""
+    try:
+        if not user_id:
+            user_id = await _get_first_user_with_platform("cloudpets")
+            if not user_id:
+                return []
+        
+        cache_key = f'user_{user_id}_cloudpets_plans'
+        cached = await cache_manager.get(cache_key)
+        if cached:
+            return cached
+        
+        from .utils.config_manager import get_config_from_db
+        account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+        password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+        
+        if not account or not password:
+            return []
+        
+        if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+            plans = await state.cloudpets.get_feeding_plans()
+        else:
+            import backend.app.services.cloudpets_service as cp_module
+            temp_service = cp_module.CloudPetsService(user_id=user_id)
+            await temp_service.initialize()
+            plans = await temp_service.get_feeding_plans()
+            await temp_service.close()
+        
+        await cache_manager.set(cache_key, plans, ttl=300)
+        return plans
+    except Exception as e:
+        logger.error(f"Failed to get plans: {e}")
+        return []
 
 @app.post("/api/cloudpets/plans", response_model=CloudPetsPlan)
-async def cloudpets_add_plan(plan: CloudPetsPlan):
-    if not state.cloudpets:
-        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
-    return await state.cloudpets.add_feeding_plan(plan)
+async def cloudpets_add_plan(plan: CloudPetsPlan, user_id: Optional[int] = None):
+    """Add feeding plan for specific user"""
+    try:
+        if not user_id:
+            user_id = await _get_first_user_with_platform("cloudpets")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="CloudPets service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+        password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+        
+        if not account or not password:
+            raise HTTPException(status_code=503, detail="CloudPets credentials missing")
+        
+        if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+            result = await state.cloudpets.add_feeding_plan(plan)
+        else:
+            import backend.app.services.cloudpets_service as cp_module
+            temp_service = cp_module.CloudPetsService(user_id=user_id)
+            await temp_service.initialize()
+            result = await temp_service.add_feeding_plan(plan)
+            await temp_service.close()
+        
+        # Invalidate cache
+        await cache_manager.delete(f'user_{user_id}_cloudpets_plans')
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Add plan failed: {str(e)}")
 
 @app.put("/api/cloudpets/plans/{plan_id}", response_model=CloudPetsPlan)
-async def cloudpets_update_plan(plan_id: str, plan: CloudPetsPlan):
-    if not state.cloudpets:
-        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
-    return await state.cloudpets.update_feeding_plan(plan_id, plan)
+async def cloudpets_update_plan(plan_id: str, plan: CloudPetsPlan, user_id: Optional[int] = None):
+    """Update feeding plan for specific user"""
+    try:
+        if not user_id:
+            user_id = await _get_first_user_with_platform("cloudpets")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="CloudPets service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+        password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+        
+        if not account or not password:
+            raise HTTPException(status_code=503, detail="CloudPets credentials missing")
+        
+        if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+            result = await state.cloudpets.update_feeding_plan(plan_id, plan)
+        else:
+            import backend.app.services.cloudpets_service as cp_module
+            temp_service = cp_module.CloudPetsService(user_id=user_id)
+            await temp_service.initialize()
+            result = await temp_service.update_feeding_plan(plan_id, plan)
+            await temp_service.close()
+        
+        # Invalidate cache
+        await cache_manager.delete(f'user_{user_id}_cloudpets_plans')
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Update plan failed: {str(e)}")
 
 @app.delete("/api/cloudpets/plans/{plan_id}")
-async def cloudpets_delete_plan(plan_id: str):
-    if not state.cloudpets:
-        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
-    return await state.cloudpets.delete_feeding_plan(plan_id)
+async def cloudpets_delete_plan(plan_id: str, user_id: Optional[int] = None):
+    """Delete feeding plan for specific user"""
+    try:
+        if not user_id:
+            user_id = await _get_first_user_with_platform("cloudpets")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="CloudPets service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+        password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+        
+        if not account or not password:
+            raise HTTPException(status_code=503, detail="CloudPets credentials missing")
+        
+        if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+            result = await state.cloudpets.delete_feeding_plan(plan_id)
+        else:
+            import backend.app.services.cloudpets_service as cp_module
+            temp_service = cp_module.CloudPetsService(user_id=user_id)
+            await temp_service.initialize()
+            result = await temp_service.delete_feeding_plan(plan_id)
+            await temp_service.close()
+        
+        # Invalidate cache
+        await cache_manager.delete(f'user_{user_id}_cloudpets_plans')
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete plan failed: {str(e)}")
 
 @app.get("/api/cloudpets/feeder/status")
-async def cloudpets_feeder_status():
-    if not state.cloudpets:
-        raise HTTPException(status_code=503, detail="CloudPets service not initialized")
-    return await state.cloudpets.get_feeder_status()
+async def cloudpets_feeder_status(user_id: Optional[int] = None):
+    """Get feeder status for specific user"""
+    try:
+        if not user_id:
+            user_id = await _get_first_user_with_platform("cloudpets")
+            if not user_id:
+                return {"status": "not_configured"}
+        
+        from .utils.config_manager import get_config_from_db
+        account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
+        password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
+        
+        if not account or not password:
+            return {"status": "not_configured"}
+        
+        if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+            return await state.cloudpets.get_feeder_status()
+        else:
+            import backend.app.services.cloudpets_service as cp_module
+            temp_service = cp_module.CloudPetsService(user_id=user_id)
+            await temp_service.initialize()
+            result = await temp_service.get_feeder_status()
+            await temp_service.close()
+            return result
+    except Exception as e:
+        logger.error(f"Failed to get feeder status: {e}")
+        return {"status": "error"}
 
 @app.post("/api/petwant/feed")
 async def petwant_feed():

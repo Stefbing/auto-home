@@ -60,8 +60,14 @@ Page({
           title: '发送指令中...'
         });
 
+        const userInfo = wx.getStorageSync('userInfo');
+        if (!userInfo || !userInfo.user_id) {
+          wx.showToast({ title: '请先登录', icon: 'none' });
+          return;
+        }
+        
         cloudRequest.callContainer({
-          path: '/api/petkit/clean',
+          path: `/api/petkit/clean?user_id=${userInfo.user_id}`,
           method: 'POST',
           success: response => {
             wx.hideLoading();
@@ -99,6 +105,8 @@ Page({
 
   fetchStats(options = {}) {
     const { showSkeleton = false, silent = true } = options;
+    const userInfo = wx.getStorageSync('userInfo');
+    if (!userInfo || !userInfo.user_id) return;
 
     this.setData({
       loading: showSkeleton,
@@ -106,7 +114,7 @@ Page({
     });
 
     cloudRequest.callContainer({
-      path: '/api/petkit/devices-stats',
+      path: `/api/petkit/devices-stats?user_id=${userInfo.user_id}`,
       success: res => {
         // callContainer 已返回业务数据
         const devicesWithStats = Array.isArray(res) ? res : [];

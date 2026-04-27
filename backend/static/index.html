@@ -598,31 +598,33 @@
                 </div>`;
             let petHtml = '<div class="device-grid">';
 
-            // 1.1 固定卡片：云宠智能喂食机
-            petHtml += `
-                <div class="device-card" onclick="location.href='/feeder'">
-                    <div class="device-icon-wrapper feeder">
-                        <i class="fas fa-cookie-bite"></i>
-                        <div class="status-indicator online"></div>
-                    </div>
-                    <div class="device-info">
-                        <div class="device-name">喂食机</div>
-                        <div class="device-status">
-                            <span class="status-text">在线</span>
+            // 1.1 动态显示云宠智能喂食机（仅当有配置时显示）
+            if (dashboardData.cloudpets_servings !== undefined || dashboardData.cloudpets_plans !== undefined) {
+                petHtml += `
+                    <div class="device-card" onclick="location.href='/feeder'">
+                        <div class="device-icon-wrapper feeder">
+                            <i class="fas fa-cookie-bite"></i>
+                            <div class="status-indicator online"></div>
                         </div>
-                    </div>
-                    <div class="device-stats">
-                        <div class="stat-item">
-                            <div class="stat-value" id="feeder-servings">--</div>
-                            <div class="stat-label">今日投喂</div>
+                        <div class="device-info">
+                            <div class="device-name">喂食机</div>
+                            <div class="device-status">
+                                <span class="status-text">在线</span>
+                            </div>
                         </div>
-                        <div class="stat-item">
-                            <div class="stat-value" id="feeder-remaining">--</div>
-                            <div class="stat-label">计划剩余</div>
+                        <div class="device-stats">
+                            <div class="stat-item">
+                                <div class="stat-value" id="feeder-servings">--</div>
+                                <div class="stat-label">今日投喂</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="feeder-remaining">--</div>
+                                <div class="stat-label">计划剩余</div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="chevron"><i class="fas fa-chevron-right"></i></div>
-                </div>`;
+                        <div class="chevron"><i class="fas fa-chevron-right"></i></div>
+                    </div>`;
+            }
 
             // 1.2 动态扫描到的猫厕所
             const litterbox = petkit.find(d => {

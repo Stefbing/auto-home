@@ -108,51 +108,16 @@ class DataRefreshTask:
         self.cache_manager = cache_manager
     
     async def refresh_petkit_data(self):
-        """刷新PetKit设备数据"""
-        try:
-            if not self.petkit_service:
-                return
-                
-            logger.info("Refreshing PetKit data...")
-            
-            # 获取设备列表
-            devices = await self.petkit_service.get_devices()
-            await self.cache_manager.set('petkit_devices', devices, ttl=300)  # 5分钟缓存
-            
-            # 为每个设备获取统计信息
-            for device in devices:
-                if hasattr(device, 'id'):
-                    stats = await self.petkit_service.get_daily_stats(device.id)
-                    cache_key = f'petkit_stats_{device.id}'
-                    await self.cache_manager.set(cache_key, stats, ttl=180)  # 3分钟缓存
-                    
-        except Exception as e:
-            logger.error(f"Failed to refresh PetKit data: {e}")
+        """刷新PetKit设备数据 - 已废弃，使用用户隔离版本"""
+        # 不再使用全局缓存，改为按需加载
+        logger.debug("Skipping global PetKit refresh (user-specific caching enabled)")
+        return
     
     async def refresh_cloudpets_data(self):
-        """刷新CloudPets数据"""
-        try:
-            if not self.cloudpets_service:
-                return
-            
-            # 检查是否有有效的 token（避免无配置时不断重试）
-            auth_header = self.cloudpets_service.client.headers.get("authorization", "")
-            if not auth_header:
-                logger.debug("Skipping CloudPets refresh: no authentication token")
-                return
-                
-            logger.info("Refreshing CloudPets data...")
-            
-            # 获取今日投喂次数
-            servings = await self.cloudpets_service.get_servings_today()
-            await self.cache_manager.set('cloudpets_servings', servings, ttl=120)  # 2分钟缓存
-            
-            # 获取喂食计划
-            plans = await self.cloudpets_service.get_feeding_plans()
-            await self.cache_manager.set('cloudpets_plans', plans, ttl=300)  # 5分钟缓存
-            
-        except Exception as e:
-            logger.error(f"Failed to refresh CloudPets data: {e}")
+        """刷新CloudPets数据 - 已废弃，使用用户隔离版本"""
+        # 不再使用全局缓存，改为按需加载
+        logger.debug("Skipping global CloudPets refresh (user-specific caching enabled)")
+        return
     
     async def refresh_combined_dashboard_data(self):
         """刷新首页聚合数据"""
