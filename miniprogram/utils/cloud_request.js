@@ -5,11 +5,11 @@
 // 配置：切换运行环境
 const CONFIG = {
   // 'cloud' - 云托管模式, 'local' - 本地调试模式
-  mode: 'local',
+  mode: 'cloud',
 
   // 云托管配置
-  cloudEnv: 'prod-2gv6fjaz6751c24a',
-  cloudService: 'home',
+  cloudEnv: 'prod-d5g0so0137afcfdd5',
+  cloudService: 'flask-3uxy',
 
   // 本地调试配置（替换为你的本地后端地址）
   localBaseUrl: 'http://192.168.1.4:8000'
