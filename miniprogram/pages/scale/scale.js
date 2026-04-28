@@ -1,33 +1,106 @@
 const cloudRequest = require('../../utils/cloud_request.js');
-const bleUtils = require('../../utils/ble_scale.js');
 
 Page({
   data: {
     scanning: false,
     device: null,
     weight: 0,
+    impedance: 0,
     isStabilized: false,
     logs: [],
     userInfo: null,
+    autoSaved: false, // 标记是否已自动保存
+    lastSavedWeight: null, // 上次保存的体重，用于去重
+    scanTimeout: null, // 扫描超时定时器
     
     // 家庭成员管理
     members: [],
     selectedMemberId: null,
     currentMember: null,
-    isLoadingMembers: false,  // 防止重复加载
+    isLoadingMembers: false,
     
     // 添加/编辑成员弹窗
     showAddMemberDialog: false,
-    editingMemberId: null,  // 编辑模式时的成员ID
+    editingMemberId: null,
     newMemberName: '',
     newMemberAge: '',
     newMemberHeight: '',
     newMemberGender: '',
-    newMemberGenderIndex: -1
+    newMemberGenderIndex: -1,
+    
+    // 体脂计算结果
+    bmi: null,
+    bodyFat: null,
+    water: null,
+    muscleMass: null,
+    protein: null,
+    bmr: null,
+    boneMass: null,
+    visceralFat: null,
+    advice: null
   },
 
   onLoad() {
     this.checkLoginStatus();
+    
+    // 检查并初始化蓝牙（三个条件：已登录 + 有体脂秤设备 + 未初始化）
+    this.checkAndInitBluetoothIfNeeded();
+  },
+  
+  /**
+   * 检查并初始化蓝牙（满足三个条件时才申请权限）
+   * 1. 用户已登录
+   * 2. 用户有体脂秤设备配置（从后端实时查询）
+   * 3. 蓝牙尚未初始化
+   */
+  async checkAndInitBluetoothIfNeeded() {
+    const app = getApp();
+    
+    // 条件1: 检查是否已登录
+    const userInfo = wx.getStorageSync('userInfo');
+    if (!userInfo || !userInfo.user_id) {
+      console.log('[Scale] 用户未登录，不初始化蓝牙');
+      return;
+    }
+    
+    // 条件2: 从后端实时检查是否有体脂秤设备
+    try {
+      const res = await cloudRequest.callContainer({
+        path: `/api/dashboard/data?user_id=${userInfo.user_id}`,
+        method: 'GET'
+      });
+      
+      const hasXiaomiConfig = res.xiaomi_config || false;
+      
+      if (!hasXiaomiConfig) {
+        console.log('[Scale] 用户未配置体脂秤设备，不初始化蓝牙');
+        wx.showModal({
+          title: '未配置设备',
+          content: '请先在首页添加体脂秤设备',
+          showCancel: false,
+          confirmText: '去配置',
+          success: () => {
+            wx.reLaunch({ url: '/pages/index/index' });
+          }
+        });
+        return;
+      }
+      
+      console.log('[Scale] 检测到用户有体脂秤配置');
+    } catch (err) {
+      console.error('[Scale] 检查设备配置失败:', err);
+      return;
+    }
+    
+    // 条件3: 检查蓝牙是否已初始化
+    if (app.globalData.bleAdapterInitialized) {
+      console.log('[Scale] 蓝牙已初始化，跳过');
+      return;
+    }
+    
+    // 三个条件都满足，初始化蓝牙
+    console.log('[Scale] 满足所有条件，开始初始化蓝牙');
+    app.checkAndInitBluetooth();
   },
 
   onShow() {
@@ -35,13 +108,286 @@ Page({
     if (this.data.userInfo && this.data.members.length > 0) {
       this.loadMembers();
     }
+    
+    // 重新注册回调（页面显示时）
+    this.registerBleCallback();
+    
+    // 检查是否有最新的蓝牙数据
+    const app = getApp();
+    if (app.globalData.latestScaleData) {
+      this.handleScaleDataUpdate(app.globalData.latestScaleData);
+    }
+    
+    // 设置超时断连机制（60秒无数据则断开）
+    this.startScanTimeout();
+  },
+  
+  onHide() {
+    // 页面隐藏时注销回调，避免内存泄漏
+    this.unregisterBleCallback();
+  },
+  
+  onUnload() {
+    // 页面卸载时注销回调
+    this.unregisterBleCallback();
+  },
+  
+  /**
+   * 注册蓝牙数据更新回调
+   */
+  registerBleCallback() {
+    const app = getApp();
+    
+    // 避免重复注册
+    if (this.bleCallback) {
+      return;
+    }
+    
+    this.bleCallback = (data) => {
+      console.log('[Scale Page] 收到蓝牙数据更新:', data);
+      this.handleScaleDataUpdate(data);
+    };
+    
+    app.registerScaleCallback(this.bleCallback);
+  },
+  
+  /**
+   * 注销蓝牙数据更新回调
+   */
+  unregisterBleCallback() {
+    const app = getApp();
+    
+    if (this.bleCallback) {
+      app.unregisterScaleCallback(this.bleCallback);
+      this.bleCallback = null;
+    }
+  },
+  
+  /**
+   * 启动扫描超时定时器（60秒）
+   */
+  startScanTimeout() {
+    // 清除旧定时器
+    if (this.data.scanTimeout) {
+      clearTimeout(this.data.scanTimeout);
+    }
+    
+    // 设置新定时器
+    const timeout = setTimeout(() => {
+      console.log('[超时] 60秒无数据，停止扫描');
+      this.setData({ 
+        scanning: false,
+        device: null
+      });
+      wx.showToast({
+        title: '已断开连接',
+        icon: 'none',
+        duration: 2000
+      });
+    }, 60000); // 60秒
+    
+    this.setData({ scanTimeout: timeout });
+  },
+  
+  /**
+   * 重置扫描超时定时器
+   */
+  resetScanTimeout() {
+    this.startScanTimeout();
+  },
+  
+  /**
+   * 处理蓝牙数据更新
+   */
+  handleScaleDataUpdate(data) {
+    console.log('[Scale Page] 处理体重数据:', data);
+    
+    // 【关键】只处理稳定数据，避免无人称重时的乱广播
+    if (!data.isStabilized) {
+      console.log('[Scale Page] 数据未稳定，忽略');
+      return;
+    }
+    
+    // 检查是否为相同数据（误差<0.05kg），避免重复计算
+    const isSameData = Math.abs(this.data.weight - data.weight) < 0.05;
+    
+    // 【防抖】如果刚刚保存过（3秒内）且体重相同，跳过处理
+    const now = Date.now();
+    if (this.lastSaveTime && (now - this.lastSaveTime) < 3000 && isSameData) {
+      console.log('[Scale Page] 距离上次保存不足3秒且数据相同，跳过');
+      return;
+    }
+    
+    // 更新页面数据
+    this.setData({
+      device: data.deviceName || '小米体脂秤',
+      weight: data.weight,
+      impedance: data.impedance,
+      isStabilized: data.isStabilized,
+      scanning: true,
+      autoSaved: false // 重置自动保存状态
+    });
+    
+    // 绘制实时仪表盘
+    this.drawWeightGauge(data.weight, data.isStabilized);
+    
+    // 重置超时定时器
+    this.resetScanTimeout();
+    
+    this.log(`体重: ${data.weight}kg | 阻抗: ${data.impedance || 0}Ω | 稳定: ${data.isStabilized ? '是' : '否'}`);
+    
+    // 如果体重稳定且不是相同数据，才重新计算和匹配
+    if (!isSameData) {
+      // 确保当前已选择成员
+      if (!this.data.currentMember) {
+        console.log('[Scale Page] 未选择成员');
+        
+        // 如果成员列表为空，等待加载完成
+        if (this.data.members.length === 0) {
+          console.log('[Scale Page] 成员列表未加载，等待...');
+          // 不执行任何操作，等待onLoad的loadMembers完成后再处理
+          return;
+        }
+        
+        // 自动选择第一个成员（通常是"自己"）
+        console.log('[Scale Page] 自动选择第一个成员');
+        this.selectMemberByIndex(0);
+      } else {
+        // 已有选中成员，直接计算体脂
+        console.log('[Scale Page] 已有成员，计算体脂');
+        this.calculateBodyMetrics();
+      }
+    }
+  },
+  
+  /**
+   * 自动匹配成员（基于历史体重±3kg范围）
+   */
+  autoMatchMember(currentWeight) {
+    const members = this.data.members;
+    
+    if (!members || members.length === 0) {
+      console.log('[自动匹配] 无成员列表');
+      return;
+    }
+    
+    // 如果只有一个成员，直接选择
+    if (members.length === 1) {
+      console.log('[自动匹配] 只有一个成员，自动选择');
+      this.selectMemberByIndex(0);
+      return;
+    }
+    
+    // 查找体重最接近的成员（容差±3kg）
+    let bestMatch = null;
+    let minDiff = Infinity;
+    const tolerance = 3.0; // 容差3kg
+    
+    members.forEach((member, index) => {
+      if (member.lastWeight && member.lastWeight > 0) {
+        const diff = Math.abs(member.lastWeight - currentWeight);
+        
+        if (diff <= tolerance && diff < minDiff) {
+          minDiff = diff;
+          bestMatch = { member, index };
+        }
+      }
+    });
+    
+    if (bestMatch) {
+      console.log(`[自动匹配] 找到匹配成员: ${bestMatch.member.name} (差异: ${minDiff.toFixed(1)}kg)`);
+      this.selectMemberByIndex(bestMatch.index);
+      wx.showToast({
+        title: `已选择: ${bestMatch.member.name}`,
+        icon: 'success',
+        duration: 1500
+      });
+    } else {
+      // 没有找到匹配的成员，检查是否有成员的历史体重
+      const hasHistoryMembers = members.some(m => m.lastWeight && m.lastWeight > 0);
+      
+      if (hasHistoryMembers) {
+        // 有历史成员但体重差距大，提示用户
+        console.log('[自动匹配] 体重差距过大，提示用户选择');
+        
+        // 找出体重最接近的成员（即使超过容差）
+        let closestMatch = null;
+        let closestDiff = Infinity;
+        
+        members.forEach((member, index) => {
+          if (member.lastWeight && member.lastWeight > 0) {
+            const diff = Math.abs(member.lastWeight - currentWeight);
+            if (diff < closestDiff) {
+              closestDiff = diff;
+              closestMatch = { member, index };
+            }
+          }
+        });
+        
+        if (closestMatch) {
+          wx.showModal({
+            title: '体重差异较大',
+            content: `当前体重 ${currentWeight}kg 与 ${closestMatch.member.name} 的历史体重 ${closestMatch.member.lastWeight}kg 相差 ${closestDiff.toFixed(1)}kg\n\n是否仍选择该成员？`,
+            confirmText: '选择',
+            cancelText: '切换',
+            success: (res) => {
+              if (res.confirm) {
+                // 用户确认选择
+                this.selectMemberByIndex(closestMatch.index);
+              } else {
+                // 用户取消，提示手动选择或添加新成员
+                wx.showModal({
+                  title: '选择成员',
+                  content: '请从下方列表中选择成员，或点击右上角“+”添加新成员',
+                  showCancel: false,
+                  confirmText: '知道了'
+                });
+              }
+            }
+          });
+        }
+      } else {
+        // 所有成员都没有历史体重，选择第一个（通常是"自己"）
+        console.log('[自动匹配] 所有成员无历史体重，选择第一个');
+        this.selectMemberByIndex(0);
+        wx.showToast({
+          title: `已选择: ${members[0].name}`,
+          icon: 'success',
+          duration: 1500
+        });
+      }
+    }
+  },
+  
+  /**
+   * 通过索引选择成员
+   */
+  selectMemberByIndex(index) {
+    const member = this.data.members[index];
+    if (!member) return;
+    
+    this.setData({
+      selectedMemberId: member.id,
+      currentMember: member
+    });
+    
+    console.log('[Scale Page] 选择成员:', member.name);
+    
+    // 自动计算体脂指标
+    this.calculateBodyMetrics();
+    
+    // 如果数据已稳定，自动保存到数据库
+    if (this.data.isStabilized && this.data.weight > 0) {
+      this.autoSaveToDatabase();
+    }
   },
 
   checkLoginStatus() {
     const userInfo = wx.getStorageSync('userInfo');
-    console.log('体脂秤页面 - userInfo:', userInfo);
+    console.log('[Scale] 体脂秤页面 - userInfo:', userInfo);
     
     if (!userInfo) {
+      this.log('未登录，跳转到首页');
       wx.showModal({
         title: '未登录',
         content: '请先在首页登录',
@@ -56,36 +402,39 @@ Page({
     
     // 确保有user_id
     if (!userInfo.user_id) {
-      console.error('userInfo中缺少user_id字段');
+      console.error('[Scale] userInfo中缺少user_id字段');
+      this.log('用户信息异常');
       wx.showToast({ title: '用户信息异常', icon: 'none' });
       return;
     }
     
     this.setData({ userInfo });
+    this.log(`用户登录: ${userInfo.nickname || userInfo.phone_number}`);
+    
     // 先加载成员，如果没有“自己”则自动创建
     this.loadMembers();
   },
 
   // 加载家庭成员（从后端）
-  loadMembers() {
+  loadMembers(callback) {
     console.log('开始加载家庭成员');
-      
+        
     // 防止重复加载
     if (this.data.isLoadingMembers) {
       console.log('正在加载中，跳过');
       return;
     }
-      
+        
     if (!this.data.userInfo || !this.data.userInfo.user_id) {
       console.error('用户信息不完整，无法加载成员');
       return;
     }
-      
+        
     this.setData({ isLoadingMembers: true });
     const userId = this.data.userInfo.user_id;
-      
+        
     console.log('请求API:', `/api/family-members?user_id=${userId}`);
-      
+        
     cloudRequest.callContainer({
       path: `/api/family-members?user_id=${userId}`,
       method: 'GET',
@@ -95,19 +444,19 @@ Page({
         let members = Array.isArray(res.data) ? res.data : (Array.isArray(res) ? res : []);
         console.log('加载成员成功:', members.length, '个成员');
         console.log('成员列表详情:', members.map(m => ({ id: m.id, name: m.name, relationship: m.relationship })));
-          
-        // 检查是否存在"自己"这个成员
+            
+        // 检查是否存在“自己”这个成员
         const hasSelf = members.some(m => m.relationship === 'self');
         console.log('是否存在“自己”成员:', hasSelf);
-          
-        // 如果没有"自己"这个成员，创建默认成员
+            
+        // 如果没有“自己”这个成员，创建默认成员
         if (!hasSelf && this.data.userInfo) {
           console.log('未找到“自己”成员，创建默认成员');
           this.createDefaultMember();
           // 注意：这里不设置isLoadingMembers=false，因为createDefaultMember会再次调用loadMembers
           return;
         }
-        
+          
         // 转换字段名为驼峰格式
         members = members.map(member => ({
           ...member,
@@ -119,20 +468,24 @@ Page({
           advice: null,
           weightHistory: []  // 添加历史数据数组
         }));
-        
+          
         // 为每个成员加载历史记录
-        this.loadMembersHistory(members);
+        this.loadMembersHistory(members, callback);
       },
       fail: (err) => {
         console.error('加载家庭成员失败:', err);
         wx.showToast({ title: '加载失败', icon: 'none' });
         this.setData({ isLoadingMembers: false });
+        // 失败时也执行回调
+        if (typeof callback === 'function') {
+          callback();
+        }
       }
     });
   },
 
   // 为每个成员加载历史记录
-  loadMembersHistory(members) {
+  loadMembersHistory(members, callback) {
     if (members.length === 0) {
       this.setData({ 
         members,
@@ -140,8 +493,14 @@ Page({
         currentMember: null,
         isLoadingMembers: false
       });
+      // 执行回调
+      if (typeof callback === 'function') {
+        callback();
+      }
       return;
     }
+    
+    console.log('[历史记录] 开始加载成员历史, 成员数:', members.length);
     
     // 并行获取所有成员的历史记录（最近7条）
     const promises = members.map(member => {
@@ -151,6 +510,7 @@ Page({
           method: 'GET',
           success: (res) => {
             const history = Array.isArray(res.data) ? res.data : (Array.isArray(res) ? res : []);
+            console.log(`[历史记录] 成员 ${member.name} 获取到 ${history.length} 条记录`);
             
             let updatedMember = { ...member, weightHistory: history };
             
@@ -166,7 +526,8 @@ Page({
             
             resolve(updatedMember);
           },
-          fail: () => {
+          fail: (err) => {
+            console.error(`[历史记录] 成员 ${member.name} 加载失败:`, err);
             resolve(member);
           }
         });
@@ -174,13 +535,59 @@ Page({
     });
     
     Promise.all(promises).then(updatedMembers => {
+      console.log('[历史记录] 所有成员历史加载完成');
+      
+      // 为每个成员计算maxWeight和格式化日期
+      updatedMembers = updatedMembers.map(member => {
+        if (member.weightHistory && member.weightHistory.length > 0) {
+          // 计算最大体重（用于图表比例）
+          const maxWeight = Math.max(...member.weightHistory.map(h => h.weight));
+          console.log(`[历史记录] 成员 ${member.name} maxWeight: ${maxWeight}, 记录数: ${member.weightHistory.length}`);
+          
+          // 格式化日期
+          member.weightHistory = member.weightHistory.map(record => {
+            const date = new Date(record.timestamp || record.created_at);
+            return {
+              ...record,
+              date: `${date.getMonth() + 1}/${date.getDate()}`,
+              bodyFat: record.body_fat || 0  // 保留体脂数据
+            };
+          });
+          
+          member.maxWeight = maxWeight;
+        } else {
+          console.log(`[历史记录] 成员 ${member.name} 无历史记录`);
+        }
+        return member;
+      });
+      
       this.setData({ 
         members: updatedMembers,
         selectedMemberId: updatedMembers[0]?.id || null,
         currentMember: updatedMembers[0] || null,
         isLoadingMembers: false
       });
-      console.log('页面数据已更新，当前成员数:', updatedMembers.length);
+      console.log('[历史记录] 页面数据已更新，当前成员:', updatedMembers[0]?.name);
+      console.log('[历史记录] 当前成员weightHistory:', updatedMembers[0]?.weightHistory?.length || 0, '条');
+      console.log('[历史记录] 当前成员maxWeight:', updatedMembers[0]?.maxWeight);
+      
+      // 绘制图表
+      setTimeout(() => {
+        this.drawWeightChart();
+      }, 300);
+      
+      // 如果已有体重数据且稳定，自动计算体脂
+      if (this.data.weight > 0 && this.data.isStabilized) {
+        console.log('[历史记录] 检测到已有稳定体重数据，自动计算体脂');
+        setTimeout(() => {
+          this.calculateBodyMetrics();
+        }, 500);
+      }
+      
+      // 执行回调
+      if (typeof callback === 'function') {
+        callback();
+      }
     });
   },
 
@@ -310,6 +717,28 @@ Page({
     
     console.log('选择成员:', member?.name);
   },
+  
+  // 通过索引选择成员（用于自动匹配）
+  selectMemberByIndex(index) {
+    if (!this.data.members || index < 0 || index >= this.data.members.length) {
+      console.log('[选择成员] 索引无效');
+      return;
+    }
+    
+    const member = this.data.members[index];
+    
+    this.setData({
+      selectedMemberId: member.id,
+      currentMember: member
+    });
+    
+    console.log('[选择成员] 自动选择:', member.name);
+    
+    // 如果已有体重数据，立即计算体脂
+    if (this.data.weight > 0 && this.data.isStabilized) {
+      this.calculateBodyMetrics();
+    }
+  },
 
   // 显示添加成员弹窗
   showAddMemberModal() {
@@ -369,8 +798,24 @@ Page({
   submitAddMember() {
     const { newMemberName, newMemberAge, newMemberHeight, newMemberGender, editingMemberId } = this.data;
     
+    // 验证必填字段
     if (!newMemberName) {
       wx.showToast({ title: '请输入姓名', icon: 'none' });
+      return;
+    }
+    
+    if (!newMemberAge || parseInt(newMemberAge) <= 0) {
+      wx.showToast({ title: '请输入有效年龄', icon: 'none' });
+      return;
+    }
+    
+    if (!newMemberHeight || parseFloat(newMemberHeight) <= 0) {
+      wx.showToast({ title: '请输入有效身高', icon: 'none' });
+      return;
+    }
+    
+    if (!newMemberGender) {
+      wx.showToast({ title: '请选择性别', icon: 'none' });
       return;
     }
 
@@ -381,8 +826,8 @@ Page({
     
     const memberData = {
       name: newMemberName,
-      age: parseInt(newMemberAge) || 0,
-      height: parseFloat(newMemberHeight) || 0,
+      age: parseInt(newMemberAge),
+      height: parseFloat(newMemberHeight),
       gender: newMemberGender === '男' ? 'male' : (newMemberGender === '女' ? 'female' : ''),
       avatar_color: currentMember?.avatar_color || this.getRandomColor(),
       relationship: currentMember?.relationship || ''  // 保留原有的 relationship
@@ -469,54 +914,642 @@ Page({
     return advice;
   },
 
-  startScan() {
-    if (this.data.scanning) return;
+  /**
+   * 计算体脂指标（基于体重、阻抗、用户信息）
+   * 
+   * 参考公式（结合实测数据校准）：
+   * - BMI = 体重(kg) / 身高(m)²
+   * - 体脂率 = f(BMI, 年龄, 性别, 阻抗)
+   * - 水分率、肌肉量等衍生指标
+   */
+  calculateBodyMetrics() {
+    const { weight, impedance, currentMember } = this.data;
     
-    wx.openBluetoothAdapter({
-      success: (res) => {
-        this.setData({ scanning: true });
-        this.log("蓝牙已初始化");
+    if (!currentMember || !weight || weight <= 0) {
+      console.log('[体脂计算] 数据不完整，无法计算');
+      return;
+    }
+    
+    const { age, gender, height } = currentMember;
+    
+    // 验证必填字段，给出明确提示
+    const missingFields = [];
+    if (!age || age <= 0) missingFields.push('年龄');
+    if (!height || height <= 0) missingFields.push('身高');
+    if (!gender) missingFields.push('性别');
+    
+    if (missingFields.length > 0) {
+      // 如果正在编辑成员，不弹窗（避免重复提示）
+      if (this.data.showAddMemberDialog && this.data.editingMemberId === currentMember.id) {
+        console.log('[体脂计算] 正在编辑成员，跳过提示');
+        return;
+      }
+      
+      wx.showModal({
+        title: '完善成员信息',
+        content: `请先完善${currentMember.name}的${missingFields.join('、')}信息，才能计算体脂数据`,
+        confirmText: '去完善',
+        cancelText: '取消',
+        success: (res) => {
+          if (res.confirm) {
+            // 打开编辑成员弹窗
+            this.editMember(currentMember);
+          }
+        }
+      });
+      return;
+    }
+    
+    // 1. 计算 BMI
+    const bmi = this.calculateBMI(weight, height);
+    console.log('[体脂计算] BMI:', bmi);
+    
+    // 2. 计算体脂率
+    let bodyFat = 0;
+    
+    if (impedance > 0 && height > 0) {
+      // 有阻抗数据时使用更精确的公式
+      // Deurenberg-Piersma 公式变体
+      const sex = gender === 'male' ? 1 : 0;
+      
+      // 基础体脂率
+      bodyFat = (1.20 * bmi) + (0.23 * age) - (10.8 * sex) - 5.4;
+      
+      // 阻抗修正（基于生物电阻抗分析 BIA）
+      // 阻抗指数 = 身高(cm)² / 阻抗(Ω)
+      const impedanceIndex = (height * height) / impedance;
+      
+      // 阻抗修正系数（经验值）
+      const impedanceCorrection = impedanceIndex * 0.001;
+      bodyFat += impedanceCorrection;
+      
+      console.log('[体脂计算] 使用阻抗修正，阻抗指数:', impedanceIndex.toFixed(2));
+    } else {
+      // 无阻抗数据时使用简化公式
+      // 根据实测数据校准：BMI=24.6, 年龄=33, 性别=男 → 体脂率=21.9%
+      const sex = gender === 'male' ? 1 : 0;
+      
+      // 基础公式
+      bodyFat = (1.20 * bmi) + (0.23 * age) - (10.8 * sex) - 5.4;
+      
+      // 微调系数（使结果更接近真实值）
+      // 实测偏差约 +1%，这里做补偿
+      bodyFat += 1.0;
+      
+      console.log('[体脂计算] 无阻抗数据，使用简化公式');
+    }
+    
+    // 限制体脂率在合理范围内
+    bodyFat = Math.max(5, Math.min(60, bodyFat));
+    console.log('[体脂计算] 体脂率:', bodyFat.toFixed(1) + '%');
+    
+    // 3. 计算水分率
+    // 根据 ZeepLife 实测数据校准：体重68.5kg, 体脂21.6%, 水分53.8%
+    // 成年男性正常范围: 50-65%, 女性: 45-60%
+    let water = 0;
+    if (gender === 'male') {
+      // 男性: 基准值与体脂率负相关，但斜率更陡
+      // 实测: 体脂21.6% → 水分53.8%
+      // 公式: water = 68 - (bodyFat - 10) * 0.7
+      water = 68 - (bodyFat - 10) * 0.7;
+    } else {
+      // 女性: 基准值略低
+      water = 63 - (bodyFat - 15) * 0.7;
+    }
+    water = Math.max(40, Math.min(70, water));
+    console.log('[体脂计算] 水分率:', water.toFixed(1) + '%');
+    
+    // 4. 计算肌肉量 (kg)
+    // 肌肉量 = 体重 × (1 - 体脂率 - 骨重比例)
+    // 骨重约占体重4-5%
+    const boneMassRatio = 0.04; // 4%
+    const muscleMass = weight * (1 - bodyFat / 100 - boneMassRatio);
+    console.log('[体脂计算] 肌肉量:', muscleMass.toFixed(2) + 'kg');
+    
+    // 5. 计算蛋白质率
+    // 根据 ZeepLife 实测数据校准：体重68.5kg, 体脂21.6%, 蛋白质20.6%
+    // 蛋白质约占去脂体重的比例，但与水分相关
+    const leanMass = weight * (1 - bodyFat / 100); // 去脂体重
+    
+    // 实测: 去脂体重=53.7kg, 蛋白质20.6% → 蛋白质质量=14.1kg
+    // 蛋白质率 = 蛋白质质量 / 体重 * 100
+    // 优化公式：蛋白质与水分正相关，与体脂负相关
+    let protein = 0;
+    if (gender === 'male') {
+      // 男性: 基准22%，随体脂增加而减少
+      protein = 22 - (bodyFat - 15) * 0.3;
+    } else {
+      // 女性: 基准20%
+      protein = 20 - (bodyFat - 20) * 0.3;
+    }
+    protein = Math.max(12, Math.min(25, protein));
+    console.log('[体脂计算] 蛋白质:', protein.toFixed(1) + '%');
+    
+    // 6. 计算基础代谢 (BMR)
+    // 根据 ZeepLife 实测数据校准：体重68.5kg, 年龄33岁, 身高174cm, BMR=1482千卡
+    // Mifflin-St Jeor 公式计算结果偏高，需要调整
+    let bmr = 0;
+    if (gender === 'male') {
+      // 原始公式: 10 * weight + 6.25 * height - 5 * age + 5
+      // 实测偏差: +81千卡，需要减去修正系数
+      bmr = 10 * weight + 6.25 * height - 5 * age + 5;
+      // 根据实测数据校准：减去约80千卡
+      bmr -= 80;
+    } else {
+      bmr = 10 * weight + 6.25 * height - 5 * age - 161;
+      // 女性也需要适当调整
+      bmr -= 60;
+    }
+    bmr = Math.round(bmr);
+    console.log('[体脂计算] 基础代谢:', bmr + '千卡');
+    
+    // 7. 计算骨重 (kg)
+    const boneMass = weight * boneMassRatio;
+    console.log('[体脂计算] 骨重:', boneMass.toFixed(2) + 'kg');
+    
+    // 8. 计算内脏脂肪等级
+    // 根据 ZeepLife 实测数据校准：BMI=24.5, 年龄33岁, 内脏脂肪=11
+    // 原公式计算结果偏低，需要大幅调整
+    let visceralFat = 0;
+    if (gender === 'male') {
+      // 男性: 基于BMI和年龄的综合评估
+      // 实测: BMI=24.5, 年龄33 → 内脏脂肪=11
+      // 优化公式: 基准值 + BMI影响(更陡) + 年龄影响(更强)
+      visceralFat = (bmi - 20) * 2.5 + (age - 25) * 0.3;
+    } else {
+      // 女性: 基准值略低
+      visceralFat = (bmi - 19) * 2.5 + (age - 25) * 0.3;
+    }
+    visceralFat = Math.max(1, Math.min(30, Math.round(visceralFat * 10) / 10));
+    console.log('[体脂计算] 内脏脂肪等级:', visceralFat);
+    
+    // 9. 生成健康建议
+    const advice = this.generateAdvice({ ...currentMember, bmi: parseFloat(bmi) });
+    
+    console.log('[体脂计算] ✅ 完整结果:', {
+      bmi: parseFloat(bmi).toFixed(1),
+      bodyFat: parseFloat(bodyFat).toFixed(1) + '%',
+      water: parseFloat(water).toFixed(1) + '%',
+      muscleMass: parseFloat(muscleMass).toFixed(2) + 'kg',
+      protein: parseFloat(protein).toFixed(1) + '%',
+      bmr: bmr + 'kcal',
+      boneMass: parseFloat(boneMass).toFixed(2) + 'kg',
+      visceralFat: visceralFat
+    });
+    
+    // 更新页面数据
+    this.setData({
+      bmi: parseFloat(parseFloat(bmi).toFixed(1)),
+      bodyFat: parseFloat(parseFloat(bodyFat).toFixed(1)),
+      water: parseFloat(parseFloat(water).toFixed(1)),
+      muscleMass: parseFloat(parseFloat(muscleMass).toFixed(2)),
+      protein: parseFloat(parseFloat(protein).toFixed(1)),
+      bmr: bmr,
+      boneMass: parseFloat(parseFloat(boneMass).toFixed(2)),
+      visceralFat: visceralFat,
+      advice
+    });
+    
+    this.log(`BMI: ${parseFloat(bmi).toFixed(1)} | 体脂率: ${parseFloat(bodyFat).toFixed(1)}% | 水分: ${parseFloat(water).toFixed(1)}%`);
+    
+    // 如果数据已稳定且选择了成员，自动保存到数据库
+    if (this.data.isStabilized && this.data.currentMember) {
+      this.autoSaveToDatabase();
+    }
+  },
+
+  /**
+   * 获取健康范围参考
+   */
+  getHealthRanges(gender) {
+    const ranges = {
+      bmi: { normal: '18.5-23.9', low: '<18.5', high: '≥24' },
+      bodyFat: gender === 'male' 
+        ? { normal: '10-20%', low: '<10%', high: '>25%' }
+        : { normal: '18-28%', low: '<18%', high: '>35%' },
+      water: gender === 'male'
+        ? { normal: '55-65%', low: '<55%', high: '>65%' }
+        : { normal: '45-60%', low: '<45%', high: '>60%' },
+      visceralFat: { normal: '1-9', warning: '10-14', high: '≥15' },
+      muscleMass: gender === 'male'
+        ? { normal: '75-89%', unit: '%' }
+        : { normal: '63-75.5%', unit: '%' }
+    };
+    return ranges;
+  },
+
+  /**
+   * 绘制体重仪表盘（实时动画）
+   */
+  drawWeightGauge(weight, isStabilized) {
+    const ctx = wx.createCanvasContext('weightGauge', this);
+    
+    // Canvas尺寸（根据WXSS: 750rpx x 400rpx）
+    const canvasWidth = 750;
+    const canvasHeight = 400;
+    const centerX = canvasWidth / 2;
+    const centerY = canvasHeight / 2 - 20;
+    const radius = 140;
+    
+    // 清空画布
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    
+    // 绘制背景圆环
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx.setStrokeStyle('#E2E8F0');
+    ctx.setLineWidth(20);
+    ctx.stroke();
+    
+    // 计算进度角度（0-150kg范围）
+    const maxWeight = 150;
+    const progress = Math.min(weight / maxWeight, 1);
+    const endAngle = -Math.PI / 2 + (progress * 2 * Math.PI);
+    
+    // 绘制进度圆环（渐变色）
+    const gradient = ctx.createLinearGradient(centerX - radius, centerY, centerX + radius, centerY);
+    if (isStabilized) {
+      gradient.addColorStop(0, '#10B981');
+      gradient.addColorStop(1, '#059669');
+    } else {
+      gradient.addColorStop(0, '#3B82F6');
+      gradient.addColorStop(1, '#2563EB');
+    }
+    
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, -Math.PI / 2, endAngle);
+    ctx.setStrokeStyle(gradient);
+    ctx.setLineWidth(20);
+    ctx.setLineCap('round');
+    ctx.stroke();
+    
+    // 绘制中心体重数字
+    ctx.setFillStyle(isStabilized ? '#059669' : '#2563EB');
+    ctx.setFontSize(120);
+    ctx.setTextAlign('center');
+    ctx.setTextBaseline('middle');
+    ctx.fillText(weight.toFixed(1), centerX, centerY - 20);
+    
+    // 绘制单位
+    ctx.setFillStyle('#94A3B8');
+    ctx.setFontSize(36);
+    ctx.fillText('kg', centerX, centerY + 50);
+    
+    // 绘制完成
+    ctx.draw();
+  },
+
+  /**
+   * 绘制体重+体脂趋势折线图
+   */
+  drawWeightChart() {
+    if (!this.data.currentMember || !this.data.currentMember.weightHistory || this.data.currentMember.weightHistory.length === 0) {
+      console.log('[图表] 无历史数据，跳过绘制');
+      return;
+    }
+
+    const history = this.data.currentMember.weightHistory;
+    console.log('[图表] 开始绘制，数据条数:', history.length);
+
+    // 创建canvas上下文
+    const ctx = wx.createCanvasContext('weightChart', this);
+    
+    // Canvas尺寸
+    const canvasWidth = 650; // rpx
+    const canvasHeight = 400; // rpx
+    
+    // 边距
+    const padding = {
+      top: 40,
+      right: 30,
+      bottom: 60,
+      left: 50
+    };
+    
+    // 绘图区域
+    const chartWidth = canvasWidth - padding.left - padding.right;
+    const chartHeight = canvasHeight - padding.top - padding.bottom;
+    
+    // 计算体重范围
+    const weights = history.map(h => h.weight);
+    const minWeight = Math.min(...weights) - 0.5;
+    const maxWeight = Math.max(...weights) + 0.5;
+    const weightRange = maxWeight - minWeight;
+    
+    // 计算体脂范围（如果有体脂数据）
+    const bodyFats = history.filter(h => h.bodyFat > 0).map(h => h.bodyFat);
+    const hasBodyFatData = bodyFats.length > 0;
+    let minBodyFat = 0, maxBodyFat = 0, bodyFatRange = 0;
+    
+    if (hasBodyFatData) {
+      minBodyFat = Math.min(...bodyFats) - 2;
+      maxBodyFat = Math.max(...bodyFats) + 2;
+      bodyFatRange = maxBodyFat - minBodyFat;
+      console.log('[图表] 体脂范围:', minBodyFat, '-', maxBodyFat);
+    }
+    
+    console.log('[图表] 体重范围:', minWeight, '-', maxWeight);
+    
+    // 清空画布
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    
+    // 绘制背景网格
+    ctx.setStrokeStyle('#E2E8F0');
+    ctx.setLineWidth(1);
+    
+    // 横向网格线（5条）- 基于体重
+    for (let i = 0; i <= 4; i++) {
+      const y = padding.top + (chartHeight / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(canvasWidth - padding.right, y);
+      ctx.stroke();
+      
+      // Y轴标签（体重）
+      const weightValue = maxWeight - (weightRange / 4) * i;
+      ctx.setFillStyle('#94A3B8');
+      ctx.setFontSize(20);
+      ctx.setTextAlign('right');
+      ctx.fillText(weightValue.toFixed(1), padding.left - 10, y + 5);
+    }
+    
+    // 绘制图例
+    ctx.setFontSize(22);
+    ctx.setTextAlign('left');
+    
+    // 体重图例
+    ctx.setFillStyle('#10B981');
+    ctx.fillRect(canvasWidth - 180, 10, 20, 4);
+    ctx.fillText('体重(kg)', canvasWidth - 155, 16);
+    
+    // 体脂图例（如果有数据）
+    if (hasBodyFatData) {
+      ctx.setFillStyle('#F59E0B');
+      ctx.fillRect(canvasWidth - 180, 30, 20, 4);
+      ctx.fillText('体脂率(%)', canvasWidth - 155, 36);
+    }
+    
+    // 绘制体重折线
+    if (history.length > 1) {
+      ctx.setStrokeStyle('#10B981');
+      ctx.setLineWidth(4);
+      ctx.setLineJoin('round');
+      
+      ctx.beginPath();
+      
+      history.forEach((item, index) => {
+        const x = padding.left + (chartWidth / (history.length - 1)) * index;
+        const y = padding.top + chartHeight - ((item.weight - minWeight) / weightRange) * chartHeight;
         
-        wx.startBluetoothDevicesDiscovery({
-          allowDuplicatesKey: true,
-          success: (res) => {
-            this.log("开始扫描");
-            wx.onBluetoothDeviceFound(this.onDeviceFound);
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      
+      ctx.stroke();
+      
+      // 绘制体脂折线（如果有数据）
+      if (hasBodyFatData) {
+        ctx.setStrokeStyle('#F59E0B');
+        ctx.setLineWidth(3);
+        ctx.setLineDash([8, 4]); // 虚线
+        
+        ctx.beginPath();
+        
+        let firstPoint = true;
+        history.forEach((item, index) => {
+          if (item.bodyFat > 0) {
+            const x = padding.left + (chartWidth / (history.length - 1)) * index;
+            const y = padding.top + chartHeight - ((item.bodyFat - minBodyFat) / bodyFatRange) * chartHeight;
+            
+            if (firstPoint) {
+              ctx.moveTo(x, y);
+              firstPoint = false;
+            } else {
+              ctx.lineTo(x, y);
+            }
           }
         });
+        
+        ctx.stroke();
+        ctx.setLineDash([]); // 恢复实线
+      }
+      
+      // 绘制数据点
+      history.forEach((item, index) => {
+        const x = padding.left + (chartWidth / (history.length - 1)) * index;
+        const y = padding.top + chartHeight - ((item.weight - minWeight) / weightRange) * chartHeight;
+        
+        // 外圈
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, 2 * Math.PI);
+        ctx.setFillStyle('#FFFFFF');
+        ctx.fill();
+        ctx.setStrokeStyle('#10B981');
+        ctx.setLineWidth(3);
+        ctx.stroke();
+        
+        // X轴日期标签
+        ctx.setFillStyle('#64748B');
+        ctx.setFontSize(18);
+        ctx.setTextAlign('center');
+        ctx.fillText(item.date, x, canvasHeight - padding.bottom + 25);
+      });
+    } else if (history.length === 1) {
+      // 只有一个数据点
+      const item = history[0];
+      const x = padding.left + chartWidth / 2;
+      const y = padding.top + chartHeight / 2;
+      
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, 2 * Math.PI);
+      ctx.setFillStyle('#10B981');
+      ctx.fill();
+      
+      ctx.setFillStyle('#64748B');
+      ctx.setFontSize(18);
+      ctx.setTextAlign('center');
+      ctx.fillText(item.date, x, canvasHeight - padding.bottom + 25);
+    }
+    
+    // 绘制完成
+    ctx.draw();
+    console.log('[图表] 绘制完成');
+  },
+
+  startScan() {
+    const app = getApp();
+    
+    // 检查蓝牙是否已初始化
+    if (!app.globalData.bleAdapterInitialized) {
+      wx.showModal({
+        title: '蓝牙未就绪',
+        content: '正在初始化蓝牙，请稍候...',
+        showCancel: false
+      });
+      return;
+    }
+    
+    // 如果已在扫描，只更新UI状态
+    if (app.globalData.bleScanning) {
+      this.setData({ scanning: true });
+      this.log("扫描已在运行中");
+      wx.showToast({ title: '扫描进行中', icon: 'success' });
+      return;
+    }
+    
+    // 启动全局扫描
+    app.startBleScan();
+    this.setData({ scanning: true });
+    this.log("开始扫描体脂秤");
+    
+    wx.showToast({ title: '扫描已启动', icon: 'success' });
+    
+    // 提示用户操作步骤
+    setTimeout(() => {
+      this.log('请将体脂秤放在手机1米内，然后站上秤');
+    }, 1000);
+  },
+
+  stopScan() {
+    const app = getApp();
+    // 注意：不停止全局扫描，只更新页面状态
+    this.setData({ scanning: false });
+    this.log("页面停止显示扫描状态");
+  },
+  
+  /**
+   * 手动刷新设备列表（读取最新蓝牙广播）
+   */
+  refreshDevices() {
+    this.log('刷新蓝牙广播...');
+    
+    // 重置扫描状态
+    this.setData({ scanning: true });
+    
+    wx.getBluetoothDevices({
+      success: (res) => {
+        console.log('[Scale] 已发现的设备:', res.devices);
+        this.log(`发现 ${res.devices.length} 个蓝牙设备`);
+        
+        // 打印所有设备名称
+        let scaleFound = false;
+        res.devices.forEach((device, index) => {
+          if (device.name) {
+            this.log(`${index + 1}. ${device.name} (RSSI: ${device.RSSI})`);
+            
+            // 检查是否是体脂秤
+            const deviceName = device.name.toLowerCase();
+            if (deviceName.includes('mi scale') || 
+                deviceName.includes('body') || 
+                deviceName.includes('scale') ||
+                deviceName.includes('米秤') ||
+                deviceName.includes('体脂') ||
+                deviceName.includes('mibfs')) {
+              scaleFound = true;
+              
+              // 如果有advertisData，尝试解析
+              if (device.advertisData) {
+                const bleUtils = require('../../utils/ble_scale.js');
+                const scaleData = bleUtils.parseScaleData(device.advertisData);
+                if (scaleData) {
+                  console.log('[Scale] 解析到体重数据:', scaleData);
+                  this.handleScaleDataUpdate({
+                    ...scaleData,
+                    deviceName: device.name
+                  });
+                }
+              }
+            }
+          }
+        });
+        
+        if (!scaleFound) {
+          wx.showToast({
+            title: '未发现体脂秤',
+            icon: 'none',
+            duration: 2000
+          });
+          this.setData({ scanning: false });
+        }
       },
       fail: (err) => {
-        this.log("蓝牙初始化失败 " + JSON.stringify(err));
-        wx.showToast({ title: '请打开蓝牙', icon: 'none' });
+        console.error('[Scale] 获取设备列表失败:', err);
+        this.log('获取设备列表失败');
+        this.setData({ scanning: false });
       }
     });
   },
 
-  stopScan() {
-    wx.stopBluetoothDevicesDiscovery();
-    wx.closeBluetoothAdapter();
-    this.setData({ scanning: false });
-    this.log("停止扫描");
-  },
-
-  onDeviceFound(res) {
-    res.devices.forEach(device => {
-      if (device.name && (device.name.includes("MI Scale") || device.name.includes("Body"))) {
-        const manufacturerData = device.advertisData;
-        if (manufacturerData) {
-          const result = bleUtils.parseScaleData(manufacturerData);
-          if (result) {
-            this.setData({
-              device: device.name,
-              weight: result.weight,
-              isStabilized: result.isStabilized
-            });
-            
-            if (result.isStabilized) {
-               this.log(`稳定体重 ${result.weight}kg`);
-            }
-          }
-        }
+  /**
+   * 自动保存到数据库（波动小于10kg时）
+   */
+  autoSaveToDatabase() {
+    if (!this.data.currentMember || !this.data.isStabilized || this.data.weight <= 0) {
+      console.log('[自动保存] 条件不满足，跳过');
+      return;
+    }
+    
+    const member = this.data.currentMember;
+    const currentWeight = this.data.weight;
+    const lastWeight = member.lastWeight || 0;
+    
+    // 检查体重波动是否小于10kg
+    if (lastWeight > 0 && Math.abs(currentWeight - lastWeight) >= 10) {
+      console.log(`[自动保存] 体重波动过大 (${Math.abs(currentWeight - lastWeight).toFixed(1)}kg)，跳过`);
+      wx.showToast({
+        title: '体重波动过大，请确认',
+        icon: 'none',
+        duration: 2000
+      });
+      return;
+    }
+    
+    // 如果还没有计算体脂指标，先计算
+    if (!this.data.bmi) {
+      this.calculateBodyMetrics();
+    }
+    
+    // 验证必填数据
+    if (!this.data.bmi || !this.data.bodyFat) {
+      console.log('[自动保存] 体脂数据不完整，跳过');
+      return;
+    }
+    
+    console.log('[自动保存] 开始保存数据到数据库...');
+    
+    cloudRequest.callContainer({
+      path: '/api/scale/record',
+      method: 'POST',
+      data: {
+        weight: this.data.weight,
+        impedance: this.data.impedance || 0,
+        bmi: parseFloat(this.data.bmi),
+        body_fat: parseFloat(this.data.bodyFat),
+        water: parseFloat(this.data.water) || 0,
+        muscle: parseFloat(this.data.muscleMass) || 0,  // 修正字段名：muscle_mass -> muscle
+        protein: parseFloat(this.data.protein) || 0,
+        bmr: this.data.bmr || 0,
+        bone_mass: parseFloat(this.data.boneMass) || 0,
+        visceral_fat: this.data.visceralFat || 0,
+        timestamp: Date.now(),
+        user_id: parseInt(this.data.userInfo.user_id),
+        member_id: member.id
+      },
+      success: (res) => {
+        console.log('[自动保存] 保存成功:', res);
+        this.setData({ autoSaved: true });
+        this.lastSaveTime = Date.now(); // 记录保存时间
+        this.log('数据已自动保存到数据库');
+        
+        // 不再自动刷新成员列表，避免循环调用
+        // 用户可以在下次进入页面时看到最新数据
+      },
+      fail: (err) => {
+        console.error('[自动保存] 保存失败:', err);
+        this.log("自动保存失败 " + JSON.stringify(err));
       }
     });
   },
@@ -533,8 +1566,17 @@ Page({
     }
     
     const member = this.data.currentMember;
-    const bmi = this.calculateBMI(this.data.weight, member.height);
-    const advice = this.generateAdvice({ ...member, bmi });
+    
+    // 如果还没有计算体脂指标，先计算
+    if (!this.data.bmi) {
+      this.calculateBodyMetrics();
+    }
+    
+    // 验证必填数据
+    if (!this.data.bmi || !this.data.bodyFat) {
+      wx.showToast({ title: '请先完善成员信息', icon: 'none' });
+      return;
+    }
     
     // 上传到后端
     wx.showLoading({ title: '上传中...' });
@@ -544,15 +1586,26 @@ Page({
       method: 'POST',
       data: {
         weight: this.data.weight,
+        impedance: this.data.impedance || 0,
+        bmi: parseFloat(this.data.bmi),
+        body_fat: parseFloat(this.data.bodyFat),
+        water: parseFloat(this.data.water) || 0,
+        muscle: parseFloat(this.data.muscleMass) || 0,  // 修正字段名：muscle_mass -> muscle
+        protein: parseFloat(this.data.protein) || 0,
+        bmr: this.data.bmr || 0,
+        bone_mass: parseFloat(this.data.boneMass) || 0,
+        visceral_fat: this.data.visceralFat || 0,
         timestamp: Date.now(),
         user_id: parseInt(this.data.userInfo.user_id),
         member_id: member.id
       },
       success: (res) => {
         wx.hideLoading();
-        wx.showToast({ title: '上传成功' });
+        wx.showToast({ title: '上传成功', icon: 'success' });
         
-        // 刷新成员数据
+        this.log('数据上传成功');
+        
+        // 刷新成员数据（包含最新历史记录）
         this.loadMembers();
       },
       fail: (err) => {
@@ -585,11 +1638,25 @@ Page({
 
   log(msg) {
     const logs = this.data.logs;
-    logs.unshift(new Date().toLocaleTimeString() + " " + msg);
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = `${timestamp} ${msg}`;
+    
+    logs.unshift(logEntry);
+    
+    // 保留最近50条日志
+    if (logs.length > 50) {
+      logs.pop();
+    }
+    
     this.setData({ logs });
+    
+    // 同时输出到控制台，方便调试
+    console.log('[Scale Log]', msg);
   },
   
   onUnload() {
-    this.stopScan();
+    // 只注销回调，不停止全局蓝牙扫描
+    this.unregisterBleCallback();
+    console.log('[Scale] 页面卸载，已注销回调');
   }
 });

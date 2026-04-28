@@ -94,6 +94,17 @@ Page({
       // 自动加载设备（后端已自动初始化服务）
       await this.loadUserDevices()
       
+      // 重新检查是否有体脂秤设备（以最新设备列表为准）
+      const hasScaleDevice = this.data.healthDevices.some(d => d.device_type === 'scale');
+      
+      // 登录成功后，如果用户有体脂秤设备，立即初始化蓝牙
+      if (hasScaleDevice) {
+        console.log('[首页] 检测到用户有体脂秤设备，立即初始化蓝牙')
+        app.checkAndInitBluetooth()
+      } else {
+        console.log('[首页] 用户无体脂秤设备，不初始化蓝牙')
+      }
+      
       wx.hideLoading()
       wx.showToast({ 
         title: userInfo.has_configured ? '登录成功，设备已连接' : '登录成功', 
@@ -324,6 +335,10 @@ Page({
       // 如果是体脂秤，自动初始化“自己”成员
       if (selectedDeviceType === 'scale') {
         await this.initScaleSelfMember()
+        
+        // 体脂秤添加成功后，立即初始化蓝牙
+        console.log('[首页] 体脂秤添加成功，立即初始化蓝牙')
+        app.checkAndInitBluetooth()
       }
       
       wx.hideLoading()
@@ -406,10 +421,36 @@ Page({
     wx.showLoading({ title: '删除中...' })
     
     try {
+      // 解析deviceKey获取platform和device_type
+      const parts = deviceKey.split('_')
+      const platform = parts[0]
+      const deviceType = parts[1]
+      
+      // 如果是体脂秤，先假删成员（软删除）并停止蓝牙扫描
+      if (deviceType === 'scale') {
+        await this.softDeleteScaleMembers()
+        
+        // 停止全局蓝牙扫描
+        const app = getApp();
+        if (app && app.stopBleScan) {
+          console.log('[首页] 删除体脂秤，停止蓝牙扫描');
+          app.stopBleScan();
+          app.globalData.bleAdapterInitialized = false;
+        }
+      }
+      
+      // 删除设备配置
       await cloudRequest.callContainer({
         path: `/api/devices/${deviceKey}?user_id=${this.data.userInfo.user_id}`,
         method: 'DELETE'
       })
+      
+      // 更新本地userInfo的has_configured状态
+      const userInfo = wx.getStorageSync('userInfo');
+      if (userInfo) {
+        userInfo.has_configured = false;
+        wx.setStorageSync('userInfo', userInfo);
+      }
       
       wx.hideLoading()
       wx.showToast({ title: '删除成功', icon: 'success' })
@@ -424,6 +465,37 @@ Page({
         icon: 'error',
         duration: 2000
       })
+    }
+  },
+
+  // 假删体脂秤成员（软删除）
+  async softDeleteScaleMembers() {
+    try {
+      // 获取所有成员
+      const membersRes = await cloudRequest.callContainer({
+        path: `/api/family-members?user_id=${this.data.userInfo.user_id}`,
+        method: 'GET'
+      })
+      
+      const members = Array.isArray(membersRes.data) ? membersRes.data : (Array.isArray(membersRes) ? membersRes : [])
+      
+      // 逐个软删除（设置is_active=false）
+      for (const member of members) {
+        await cloudRequest.callContainer({
+          path: `/api/family-members/${member.id}?user_id=${this.data.userInfo.user_id}`,
+          method: 'PUT',
+          data: {
+            ...member,
+            is_active: false
+          }
+        }).catch(err => {
+          console.warn(`[假删成员] 成员 ${member.name} 删除失败:`, err)
+        })
+      }
+      
+      console.log('[假删成员] 已软删除', members.length, '个成员')
+    } catch (err) {
+      console.error('[假删成员] 失败:', err)
     }
   },
 

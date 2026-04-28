@@ -1,4 +1,4 @@
-<view class="page">
+ <view class="page">
   <!-- Hero卡片 - 设备状态 -->
   <view class="hero-card">
     <view class="device-header">
@@ -7,25 +7,26 @@
         <view class="device-text">
           <text class="device-name">智能体脂秤</text>
           <view class="device-status">
-            <view class="status-dot {{device ? 'online' : 'offline'}}"></view>
-            <text class="status-text">{{device ? '已连接' : '未连接'}}</text>
+            <view class="status-dot {{scanning ? 'broadcasting' : (device ? 'connected' : 'disconnected')}}"></view>
+            <text class="status-text">{{scanning ? '广播中' : (device ? '已连接' : '未连接')}}</text>
           </view>
         </view>
       </view>
-      <button class="refresh-btn {{scanning ? 'loading' : ''}}" bindtap="startScan" loading="{{scanning}}" disabled="{{scanning}}">
-        <text wx:if="{{!scanning}}">扫描</text>
+      <button class="refresh-btn {{scanning ? 'loading' : ''}}" bindtap="refreshDevices" loading="{{scanning}}" disabled="{{false}}">
+        <text wx:if="{{!scanning}}">刷新</text>
         <text wx:else>扫描中</text>
       </button>
     </view>
   </view>
 
-  <!-- 实时体重显示 -->
-  <view class="weight-hero" wx:if="{{weight > 0}}">
-    <view class="weight-value">{{weight}}</view>
-    <view class="weight-unit">kg</view>
-    <view class="weight-status {{isStabilized ? 'stabilized' : ''}}">
-      <text class="status-icon">{{isStabilized ? '✓' : '○'}}</text>
-      <text class="status-text">{{isStabilized ? '数据已稳定' : '等待稳定'}}</text>
+  <!-- 实时体重仪表盘 -->
+  <view class="gauge-section" wx:if="{{weight > 0}}">
+    <canvas canvas-id="weightGauge" id="weightGauge" class="weight-gauge"></canvas>
+    
+    <!-- 稳定状态提示 -->
+    <view class="gauge-status {{isStabilized ? 'stabilized' : 'waiting'}}">
+      <view class="status-ring"></view>
+      <text class="status-text">{{isStabilized ? '数据已稳定' : '等待稳定...'}}</text>
     </view>
   </view>
 
@@ -38,10 +39,15 @@
       </button>
     </view>
 
-    <scroll-view class="member-list" scroll-x>
-      <view wx:for="{{members}}" wx:key="id" 
+    <!-- 加载中提示 -->
+    <view class="loading-members" wx:if="{{isLoadingMembers}}">
+      <text class="loading-text">加载中...</text>
+    </view>
+
+    <scroll-view class="member-list" scroll-x wx:else>
+      <view wx:for="{{members}}" wx:key="id"
             class="member-card {{selectedMemberId === item.id ? 'active' : ''}}"
-            bindtap="selectMember" 
+            bindtap="selectMember"
             bindlongpress="onLongPressMember"
             data-id="{{item.id}}"
             data-name="{{item.name}}">
@@ -49,19 +55,19 @@
           <text class="avatar-text">{{item.name[0]}}</text>
         </view>
         <text class="member-name">{{item.name}}</text>
-        
+
         <!-- 基本信息 -->
         <view class="member-info" wx:if="{{item.age || item.height}}">
           <text class="info-item" wx:if="{{item.age}}">{{item.age}}岁</text>
           <text class="info-divider" wx:if="{{item.age && item.height}}">|</text>
           <text class="info-item" wx:if="{{item.height}}">{{item.height}}cm</text>
         </view>
-        
+
         <!-- 最新体重 -->
         <view class="member-stats" wx:if="{{item.lastWeight}}">
           <text class="member-weight">{{item.lastWeight}}kg</text>
         </view>
-        
+
         <!-- 历史数据趋势图标 -->
         <view class="member-trend" wx:if="{{item.weightHistory && item.weightHistory.length > 1}}">
           <text class="trend-icon">📈</text>
@@ -72,13 +78,13 @@
   </view>
 
   <!-- 健康数据统计 -->
-  <view class="stats-grid" wx:if="{{currentMember}}">
+  <view class="stats-grid" wx:if="{{currentMember && isStabilized && bmi}}">
     <view class="stat-card">
       <view class="stat-icon">⚖️</view>
       <view class="stat-content">
         <text class="stat-label">当前体重</text>
         <view class="stat-value">
-          <text class="stat-number">{{currentMember.lastWeight || '--'}}</text>
+          <text class="stat-number">{{weight}}</text>
           <text class="stat-unit">kg</text>
         </view>
       </view>
@@ -89,8 +95,9 @@
       <view class="stat-content">
         <text class="stat-label">BMI指数</text>
         <view class="stat-value">
-          <text class="stat-number">{{currentMember.bmi || '--'}}</text>
+          <text class="stat-number">{{bmi}}</text>
         </view>
+        <text class="stat-range">正常: 18.5-23.9</text>
       </view>
     </view>
 
@@ -99,9 +106,10 @@
       <view class="stat-content">
         <text class="stat-label">体脂率</text>
         <view class="stat-value">
-          <text class="stat-number">{{currentMember.bodyFat || '--'}}</text>
+          <text class="stat-number">{{bodyFat}}</text>
           <text class="stat-unit">%</text>
         </view>
+        <text class="stat-range">{{currentMember.gender === 'male' ? '男: 10-20%' : '女: 18-28%'}}</text>
       </view>
     </view>
 
@@ -110,19 +118,75 @@
       <view class="stat-content">
         <text class="stat-label">水分</text>
         <view class="stat-value">
-          <text class="stat-number">{{currentMember.water || '--'}}</text>
+          <text class="stat-number">{{water}}</text>
+          <text class="stat-unit">%</text>
+        </view>
+        <text class="stat-range">{{currentMember.gender === 'male' ? '男: 55-65%' : '女: 45-60%'}}</text>
+      </view>
+    </view>
+
+    <view class="stat-card">
+      <view class="stat-icon">🦴</view>
+      <view class="stat-content">
+        <text class="stat-label">肌肉量</text>
+        <view class="stat-value">
+          <text class="stat-number">{{muscleMass}}</text>
+          <text class="stat-unit">kg</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="stat-card">
+      <view class="stat-icon">🥩</view>
+      <view class="stat-content">
+        <text class="stat-label">蛋白质</text>
+        <view class="stat-value">
+          <text class="stat-number">{{protein}}</text>
           <text class="stat-unit">%</text>
         </view>
       </view>
     </view>
+
+    <view class="stat-card">
+      <view class="stat-icon">🔥</view>
+      <view class="stat-content">
+        <text class="stat-label">基础代谢</text>
+        <view class="stat-value">
+          <text class="stat-number">{{bmr}}</text>
+          <text class="stat-unit">kcal</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="stat-card">
+      <view class="stat-icon">🫀</view>
+      <view class="stat-content">
+        <text class="stat-label">内脏脂肪</text>
+        <view class="stat-value">
+          <text class="stat-number">{{visceralFat}}</text>
+        </view>
+        <text class="stat-range">正常: 1-9</text>
+      </view>
+    </view>
   </view>
 
-  <!-- 上传按钮 -->
-  <view class="action-card" wx:if="{{weight > 0 && isStabilized}}">
-    <button class="upload-btn" bindtap="uploadData">
-      <text class="upload-icon">↑</text>
-      <text class="upload-text">上传到 {{currentMember ? currentMember.name : '当前用户'}}</text>
-    </button>
+  <!-- 历史趋势图表 -->
+  <view class="chart-section" wx:if="{{currentMember && currentMember.weightHistory && currentMember.weightHistory.length > 0}}">
+    <view class="section-header">
+      <text class="section-title">体重趋势</text>
+      <text class="chart-count">最近{{currentMember.weightHistory.length}}次</text>
+    </view>
+    <view class="chart-container">
+      <canvas canvas-id="weightChart" id="weightChart" class="weight-chart"></canvas>
+    </view>
+  </view>
+
+  <!-- 自动保存提示 -->
+  <view class="action-card" wx:if="{{weight > 0 && isStabilized && autoSaved}}">
+    <view class="saved-indicator">
+      <text class="saved-icon">✓</text>
+      <text class="saved-text">已自动保存到数据库</text>
+    </view>
   </view>
 
   <!-- 健康建议 -->
@@ -141,23 +205,23 @@
       <view class="modal-title">{{editingMemberId ? '编辑成员' : '添加家庭成员'}}</view>
 
       <view class="form-group">
-        <text class="form-label">姓名</text>
+        <text class="form-label">姓名 <text class="required">*</text></text>
         <input class="form-input" placeholder="请输入姓名" value="{{newMemberName}}" bindinput="onMemberNameInput" />
       </view>
 
       <view class="form-row">
         <view class="form-group half">
-          <text class="form-label">年龄</text>
-          <input class="form-input" type="number" placeholder="年龄" value="{{newMemberAge}}" bindinput="onMemberAgeInput" />
+          <text class="form-label">年龄 <text class="required">*</text></text>
+          <input class="form-input" type="number" placeholder="必填" value="{{newMemberAge}}" bindinput="onMemberAgeInput" />
         </view>
         <view class="form-group half">
-          <text class="form-label">身高(cm)</text>
-          <input class="form-input" type="number" placeholder="身高" value="{{newMemberHeight}}" bindinput="onMemberHeightInput" />
+          <text class="form-label">身高(cm) <text class="required">*</text></text>
+          <input class="form-input" type="number" placeholder="必填" value="{{newMemberHeight}}" bindinput="onMemberHeightInput" />
         </view>
       </view>
 
       <view class="form-group">
-        <text class="form-label">性别</text>
+        <text class="form-label">性别 <text class="required">*</text></text>
         <picker mode="selector" range="{{['男', '女']}}" value="{{newMemberGenderIndex}}" bindchange="onMemberGenderChange">
           <view class="picker-value">{{newMemberGender || '请选择性别'}}</view>
         </picker>

@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS weightrecord (
     body_fat DECIMAL(5,2),                              -- 体脂率（%）
     muscle DECIMAL(5,2),                                -- 肌肉量（kg）
     water DECIMAL(5,2),                                 -- 水分（%）
+    protein DECIMAL(5,2),                               -- 蛋白质率（%）
     visceral_fat DECIMAL(5,2),                          -- 内脏脂肪等级
     bone_mass DECIMAL(5,2),                             -- 骨量（kg）
     bmr DECIMAL(8,2),                                   -- 基础代谢（kcal）

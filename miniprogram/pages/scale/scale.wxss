@@ -26,6 +26,12 @@ page {
   gap: 16rpx;
 }
 
+.action-buttons {
+  display: flex;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
 .device-info {
   display: flex;
   align-items: center;
@@ -72,12 +78,27 @@ page {
   box-shadow: 0 0 0 2rpx rgba(255, 255, 255, 0.8);
 }
 
-.status-dot.online {
+.status-dot.broadcasting {
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  box-shadow: 0 0 8rpx rgba(245, 158, 11, 0.4);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-dot.connected {
   background: linear-gradient(135deg, #10B981 0%, #059669 100%);
   box-shadow: 0 0 8rpx rgba(16, 185, 129, 0.4);
 }
 
-.status-dot.offline {
+.status-dot.disconnected {
   background: #D1D5DB;
 }
 
@@ -114,6 +135,31 @@ page {
 
 .refresh-btn[disabled] {
   opacity: 0.6;
+}
+
+.debug-btn {
+  padding: 0 8rpx;
+  min-width: 64rpx;
+  max-width: 120rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 14rpx;
+  background: rgba(245, 158, 11, 0.08);
+  color: #F59E0B;
+  font-size: 24rpx;
+  font-weight: 600;
+  border: none;
+  transition: all 0.3s;
+  flex-shrink: 0;
+}
+
+.debug-btn::after {
+  border: none;
+}
+
+.debug-btn:active {
+  background: rgba(245, 158, 11, 0.15);
+  transform: scale(0.96);
 }
 
 /* ========== 实时体重显示 ========== */
@@ -179,9 +225,140 @@ page {
   color: #FFFFFF;
 }
 
+/* ========== 历史趋势图表 ========== */
+.chart-section {
+  margin: 0 32rpx 24rpx;
+  padding: 32rpx;
+  background: #FFFFFF;
+  border-radius: 24rpx;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.06);
+}
+
+.chart-count {
+  font-size: 24rpx;
+  color: #94A3B8;
+  font-weight: 500;
+}
+
+.chart-container {
+  margin-top: 24rpx;
+  padding: 24rpx 0;
+  width: 100%;
+}
+
+.weight-chart {
+  width: 100%;
+  height: 400rpx;
+}
+
+/* ========== 实时体脂指标 ========== */
+.realtime-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16rpx;
+  margin-top: 32rpx;
+  padding-top: 32rpx;
+  border-top: 2rpx solid rgba(255, 255, 255, 0.3);
+}
+
+.metric-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+  padding: 16rpx;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10rpx);
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.08);
+}
+
+.metric-label {
+  font-size: 22rpx;
+  color: #64748B;
+  font-weight: 500;
+}
+
+.metric-value {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+/* ========== 实时体重仪表盘 ========== */
+.gauge-section {
+  position: relative;
+  margin: 0 32rpx 24rpx;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10rpx);
+  border-radius: 24rpx;
+  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.08);
+  padding: 40rpx 0;
+  overflow: hidden;
+}
+
+.weight-gauge {
+  width: 100%;
+  height: 400rpx;
+}
+
+.gauge-status {
+  position: absolute;
+  bottom: 40rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 12rpx 24rpx;
+  border-radius: 40rpx;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+}
+
+.gauge-status.waiting .status-ring {
+  width: 16rpx;
+  height: 16rpx;
+  border: 3rpx solid #3B82F6;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.gauge-status.stabilized .status-ring {
+  width: 16rpx;
+  height: 16rpx;
+  background: #10B981;
+  border-radius: 50%;
+}
+
+.gauge-status .status-text {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1E293B;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ========== 家庭成员选择 ========== */
 .member-section {
   margin: 0 32rpx 24rpx;
+}
+
+.loading-members {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 40rpx;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 16rpx;
+}
+
+.loading-text {
+  font-size: 28rpx;
+  color: #9CA3AF;
 }
 
 .section-header {
@@ -379,7 +556,7 @@ page {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 6rpx;
 }
 
 .stat-label {
@@ -408,6 +585,13 @@ page {
   font-weight: 500;
 }
 
+.stat-range {
+  font-size: 20rpx;
+  color: #94A3B8;
+  font-weight: 500;
+  margin-top: 4rpx;
+}
+
 /* ========== 快捷操作卡片 ========== */
 .action-card {
   margin: 0 32rpx 24rpx;
@@ -417,6 +601,29 @@ page {
   border-radius: 24rpx;
   box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04),
               0 0 0 1rpx rgba(0, 0, 0, 0.02) inset;
+}
+
+.saved-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 24rpx;
+  background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 12rpx rgba(16, 185, 129, 0.15);
+}
+
+.saved-icon {
+  font-size: 32rpx;
+  color: #059669;
+  font-weight: 700;
+}
+
+.saved-text {
+  font-size: 28rpx;
+  color: #065F46;
+  font-weight: 600;
 }
 
 .upload-btn {
@@ -566,6 +773,12 @@ page {
   color: #374151;
   margin-bottom: 12rpx;
   font-weight: 600;
+}
+
+.required {
+  color: #EF4444;
+  font-weight: 700;
+  margin-left: 4rpx;
 }
 
 .form-input {

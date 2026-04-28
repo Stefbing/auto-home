@@ -821,11 +821,22 @@ def calculate_body_metrics(weight: float, impedance: int, user: User):
     body_fat = max(5.0, min(body_fat, 50.0))
     muscle = weight * (1 - body_fat / 100.0) * 0.75
     water = (100 - body_fat) * 0.7
-    visceral_fat = max(1.0, min(bmi - 13.0, 20.0))
+    
+    # 计算蛋白质率（占去脂体重的约20-22%）
+    lean_mass = weight * (1 - body_fat / 100.0)  # 去脂体重
+    protein = (lean_mass * 0.205 / weight) * 100  # 占总体重百分比
+    
+    # 计算内脏脂肪等级（基于BMI、年龄、性别）
+    if is_male:
+        visceral_fat = (bmi - 22) * 0.8 + (age - 30) * 0.15
+    else:
+        visceral_fat = (bmi - 20) * 0.8 + (age - 30) * 0.15
+    visceral_fat = max(1.0, min(visceral_fat, 30.0))
+    
     bone_mass = weight * 0.04
     bmr = weight * 24.0 if is_male else weight * 22.0
     return {"bmi": round(bmi, 1), "body_fat": round(body_fat, 1), "muscle": round(muscle, 1),
-            "water": round(water, 1), "visceral_fat": round(visceral_fat, 1),
+            "water": round(water, 1), "protein": round(protein, 1), "visceral_fat": round(visceral_fat, 1),
             "bone_mass": round(bone_mass, 1), "bmr": round(bmr, 0)}
 
 @app.post("/api/scale/record")
@@ -838,6 +849,7 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
             record.body_fat = metrics["body_fat"]
             record.muscle = metrics["muscle"]
             record.water = metrics["water"]
+            record.protein = metrics["protein"]
             record.visceral_fat = metrics["visceral_fat"]
             record.bone_mass = metrics["bone_mass"]
             record.bmr = metrics["bmr"]
@@ -1421,15 +1433,16 @@ async def get_member_history(member_id: int, user_id: str, limit: int = 30, sess
                 "bmi": record.bmi,
                 "body_fat": record.body_fat,
                 "water": record.water,
-                "timestamp": record.timestamp
+                "muscle_mass": record.muscle,
+                "protein": record.protein if hasattr(record, 'protein') else None,
+                "bmr": record.bmr,
+                "bone_mass": record.bone_mass,
+                "visceral_fat": record.visceral_fat,
+                "timestamp": record.timestamp,
+                "created_at": record.created_at
             })
         
-        return {
-            "member_id": member_id,
-            "member_name": member.name,
-            "total_records": len(history),
-            "history": history
-        }
+        return history
     except HTTPException:
         raise
     except ValueError:

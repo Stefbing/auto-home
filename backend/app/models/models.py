@@ -32,6 +32,7 @@ class WeightRecord(SQLModel, table=True):
     body_fat: Optional[float] = None
     muscle: Optional[float] = None
     water: Optional[float] = None
+    protein: Optional[float] = None  # 蛋白质率
     visceral_fat: Optional[float] = None
     bone_mass: Optional[float] = None
     bmr: Optional[float] = None
