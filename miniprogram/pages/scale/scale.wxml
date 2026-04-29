@@ -20,15 +20,41 @@
   </view>
 
   <!-- 实时体重仪表盘 -->
-  <view class="gauge-section" wx:if="{{weight > 0}}">
-    <canvas canvas-id="weightGauge" id="weightGauge" class="weight-gauge"></canvas>
-    
-    <!-- 稳定状态提示 -->
-    <view class="gauge-status {{isStabilized ? 'stabilized' : 'waiting'}}">
-      <view class="status-ring"></view>
-      <text class="status-text">{{isStabilized ? '数据已稳定' : '等待稳定...'}}</text>
-    </view>
-  </view>
+   <view class="gauge-section" wx:if="{{weight >= 0}}">
+     <view class="gauge-card">
+       <view class="gauge-viewport">
+
+         <view class="gauge-container">
+           <block wx:for="{{61}}" wx:key="index">
+             <view class="tick {{index % 10 === 0 ? 'major' : (index % 5 === 0 ? 'mid' : 'minor')}}"
+                   style="transform: rotate({{(index * 3) - 90}}deg);"></view>
+           </block>
+
+           <view class="gauge-labels">
+             <text class="label-item l-0">0</text>
+             <text class="label-item l-75">75</text>
+             <text class="label-item l-150">150</text>
+           </view>
+         </view>
+
+         <view class="needle-layer" style="transform: rotate({{(weight / 150) * 180 - 90}}deg);">
+           <view class="needle-blade"></view>
+         </view>
+
+         <view class="data-hub">
+           <view class="weight-box {{isStabilized ? 'stable' : ''}}">
+             <text class="weight-value">{{weight}}</text>
+             <text class="weight-unit">kg</text>
+           </view>
+           <view class="status-pill {{isStabilized ? 'pill-stable' : 'pill-scan'}}">
+             <view class="dot"></view>
+             <text>{{isStabilized ? '测量完成' : '实时测量中'}}</text>
+           </view>
+         </view>
+
+       </view>
+     </view>
+   </view>
 
   <!-- 家庭成员选择 -->
   <view class="member-section">
@@ -178,6 +204,14 @@
     </view>
     <view class="chart-container">
       <canvas canvas-id="weightChart" id="weightChart" class="weight-chart"></canvas>
+    </view>
+
+    <!-- 体脂趋势图 -->
+    <view class="section-header" style="margin-top: 32rpx;">
+      <text class="section-title">体脂趋势</text>
+    </view>
+    <view class="chart-container">
+      <canvas canvas-id="bodyFatChart" id="bodyFatChart" class="weight-chart"></canvas>
     </view>
   </view>
 

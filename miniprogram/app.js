@@ -1,5 +1,6 @@
 const cloudRequest = require('./utils/cloud_request.js');
 const bleUtils = require('./utils/ble_scale.js');
+const { SCALE_CONFIG, LIMITS } = require('./config/scale_constants.js');
 
 App({
   globalData: {
@@ -157,12 +158,9 @@ App({
       if (!device.name) continue;
       
       const deviceName = device.name.toLowerCase();
-      const isScaleDevice = deviceName.includes('mi scale') || 
-                           deviceName.includes('body') || 
-                           deviceName.includes('scale') ||
-                           deviceName.includes('米秤') ||
-                           deviceName.includes('体脂') ||
-                           deviceName.includes('mibfs'); // 小米体脂秤2的实际广播名称
+      const isScaleDevice = SCALE_CONFIG.SCALE_DEVICE_KEYWORDS.some(keyword => 
+        deviceName.includes(keyword)
+      );
       
       if (!isScaleDevice) continue;
       
@@ -333,16 +331,16 @@ App({
       
       // 记录历史数据（用于稳定性检测）
       this.globalData.scaleDataHistory.push(finalData);
-      if (this.globalData.scaleDataHistory.length > 20) {
+      if (this.globalData.scaleDataHistory.length > LIMITS.HISTORY) {
         this.globalData.scaleDataHistory.shift(); // 保留最近20条
       }
       
       // 通知所有注册的回调
       this.notifyScaleDataUpdate(this.globalData.latestScaleData);
       
-      // 【增强】如果检测到稳定体重或连续3次相同值，尝试跳转
+      // 【增强】如果检测到稳定体重或连续N次相同值，尝试跳转
       const isStableByFlag = finalData.isStabilized;
-      const isStableByHistory = this.isWeightStable(3); // 连续3次相同
+      const isStableByHistory = this.isWeightStable(SCALE_CONFIG.STABLE_THRESHOLD);
       
       if (isStableByFlag || isStableByHistory) {
         console.log('[BLE Manager] 体重稳定检测:', {
@@ -431,7 +429,7 @@ App({
           });
         }
       });
-    }, 500);
+    }, SCALE_CONFIG.NAVIGATE_DELAY);
   },
   
   /**
@@ -439,7 +437,7 @@ App({
    * @param {Number} threshold - 稳定阈值（次数），默认3次
    * @returns {Boolean}
    */
-  isWeightStable(threshold = 3) {
+  isWeightStable(threshold = SCALE_CONFIG.STABLE_THRESHOLD) {
     const history = this.globalData.scaleDataHistory;
     if (history.length < threshold) return false;
     
@@ -447,6 +445,6 @@ App({
     const firstWeight = recent[0].weight;
     
     // 检查最近N次体重是否一致（误差<0.05kg）
-    return recent.every(item => Math.abs(item.weight - firstWeight) < 0.05);
+    return recent.every(item => Math.abs(item.weight - firstWeight) < SCALE_CONFIG.DATA_DEDUPLICATION_THRESHOLD);
   }
 });

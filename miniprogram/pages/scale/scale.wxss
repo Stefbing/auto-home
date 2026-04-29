@@ -285,61 +285,160 @@ page {
   color: #1E293B;
 }
 
-/* ========== 实时体重仪表盘 ========== */
-.gauge-section {
+/* 容器卡片：清爽白背景 */
+.gauge-card {
+  background: #FFFFFF;
+  margin: 32rpx;
+  padding: 80rpx 0 60rpx;
+  border-radius: 48rpx;
+  box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.05);
+  display: flex;
+  justify-content: center;
+}
+
+/* 视口：关键在于 overflow: hidden 裁切下半圆 */
+.gauge-viewport {
   position: relative;
-  margin: 0 32rpx 24rpx;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10rpx);
-  border-radius: 24rpx;
-  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.08);
-  padding: 40rpx 0;
+  width: 600rpx;
+  height: 380rpx; /* 露出的半圆区域 */
   overflow: hidden;
 }
 
-.weight-gauge {
-  width: 100%;
-  height: 400rpx;
+/* 基础容器：600x600 正圆 */
+.gauge-container {
+  position: absolute;
+  width: 600rpx;
+  height: 600rpx;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  border-top: 2rpx solid #F1F5F9; /* 极细的外圆弧轮廓 */
 }
 
-.gauge-status {
+/* 刻度线：旋转中心严格设在中心点 (300rpx) */
+.tick {
   position: absolute;
-  bottom: 40rpx;
+  left: 300rpx;
+  top: 0;
+  transform-origin: center 300rpx;
+  background: #E2E8F0;
+}
+.tick.minor { width: 1rpx; height: 12rpx; opacity: 0.5; }
+.tick.mid { width: 2rpx; height: 24rpx; background: #CBD5E1; }
+.tick.major { width: 4rpx; height: 36rpx; background: #94A3B8; }
+
+/* 刻度数字：不再随圆旋转，而是固定位置 */
+.gauge-labels {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+}
+.label-item {
+  position: absolute;
+  font-size: 24rpx;
+  color: #94A3B8;
+  font-weight: 700;
+  font-family: Arial, sans-serif;
+}
+.l-0 { left: 45rpx; top: 300rpx; transform: translateY(-50%); }
+.l-75 { left: 50%; top: 50rpx; transform: translateX(-50%); }
+.l-150 { right: 45rpx; top: 300rpx; transform: translateY(-50%); }
+
+/* 指针层：同样共享 600rpx 圆心 */
+.needle-layer {
+  position: absolute;
+  width: 600rpx;
+  height: 600rpx;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* 三菱指针形状：严格复刻 HTML 里的渐变和光影 */
+.needle-blade {
+  position: absolute;
+  top: 20rpx;
   left: 50%;
+  width: 10rpx;
+  height: 180rpx;
+  background: linear-gradient(to bottom, #F43F5E 0%, rgba(244, 63, 94, 0) 100%);
   transform: translateX(-50%);
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+  filter: drop-shadow(0 0 8rpx rgba(244, 63, 94, 0.4));
+}
+
+/* 数据区域：嵌套在圆弧中心下方 */
+.data-hub {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 20;
+}
+
+.weight-box {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 4rpx;
+}
+
+.weight-value {
+  font-size: 104rpx; /* 大数字重心 */
+  font-weight: 800;
+  color: #1E293B;
+  font-family: "DIN Alternate", -apple-system, sans-serif;
+  letter-spacing: -2rpx;
+}
+
+.weight-unit {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #94A3B8;
+  margin-left: 12rpx;
+}
+
+/* 稳定状态视觉增强 */
+.weight-box.stable .weight-value {
+  color: #10B981;
+  text-shadow: 0 0 20rpx rgba(16, 185, 129, 0.2);
+  transition: color 0.3s;
+}
+
+/* 状态标签：药丸形呼吸灯 */
+.status-pill {
+  font-size: 24rpx;
+  font-weight: 700;
+  padding: 10rpx 32rpx;
+  border-radius: 100rpx;
   display: flex;
   align-items: center;
-  gap: 12rpx;
-  padding: 12rpx 24rpx;
-  border-radius: 40rpx;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+  margin-top: 10rpx;
 }
 
-.gauge-status.waiting .status-ring {
-  width: 16rpx;
-  height: 16rpx;
-  border: 3rpx solid #3B82F6;
-  border-top-color: transparent;
+.pill-scan { color: #3B82F6; background: #EFF6FF; }
+.pill-stable { color: #10B981; background: #ECFDF5; }
+
+.dot {
+  width: 10rpx;
+  height: 10rpx;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  background: currentColor;
+  margin-right: 12rpx;
 }
 
-.gauge-status.stabilized .status-ring {
-  width: 16rpx;
-  height: 16rpx;
-  background: #10B981;
-  border-radius: 50%;
+.pill-scan .dot {
+  animation: breathe 1.5s infinite ease-in-out;
 }
 
-.gauge-status .status-text {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #1E293B;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
+@keyframes breathe {
+  0%, 100% { opacity: 1; transform: scale(1.1); }
+  50% { opacity: 0.3; transform: scale(0.8); }
 }
 
 /* ========== 家庭成员选择 ========== */

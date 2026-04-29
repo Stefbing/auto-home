@@ -1,4 +1,6 @@
 const cloudRequest = require('../../utils/cloud_request.js');
+const { SCALE_CONFIG, MATCHING, TIMING, LIMITS } = require('../../config/scale_constants.js');
+const chartDrawer = require('../../modules/chart_drawer.js');
 
 Page({
   data: {
@@ -184,7 +186,7 @@ Page({
         icon: 'none',
         duration: 2000
       });
-    }, 60000); // 60秒
+    }, TIMING.TIMEOUT);
     
     this.setData({ scanTimeout: timeout });
   },
@@ -202,23 +204,18 @@ Page({
   handleScaleDataUpdate(data) {
     console.log('[Scale Page] 处理体重数据:', data);
     
-    // 【关键】只处理稳定数据，避免无人称重时的乱广播
-    if (!data.isStabilized) {
-      console.log('[Scale Page] 数据未稳定，忽略');
-      return;
-    }
-    
+    // 【关键】实时更新所有数据（包括未稳定的）
     // 检查是否为相同数据（误差<0.05kg），避免重复计算
-    const isSameData = Math.abs(this.data.weight - data.weight) < 0.05;
+    const isSameData = Math.abs(this.data.weight - data.weight) < MATCHING.DEDUPLICATION_THRESHOLD;
     
-    // 【防抖】如果刚刚保存过（3秒内）且体重相同，跳过处理
+    // 【防抖】如果刚刚保存过（3秒内）且数据相同，跳过处理
     const now = Date.now();
-    if (this.lastSaveTime && (now - this.lastSaveTime) < 3000 && isSameData) {
+    if (this.lastSaveTime && (now - this.lastSaveTime) < TIMING.DEBOUNCE && isSameData) {
       console.log('[Scale Page] 距离上次保存不足3秒且数据相同，跳过');
       return;
     }
     
-    // 更新页面数据
+    // 更新页面数据（CSS会自动动画）
     this.setData({
       device: data.deviceName || '小米体脂秤',
       weight: data.weight,
@@ -228,13 +225,16 @@ Page({
       autoSaved: false // 重置自动保存状态
     });
     
-    // 绘制实时仪表盘
-    this.drawWeightGauge(data.weight, data.isStabilized);
-    
     // 重置超时定时器
     this.resetScanTimeout();
     
     this.log(`体重: ${data.weight}kg | 阻抗: ${data.impedance || 0}Ω | 稳定: ${data.isStabilized ? '是' : '否'}`);
+    
+    // 只有数据稳定时才进行后续处理
+    if (!data.isStabilized) {
+      console.log('[Scale Page] 数据未稳定，仅更新显示');
+      return;
+    }
     
     // 如果体重稳定且不是相同数据，才重新计算和匹配
     if (!isSameData) {
@@ -281,7 +281,7 @@ Page({
     // 查找体重最接近的成员（容差±3kg）
     let bestMatch = null;
     let minDiff = Infinity;
-    const tolerance = 3.0; // 容差3kg
+    const tolerance = MATCHING.TOLERANCE; // 容差3kg
     
     members.forEach((member, index) => {
       if (member.lastWeight && member.lastWeight > 0) {
@@ -360,11 +360,15 @@ Page({
   },
   
   /**
-   * 通过索引选择成员
+   * 通过索引选择成员（用于自动匹配）
    */
   selectMemberByIndex(index) {
+    if (!this.data.members || index < 0 || index >= this.data.members.length) {
+      console.log('[选择成员] 索引无效');
+      return;
+    }
+    
     const member = this.data.members[index];
-    if (!member) return;
     
     this.setData({
       selectedMemberId: member.id,
@@ -574,14 +578,15 @@ Page({
       // 绘制图表
       setTimeout(() => {
         this.drawWeightChart();
-      }, 300);
+        this.drawBodyFatChart();
+      }, TIMING.CHART_DELAY);
       
       // 如果已有体重数据且稳定，自动计算体脂
       if (this.data.weight > 0 && this.data.isStabilized) {
         console.log('[历史记录] 检测到已有稳定体重数据，自动计算体脂');
         setTimeout(() => {
           this.calculateBodyMetrics();
-        }, 500);
+        }, TIMING.CALCULATE_DELAY);
       }
       
       // 执行回调
@@ -718,27 +723,7 @@ Page({
     console.log('选择成员:', member?.name);
   },
   
-  // 通过索引选择成员（用于自动匹配）
-  selectMemberByIndex(index) {
-    if (!this.data.members || index < 0 || index >= this.data.members.length) {
-      console.log('[选择成员] 索引无效');
-      return;
-    }
-    
-    const member = this.data.members[index];
-    
-    this.setData({
-      selectedMemberId: member.id,
-      currentMember: member
-    });
-    
-    console.log('[选择成员] 自动选择:', member.name);
-    
-    // 如果已有体重数据，立即计算体脂
-    if (this.data.weight > 0 && this.data.isStabilized) {
-      this.calculateBodyMetrics();
-    }
-  },
+
 
   // 显示添加成员弹窗
   showAddMemberModal() {
@@ -876,14 +861,7 @@ Page({
 
   // 获取随机颜色
   getRandomColor() {
-    const colors = [
-      'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
-      'linear-gradient(135deg, #F093FB 0%, #F5576C 100%)',
-      'linear-gradient(135deg, #4FACFE 0%, #00F2FE 100%)',
-      'linear-gradient(135deg, #43E97B 0%, #38F9D7 100%)',
-      'linear-gradient(135deg, #FA709A 0%, #FEE140 100%)',
-      'linear-gradient(135deg, #FF9A9E 0%, #FECFEF 100%)'
-    ];
+    const colors = SCALE_CONFIG.AVATAR_COLORS;
     return colors[Math.floor(Math.random() * colors.length)];
   },
 
@@ -1000,7 +978,7 @@ Page({
     }
     
     // 限制体脂率在合理范围内
-    bodyFat = Math.max(5, Math.min(60, bodyFat));
+    bodyFat = Math.max(SCALE_CONFIG.BODY_FAT_MIN, Math.min(SCALE_CONFIG.BODY_FAT_MAX, bodyFat));
     console.log('[体脂计算] 体脂率:', bodyFat.toFixed(1) + '%');
     
     // 3. 计算水分率
@@ -1016,13 +994,13 @@ Page({
       // 女性: 基准值略低
       water = 63 - (bodyFat - 15) * 0.7;
     }
-    water = Math.max(40, Math.min(70, water));
+    water = Math.max(SCALE_CONFIG.WATER_MIN, Math.min(SCALE_CONFIG.WATER_MAX, water));
     console.log('[体脂计算] 水分率:', water.toFixed(1) + '%');
     
     // 4. 计算肌肉量 (kg)
     // 肌肉量 = 体重 × (1 - 体脂率 - 骨重比例)
     // 骨重约占体重4-5%
-    const boneMassRatio = 0.04; // 4%
+    const boneMassRatio = SCALE_CONFIG.BONE_MASS_RATIO; // 4%
     const muscleMass = weight * (1 - bodyFat / 100 - boneMassRatio);
     console.log('[体脂计算] 肌肉量:', muscleMass.toFixed(2) + 'kg');
     
@@ -1042,7 +1020,7 @@ Page({
       // 女性: 基准20%
       protein = 20 - (bodyFat - 20) * 0.3;
     }
-    protein = Math.max(12, Math.min(25, protein));
+    protein = Math.max(SCALE_CONFIG.PROTEIN_MIN, Math.min(SCALE_CONFIG.PROTEIN_MAX, protein));
     console.log('[体脂计算] 蛋白质:', protein.toFixed(1) + '%');
     
     // 6. 计算基础代谢 (BMR)
@@ -1080,7 +1058,7 @@ Page({
       // 女性: 基准值略低
       visceralFat = (bmi - 19) * 2.5 + (age - 25) * 0.3;
     }
-    visceralFat = Math.max(1, Math.min(30, Math.round(visceralFat * 10) / 10));
+    visceralFat = Math.max(SCALE_CONFIG.VISCERAL_FAT_MIN, Math.min(SCALE_CONFIG.VISCERAL_FAT_MAX, Math.round(visceralFat * 10) / 10));
     console.log('[体脂计算] 内脏脂肪等级:', visceralFat);
     
     // 9. 生成健康建议
@@ -1139,67 +1117,6 @@ Page({
   },
 
   /**
-   * 绘制体重仪表盘（实时动画）
-   */
-  drawWeightGauge(weight, isStabilized) {
-    const ctx = wx.createCanvasContext('weightGauge', this);
-    
-    // Canvas尺寸（根据WXSS: 750rpx x 400rpx）
-    const canvasWidth = 750;
-    const canvasHeight = 400;
-    const centerX = canvasWidth / 2;
-    const centerY = canvasHeight / 2 - 20;
-    const radius = 140;
-    
-    // 清空画布
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-    
-    // 绘制背景圆环
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-    ctx.setStrokeStyle('#E2E8F0');
-    ctx.setLineWidth(20);
-    ctx.stroke();
-    
-    // 计算进度角度（0-150kg范围）
-    const maxWeight = 150;
-    const progress = Math.min(weight / maxWeight, 1);
-    const endAngle = -Math.PI / 2 + (progress * 2 * Math.PI);
-    
-    // 绘制进度圆环（渐变色）
-    const gradient = ctx.createLinearGradient(centerX - radius, centerY, centerX + radius, centerY);
-    if (isStabilized) {
-      gradient.addColorStop(0, '#10B981');
-      gradient.addColorStop(1, '#059669');
-    } else {
-      gradient.addColorStop(0, '#3B82F6');
-      gradient.addColorStop(1, '#2563EB');
-    }
-    
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, -Math.PI / 2, endAngle);
-    ctx.setStrokeStyle(gradient);
-    ctx.setLineWidth(20);
-    ctx.setLineCap('round');
-    ctx.stroke();
-    
-    // 绘制中心体重数字
-    ctx.setFillStyle(isStabilized ? '#059669' : '#2563EB');
-    ctx.setFontSize(120);
-    ctx.setTextAlign('center');
-    ctx.setTextBaseline('middle');
-    ctx.fillText(weight.toFixed(1), centerX, centerY - 20);
-    
-    // 绘制单位
-    ctx.setFillStyle('#94A3B8');
-    ctx.setFontSize(36);
-    ctx.fillText('kg', centerX, centerY + 50);
-    
-    // 绘制完成
-    ctx.draw();
-  },
-
-  /**
    * 绘制体重+体脂趋势折线图
    */
   drawWeightChart() {
@@ -1209,174 +1126,29 @@ Page({
     }
 
     const history = this.data.currentMember.weightHistory;
-    console.log('[图表] 开始绘制，数据条数:', history.length);
+    console.log('[图表] 开始绘制体重趋势图，数据条数:', history.length);
 
     // 创建canvas上下文
     const ctx = wx.createCanvasContext('weightChart', this);
     
-    // Canvas尺寸
-    const canvasWidth = 650; // rpx
-    const canvasHeight = 400; // rpx
-    
-    // 边距
-    const padding = {
-      top: 40,
-      right: 30,
-      bottom: 60,
-      left: 50
-    };
-    
-    // 绘图区域
-    const chartWidth = canvasWidth - padding.left - padding.right;
-    const chartHeight = canvasHeight - padding.top - padding.bottom;
-    
-    // 计算体重范围
-    const weights = history.map(h => h.weight);
-    const minWeight = Math.min(...weights) - 0.5;
-    const maxWeight = Math.max(...weights) + 0.5;
-    const weightRange = maxWeight - minWeight;
-    
-    // 计算体脂范围（如果有体脂数据）
-    const bodyFats = history.filter(h => h.bodyFat > 0).map(h => h.bodyFat);
-    const hasBodyFatData = bodyFats.length > 0;
-    let minBodyFat = 0, maxBodyFat = 0, bodyFatRange = 0;
-    
-    if (hasBodyFatData) {
-      minBodyFat = Math.min(...bodyFats) - 2;
-      maxBodyFat = Math.max(...bodyFats) + 2;
-      bodyFatRange = maxBodyFat - minBodyFat;
-      console.log('[图表] 体脂范围:', minBodyFat, '-', maxBodyFat);
+    // 调用模块绘制
+    chartDrawer.drawWeightChart(ctx, history, 'weightChart');
+  },
+  
+  drawBodyFatChart() {
+    if (!this.data.currentMember || !this.data.currentMember.weightHistory || this.data.currentMember.weightHistory.length === 0) {
+      console.log('[图表] 无历史数据，跳过绘制');
+      return;
     }
+
+    const history = this.data.currentMember.weightHistory;
+    console.log('[图表] 开始绘制体脂趋势图，数据条数:', history.length);
+
+    // 创建canvas上下文
+    const ctx = wx.createCanvasContext('bodyFatChart', this);
     
-    console.log('[图表] 体重范围:', minWeight, '-', maxWeight);
-    
-    // 清空画布
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-    
-    // 绘制背景网格
-    ctx.setStrokeStyle('#E2E8F0');
-    ctx.setLineWidth(1);
-    
-    // 横向网格线（5条）- 基于体重
-    for (let i = 0; i <= 4; i++) {
-      const y = padding.top + (chartHeight / 4) * i;
-      ctx.beginPath();
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(canvasWidth - padding.right, y);
-      ctx.stroke();
-      
-      // Y轴标签（体重）
-      const weightValue = maxWeight - (weightRange / 4) * i;
-      ctx.setFillStyle('#94A3B8');
-      ctx.setFontSize(20);
-      ctx.setTextAlign('right');
-      ctx.fillText(weightValue.toFixed(1), padding.left - 10, y + 5);
-    }
-    
-    // 绘制图例
-    ctx.setFontSize(22);
-    ctx.setTextAlign('left');
-    
-    // 体重图例
-    ctx.setFillStyle('#10B981');
-    ctx.fillRect(canvasWidth - 180, 10, 20, 4);
-    ctx.fillText('体重(kg)', canvasWidth - 155, 16);
-    
-    // 体脂图例（如果有数据）
-    if (hasBodyFatData) {
-      ctx.setFillStyle('#F59E0B');
-      ctx.fillRect(canvasWidth - 180, 30, 20, 4);
-      ctx.fillText('体脂率(%)', canvasWidth - 155, 36);
-    }
-    
-    // 绘制体重折线
-    if (history.length > 1) {
-      ctx.setStrokeStyle('#10B981');
-      ctx.setLineWidth(4);
-      ctx.setLineJoin('round');
-      
-      ctx.beginPath();
-      
-      history.forEach((item, index) => {
-        const x = padding.left + (chartWidth / (history.length - 1)) * index;
-        const y = padding.top + chartHeight - ((item.weight - minWeight) / weightRange) * chartHeight;
-        
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-      
-      ctx.stroke();
-      
-      // 绘制体脂折线（如果有数据）
-      if (hasBodyFatData) {
-        ctx.setStrokeStyle('#F59E0B');
-        ctx.setLineWidth(3);
-        ctx.setLineDash([8, 4]); // 虚线
-        
-        ctx.beginPath();
-        
-        let firstPoint = true;
-        history.forEach((item, index) => {
-          if (item.bodyFat > 0) {
-            const x = padding.left + (chartWidth / (history.length - 1)) * index;
-            const y = padding.top + chartHeight - ((item.bodyFat - minBodyFat) / bodyFatRange) * chartHeight;
-            
-            if (firstPoint) {
-              ctx.moveTo(x, y);
-              firstPoint = false;
-            } else {
-              ctx.lineTo(x, y);
-            }
-          }
-        });
-        
-        ctx.stroke();
-        ctx.setLineDash([]); // 恢复实线
-      }
-      
-      // 绘制数据点
-      history.forEach((item, index) => {
-        const x = padding.left + (chartWidth / (history.length - 1)) * index;
-        const y = padding.top + chartHeight - ((item.weight - minWeight) / weightRange) * chartHeight;
-        
-        // 外圈
-        ctx.beginPath();
-        ctx.arc(x, y, 6, 0, 2 * Math.PI);
-        ctx.setFillStyle('#FFFFFF');
-        ctx.fill();
-        ctx.setStrokeStyle('#10B981');
-        ctx.setLineWidth(3);
-        ctx.stroke();
-        
-        // X轴日期标签
-        ctx.setFillStyle('#64748B');
-        ctx.setFontSize(18);
-        ctx.setTextAlign('center');
-        ctx.fillText(item.date, x, canvasHeight - padding.bottom + 25);
-      });
-    } else if (history.length === 1) {
-      // 只有一个数据点
-      const item = history[0];
-      const x = padding.left + chartWidth / 2;
-      const y = padding.top + chartHeight / 2;
-      
-      ctx.beginPath();
-      ctx.arc(x, y, 8, 0, 2 * Math.PI);
-      ctx.setFillStyle('#10B981');
-      ctx.fill();
-      
-      ctx.setFillStyle('#64748B');
-      ctx.setFontSize(18);
-      ctx.setTextAlign('center');
-      ctx.fillText(item.date, x, canvasHeight - padding.bottom + 25);
-    }
-    
-    // 绘制完成
-    ctx.draw();
-    console.log('[图表] 绘制完成');
+    // 调用模块绘制
+    chartDrawer.drawBodyFatChart(ctx, history, 'bodyFatChart');
   },
 
   startScan() {
@@ -1497,7 +1269,7 @@ Page({
     const lastWeight = member.lastWeight || 0;
     
     // 检查体重波动是否小于10kg
-    if (lastWeight > 0 && Math.abs(currentWeight - lastWeight) >= 10) {
+    if (lastWeight > 0 && Math.abs(currentWeight - lastWeight) >= SCALE_CONFIG.AUTO_SAVE_WEIGHT_DIFF) {
       console.log(`[自动保存] 体重波动过大 (${Math.abs(currentWeight - lastWeight).toFixed(1)}kg)，跳过`);
       wx.showToast({
         title: '体重波动过大，请确认',
@@ -1644,7 +1416,7 @@ Page({
     logs.unshift(logEntry);
     
     // 保留最近50条日志
-    if (logs.length > 50) {
+    if (logs.length > LIMITS.LOGS) {
       logs.pop();
     }
     
@@ -1652,11 +1424,5 @@ Page({
     
     // 同时输出到控制台，方便调试
     console.log('[Scale Log]', msg);
-  },
-  
-  onUnload() {
-    // 只注销回调，不停止全局蓝牙扫描
-    this.unregisterBleCallback();
-    console.log('[Scale] 页面卸载，已注销回调');
   }
 });
