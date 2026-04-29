@@ -43,7 +43,7 @@
 
          <view class="data-hub">
            <view class="weight-box {{isStabilized ? 'stable' : ''}}">
-             <text class="weight-value">{{weight}}</text>
+             <text class="weight-value">{{weightDisplay}}</text>
              <text class="weight-unit">kg</text>
            </view>
            <view class="status-pill {{isStabilized ? 'pill-stable' : 'pill-scan'}}">
@@ -104,7 +104,7 @@
   </view>
 
   <!-- 健康数据统计 -->
-  <view class="stats-grid" wx:if="{{currentMember && isStabilized && bmi}}">
+  <view class="stats-grid" wx:if="{{currentMember && bodyFat}}">
     <view class="stat-card">
       <view class="stat-icon">⚖️</view>
       <view class="stat-content">
@@ -196,22 +196,14 @@
     </view>
   </view>
 
-  <!-- 历史趋势图表 -->
+  <!-- 历史趋势图表（体重+体脂合并） -->
   <view class="chart-section" wx:if="{{currentMember && currentMember.weightHistory && currentMember.weightHistory.length > 0}}">
     <view class="section-header">
-      <text class="section-title">体重趋势</text>
+      <text class="section-title">健康趋势</text>
       <text class="chart-count">最近{{currentMember.weightHistory.length}}次</text>
     </view>
     <view class="chart-container">
-      <canvas canvas-id="weightChart" id="weightChart" class="weight-chart"></canvas>
-    </view>
-
-    <!-- 体脂趋势图 -->
-    <view class="section-header" style="margin-top: 32rpx;">
-      <text class="section-title">体脂趋势</text>
-    </view>
-    <view class="chart-container">
-      <canvas canvas-id="bodyFatChart" id="bodyFatChart" class="weight-chart"></canvas>
+      <canvas canvas-id="combinedChart" id="combinedChart" class="weight-chart"></canvas>
     </view>
   </view>
 

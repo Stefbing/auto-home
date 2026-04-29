@@ -7,6 +7,7 @@ Page({
     scanning: false,
     device: null,
     weight: 0,
+    weightDisplay: '0.00', // 格式化后的体重显示
     impedance: 0,
     isStabilized: false,
     logs: [],
@@ -14,6 +15,10 @@ Page({
     autoSaved: false, // 标记是否已自动保存
     lastSavedWeight: null, // 上次保存的体重，用于去重
     scanTimeout: null, // 扫描超时定时器
+    measurementLocked: false, // 测量完成后锁定，等待用户选择成员
+    lockedWeight: null, // 锁定的体重数据
+    lockedImpedance: null, // 锁定的阻抗数据
+    lastDataTime: null, // 最后一次收到数据的时间戳
     
     // 家庭成员管理
     members: [],
@@ -127,11 +132,21 @@ Page({
   onHide() {
     // 页面隐藏时注销回调，避免内存泄漏
     this.unregisterBleCallback();
+    
+    // 页面隐藏时不重置状态，保持测量数据
+    console.log('[Scale Page] 页面隐藏，保持测量状态');
   },
   
   onUnload() {
     // 页面卸载时注销回调
     this.unregisterBleCallback();
+    
+    // 清除定时器
+    if (this.data.scanTimeout) {
+      clearTimeout(this.data.scanTimeout);
+    }
+    
+    console.log('[Scale Page] 页面卸载，清理资源');
   },
   
   /**
@@ -176,11 +191,8 @@ Page({
     
     // 设置新定时器
     const timeout = setTimeout(() => {
-      console.log('[超时] 60秒无数据，停止扫描');
-      this.setData({ 
-        scanning: false,
-        device: null
-      });
+      console.log('[超时] 60秒无数据，断开连接');
+      this.resetMeasurementState();
       wx.showToast({
         title: '已断开连接',
         icon: 'none',
@@ -199,62 +211,163 @@ Page({
   },
   
   /**
+   * 重置测量状态（断连或超时时调用）
+   */
+  resetMeasurementState() {
+    console.log('[Scale Page] 🔄 重置测量状态');
+    
+    // 清除定时器
+    if (this.data.scanTimeout) {
+      clearTimeout(this.data.scanTimeout);
+    }
+    
+    // 重置所有状态
+    this.setData({
+      scanning: false,
+      device: null,
+      weight: 0,
+      weightDisplay: '0.00',
+      impedance: 0,
+      isStabilized: false,
+      autoSaved: false,
+      measurementLocked: false,
+      lockedWeight: null,
+      lockedImpedance: null,
+      lastDataTime: null,
+      // 保留体脂计算结果，让用户能看到最后的数据
+      // bmi, bodyFat, water 等不清空
+    });
+    
+    this.log('连接已断开，状态已重置');
+  },
+  
+  /**
    * 处理蓝牙数据更新
    */
   handleScaleDataUpdate(data) {
-    console.log('[Scale Page] 处理体重数据:', data);
+    console.log('[Scale Page] 收到原始数据:', JSON.stringify(data));
+      
+    // 【锁定检查】如果已锁定，忽略新数据
+    if (this.data.measurementLocked) {
+      console.log('[Scale Page] ⚠️ 测量已锁定，忽略新数据');
+      return;
+    }
+        
+    // 【关键验证】检查数据有效性
+    if (!data || !data.weight || data.weight <= 0) {
+      console.log('[Scale Page] ❌ 无效数据:', data);
+      return;
+    }
+        
+    // 【关键验证】体重合理性检查（0.1kg - 300kg）
+    if (data.weight < 0.1 || data.weight > 300) {
+      console.log('[Scale Page] ❌ 体重超出合理范围:', data.weight);
+      return;
+    }
     
-    // 【关键】实时更新所有数据（包括未稳定的）
+    // 【重要】实时测量时不强制要求阻抗数据（体脂秤在测量过程中可能先返回体重）
+    // 只有在数据稳定时才严格验证阻抗
+    const hasImpedance = data.impedance && data.impedance > 0;
+    const isStable = data.isStabilized;
+    
+    console.log('[Scale Page] 数据验证:', {
+      weight: data.weight,
+      impedance: data.impedance,
+      hasImpedance,
+      isStable
+    });
+    
+    // 如果数据稳定但没有阻抗，说明可能不是真正的体脂秤数据
+    if (isStable && !hasImpedance) {
+      console.log('[Scale Page] ⚠️ 数据稳定但无阻抗，等待下一次数据');
+      return;
+    }
+    
+    // 如果有阻抗数据，验证合理性
+    if (hasImpedance && (data.impedance < 100 || data.impedance > 3000)) {
+      console.log('[Scale Page] ❌ 阻抗超出合理范围:', data.impedance);
+      return;
+    }
+        
     // 检查是否为相同数据（误差<0.05kg），避免重复计算
     const isSameData = Math.abs(this.data.weight - data.weight) < MATCHING.DEDUPLICATION_THRESHOLD;
-    
+    console.log('[Scale Page] 数据对比:', {
+      oldWeight: this.data.weight,
+      newWeight: data.weight,
+      diff: Math.abs(this.data.weight - data.weight),
+      isSameData
+    });
+        
     // 【防抖】如果刚刚保存过（3秒内）且数据相同，跳过处理
     const now = Date.now();
     if (this.lastSaveTime && (now - this.lastSaveTime) < TIMING.DEBOUNCE && isSameData) {
-      console.log('[Scale Page] 距离上次保存不足3秒且数据相同，跳过');
+      console.log('[Scale Page] ⏱️ 防抖：距离上次保存不足3秒且数据相同，跳过');
       return;
     }
+        
+    console.log('[Scale Page] ✅ 数据通过验证，开始更新UI');
     
     // 更新页面数据（CSS会自动动画）
     this.setData({
       device: data.deviceName || '小米体脂秤',
       weight: data.weight,
-      impedance: data.impedance,
+      weightDisplay: data.weight.toFixed(2), // 格式化显示
+      impedance: data.impedance || 0,
       isStabilized: data.isStabilized,
       scanning: true,
-      autoSaved: false // 重置自动保存状态
+      autoSaved: false, // 重置自动保存状态
+      lastDataTime: now // 记录最后一次收到数据的时间
+    }, () => {
+      console.log('[Scale Page] UI更新完成:', {
+        weight: this.data.weight,
+        weightDisplay: this.data.weightDisplay,
+        isStabilized: this.data.isStabilized
+      });
     });
-    
+        
     // 重置超时定时器
     this.resetScanTimeout();
-    
+      
     this.log(`体重: ${data.weight}kg | 阻抗: ${data.impedance || 0}Ω | 稳定: ${data.isStabilized ? '是' : '否'}`);
-    
+        
     // 只有数据稳定时才进行后续处理
     if (!data.isStabilized) {
-      console.log('[Scale Page] 数据未稳定，仅更新显示');
+      console.log('[Scale Page] 📊 数据未稳定，仅更新显示');
       return;
     }
-    
+      
+    // 【关键】数据稳定后，锁定测量，等待用户选择成员
+    console.log('[Scale Page] 🔒 数据已稳定，锁定测量');
+    this.setData({
+      measurementLocked: true,
+      lockedWeight: data.weight,
+      lockedImpedance: data.impedance
+    });
+      
+    // 提示用户选择成员
+    wx.showToast({
+      title: '请选择成员',
+      icon: 'none',
+      duration: 2000
+    });
+      
     // 如果体重稳定且不是相同数据，才重新计算和匹配
     if (!isSameData) {
       // 确保当前已选择成员
       if (!this.data.currentMember) {
-        console.log('[Scale Page] 未选择成员');
-        
+        console.log('[Scale Page] 👤 未选择成员，等待用户操作');
+          
         // 如果成员列表为空，等待加载完成
         if (this.data.members.length === 0) {
-          console.log('[Scale Page] 成员列表未加载，等待...');
-          // 不执行任何操作，等待onLoad的loadMembers完成后再处理
+          console.log('[Scale Page] ⚠️ 成员列表未加载，等待...');
           return;
         }
-        
-        // 自动选择第一个成员（通常是"自己"）
-        console.log('[Scale Page] 自动选择第一个成员');
-        this.selectMemberByIndex(0);
+          
+        // 不自动选择，等待用户手动选择
+        console.log('[Scale Page] ⏳ 等待用户选择成员');
       } else {
         // 已有选中成员，直接计算体脂
-        console.log('[Scale Page] 已有成员，计算体脂');
+        console.log('[Scale Page] 🧮 已有成员，计算体脂');
         this.calculateBodyMetrics();
       }
     }
@@ -370,20 +483,106 @@ Page({
     
     const member = this.data.members[index];
     
+    // 【新增】如果已选择过成员且已有计算结果，切换时需要确认
+    if (this.data.currentMember && this.data.currentMember.id !== member.id && this.data.bodyFat) {
+      wx.showModal({
+        title: '切换成员',
+        content: `当前已计算 ${this.data.currentMember.name} 的数据，是否切换到 ${member.name}？\n\n切换后将重新计算并保存新数据。`,
+        confirmText: '切换',
+        cancelText: '取消',
+        success: (res) => {
+          if (res.confirm) {
+            // 用户确认切换，先清除旧数据
+            this.clearCalculationResults();
+            // 执行切换
+            this.performMemberSwitch(member);
+          }
+        }
+      });
+      return;
+    }
+    
+    // 首次选择或无计算结果，直接切换
+    this.performMemberSwitch(member);
+  },
+  
+  /**
+   * 执行成员切换逻辑
+   */
+  performMemberSwitch(member) {
+    console.log('[Scale Page] 选择成员:', member.name);
+    
     this.setData({
       selectedMemberId: member.id,
       currentMember: member
     });
     
-    console.log('[Scale Page] 选择成员:', member.name);
+    // 显示计算中提示
+    wx.showLoading({ title: '计算中...', mask: true });
     
-    // 自动计算体脂指标
-    this.calculateBodyMetrics();
-    
-    // 如果数据已稳定，自动保存到数据库
-    if (this.data.isStabilized && this.data.weight > 0) {
-      this.autoSaveToDatabase();
+    // 【关键】如果测量已锁定，使用锁定的数据计算
+    if (this.data.measurementLocked && this.data.lockedWeight) {
+      console.log('[Scale Page] 使用锁定数据计算体脂');
+      // 临时更新weight和impedance为锁定值
+      const tempWeight = this.data.weight;
+      const tempImpedance = this.data.impedance;
+      
+      this.setData({
+        weight: this.data.lockedWeight,
+        impedance: this.data.lockedImpedance
+      });
+      
+      // 计算体脂
+      setTimeout(() => {
+        this.calculateBodyMetrics(() => {
+          // 计算完成后隐藏loading
+          wx.hideLoading();
+          
+          // 恢复当前实时数据（如果有）
+          if (tempWeight > 0) {
+            this.setData({
+              weight: tempWeight,
+              impedance: tempImpedance
+            });
+          }
+          
+          // 解锁，允许下一次测量
+          this.setData({
+            measurementLocked: false,
+            lockedWeight: null,
+            lockedImpedance: null
+          });
+          
+          console.log('[Scale Page] 测量完成，已解锁');
+        });
+      }, 500); // 延迟500ms让用户看到"计算中"
+    } else {
+      // 正常模式，直接计算
+      setTimeout(() => {
+        this.calculateBodyMetrics(() => {
+          wx.hideLoading();
+        });
+      }, 500);
     }
+  },
+  
+  /**
+   * 清除计算结果（切换成员时调用）
+   */
+  clearCalculationResults() {
+    console.log('[Scale Page] 清除旧的计算结果');
+    this.setData({
+      bmi: null,
+      bodyFat: null,
+      water: null,
+      muscleMass: null,
+      protein: null,
+      bmr: null,
+      boneMass: null,
+      visceralFat: null,
+      advice: null,
+      autoSaved: false
+    });
   },
 
   checkLoginStatus() {
@@ -577,8 +776,7 @@ Page({
       
       // 绘制图表
       setTimeout(() => {
-        this.drawWeightChart();
-        this.drawBodyFatChart();
+        this.drawCombinedChart();
       }, TIMING.CHART_DELAY);
       
       // 如果已有体重数据且稳定，自动计算体脂
@@ -715,12 +913,29 @@ Page({
     const memberId = e.currentTarget.dataset.id;
     const member = this.data.members.find(m => m.id === memberId);
     
-    this.setData({
-      selectedMemberId: memberId,
-      currentMember: member
-    });
+    if (!member) return;
     
-    console.log('选择成员:', member?.name);
+    // 【新增】如果已选择过成员且已有计算结果，切换时需要确认
+    if (this.data.currentMember && this.data.currentMember.id !== member.id && this.data.bodyFat) {
+      wx.showModal({
+        title: '切换成员',
+        content: `当前已计算 ${this.data.currentMember.name} 的数据，是否切换到 ${member.name}？\n\n切换后将重新计算并保存新数据。`,
+        confirmText: '切换',
+        cancelText: '取消',
+        success: (res) => {
+          if (res.confirm) {
+            // 用户确认切换，先清除旧数据
+            this.clearCalculationResults();
+            // 执行切换
+            this.performMemberSwitch(member);
+          }
+        }
+      });
+      return;
+    }
+    
+    // 首次选择或无计算结果，直接切换
+    this.performMemberSwitch(member);
   },
   
 
@@ -899,12 +1114,15 @@ Page({
    * - BMI = 体重(kg) / 身高(m)²
    * - 体脂率 = f(BMI, 年龄, 性别, 阻抗)
    * - 水分率、肌肉量等衍生指标
+   * 
+   * @param {Function} callback - 计算完成后的回调函数
    */
-  calculateBodyMetrics() {
+  calculateBodyMetrics(callback) {
     const { weight, impedance, currentMember } = this.data;
     
     if (!currentMember || !weight || weight <= 0) {
       console.log('[体脂计算] 数据不完整，无法计算');
+      if (typeof callback === 'function') callback();
       return;
     }
     
@@ -920,6 +1138,7 @@ Page({
       // 如果正在编辑成员，不弹窗（避免重复提示）
       if (this.data.showAddMemberDialog && this.data.editingMemberId === currentMember.id) {
         console.log('[体脂计算] 正在编辑成员，跳过提示');
+        if (typeof callback === 'function') callback();
         return;
       }
       
@@ -933,6 +1152,7 @@ Page({
             // 打开编辑成员弹窗
             this.editMember(currentMember);
           }
+          if (typeof callback === 'function') callback();
         }
       });
       return;
@@ -1086,12 +1306,16 @@ Page({
       boneMass: parseFloat(parseFloat(boneMass).toFixed(2)),
       visceralFat: visceralFat,
       advice
+    }, () => {
+      // setData完成后执行回调
+      if (typeof callback === 'function') callback();
     });
     
     this.log(`BMI: ${parseFloat(bmi).toFixed(1)} | 体脂率: ${parseFloat(bodyFat).toFixed(1)}% | 水分: ${parseFloat(water).toFixed(1)}%`);
     
-    // 如果数据已稳定且选择了成员，自动保存到数据库
+    // 【重要】立即保存到数据库（不等待自动保存）
     if (this.data.isStabilized && this.data.currentMember) {
+      console.log('[体脂计算] 📤 立即保存到数据库');
       this.autoSaveToDatabase();
     }
   },
@@ -1117,38 +1341,22 @@ Page({
   },
 
   /**
-   * 绘制体重+体脂趋势折线图
+   * 绘制合并趋势图（体重+体脂）
    */
-  drawWeightChart() {
+  drawCombinedChart() {
     if (!this.data.currentMember || !this.data.currentMember.weightHistory || this.data.currentMember.weightHistory.length === 0) {
       console.log('[图表] 无历史数据，跳过绘制');
       return;
     }
 
     const history = this.data.currentMember.weightHistory;
-    console.log('[图表] 开始绘制体重趋势图，数据条数:', history.length);
+    console.log('[图表] 开始绘制合并趋势图，数据条数:', history.length);
 
     // 创建canvas上下文
-    const ctx = wx.createCanvasContext('weightChart', this);
+    const ctx = wx.createCanvasContext('combinedChart', this);
     
     // 调用模块绘制
-    chartDrawer.drawWeightChart(ctx, history, 'weightChart');
-  },
-  
-  drawBodyFatChart() {
-    if (!this.data.currentMember || !this.data.currentMember.weightHistory || this.data.currentMember.weightHistory.length === 0) {
-      console.log('[图表] 无历史数据，跳过绘制');
-      return;
-    }
-
-    const history = this.data.currentMember.weightHistory;
-    console.log('[图表] 开始绘制体脂趋势图，数据条数:', history.length);
-
-    // 创建canvas上下文
-    const ctx = wx.createCanvasContext('bodyFatChart', this);
-    
-    // 调用模块绘制
-    chartDrawer.drawBodyFatChart(ctx, history, 'bodyFatChart');
+    chartDrawer.drawCombinedChart(ctx, history, 'combinedChart');
   },
 
   startScan() {
@@ -1316,12 +1524,26 @@ Page({
         this.lastSaveTime = Date.now(); // 记录保存时间
         this.log('数据已自动保存到数据库');
         
+        // 【新增】显示成功提示
+        wx.showToast({
+          title: '保存成功',
+          icon: 'success',
+          duration: 1500
+        });
+        
         // 不再自动刷新成员列表，避免循环调用
         // 用户可以在下次进入页面时看到最新数据
       },
       fail: (err) => {
         console.error('[自动保存] 保存失败:', err);
         this.log("自动保存失败 " + JSON.stringify(err));
+        
+        // 【新增】显示失败提示
+        wx.showToast({
+          title: '保存失败',
+          icon: 'error',
+          duration: 2000
+        });
       }
     });
   },

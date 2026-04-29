@@ -338,15 +338,14 @@ App({
       // 通知所有注册的回调
       this.notifyScaleDataUpdate(this.globalData.latestScaleData);
       
-      // 【增强】如果检测到稳定体重或连续N次相同值，尝试跳转
-      const isStableByFlag = finalData.isStabilized;
-      const isStableByHistory = this.isWeightStable(SCALE_CONFIG.STABLE_THRESHOLD);
+      // 【增强】只要有体重数据就跳转（实时+稳定），让用户看到动态过程
+      const hasWeight = finalData.weight > 0;
       
-      if (isStableByFlag || isStableByHistory) {
-        console.log('[BLE Manager] 体重稳定检测:', {
-          稳定标志: isStableByFlag,
-          历史稳定: isStableByHistory,
-          当前体重: finalData.weight
+      if (hasWeight) {
+        console.log('[BLE Manager] 📊 检测到体重数据，准备跳转到体脂秤页面', {
+          weight: finalData.weight,
+          isStabilized: finalData.isStabilized,
+          impedance: finalData.impedance || 0
         });
         this.checkAndNavigateToScalePage();
       }
