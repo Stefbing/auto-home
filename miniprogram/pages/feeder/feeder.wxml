@@ -1,3 +1,6 @@
+<!-- 自定义导航栏 -->
+<custom-nav />
+
 <view class="page">
   <!-- Hero卡片 - 设备状态概览 -->
   <view class="hero-card">

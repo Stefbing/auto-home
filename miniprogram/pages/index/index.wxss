@@ -385,6 +385,21 @@
   box-shadow: 0 0 12rpx rgba(16, 185, 129, 0.5);
 }
 
+.status-indicator.scanning {
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  box-shadow: 0 0 12rpx rgba(245, 158, 11, 0.5);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 .status-indicator.offline {
   background: #D1D5DB;
 }
@@ -394,27 +409,7 @@
   min-width: 0;
 }
 
-.card-name {
-  font-size: 32rpx;
-  font-weight: 700;
-  color: #1F2937;
-  display: block;
-  margin-bottom: 8rpx;
-  letter-spacing: 0.5rpx;
-}
-
-.card-status {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.status-text {
-  font-size: 24rpx;
-  color: #6B7280;
-  font-weight: 500;
-}
-
+/* 通用卡片统计信息（喂食机、猫厕所） */
 .card-stats {
   display: flex;
   gap: 32rpx;
@@ -453,6 +448,71 @@
   letter-spacing: 0.5rpx;
   margin-top: 4rpx;
   display: block;
+}
+
+/* 体脂秤卡片右侧区域 */
+.card-right {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  flex-shrink: 0;
+}
+
+.scale-card .card-stats {
+  display: flex;
+  gap: 24rpx;
+  align-items: center;
+  margin-left: 0;
+}
+
+.scale-card .stat-value {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #1F2937;
+  line-height: 1.2;
+  display: block;
+  letter-spacing: -0.5rpx;
+}
+
+.scale-card .stat-label {
+  font-size: 20rpx;
+  color: #9CA3AF;
+  font-weight: 500;
+  margin-top: 2rpx;
+  display: block;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.scale-card .stat-empty {
+  text-align: right;
+}
+
+.scale-card .empty-text {
+  font-size: 24rpx;
+  color: #D1D5DB;
+  font-weight: 500;
+}
+
+.card-name {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #1F2937;
+  display: block;
+  margin-bottom: 8rpx;
+  letter-spacing: 0.5rpx;
+}
+
+.card-status {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.status-text {
+  font-size: 24rpx;
+  color: #6B7280;
+  font-weight: 500;
 }
 
 /* 卡片右箭头 */

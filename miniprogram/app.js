@@ -17,7 +17,25 @@ App({
     
     // 日志优化：记录上次发现的设备信息
     lastDiscoveredDeviceId: null,
-    lastDiscoveredRSSI: null
+    lastDiscoveredRSSI: null,
+    
+    // 设备在线状态管理
+    deviceOnlineStatus: {}, // {deviceKey: {online: boolean, lastSeen: timestamp}}
+    
+    // 体脂秤扫描状态：'offline' | 'scanning' | 'online'
+    scaleConnectionStatus: 'offline',
+    
+    // 定时扫描控制
+    scanTimer: null, // 扫描定时器
+    
+    // 智能扫描策略：先频繁后缓慢
+    SCAN_PHASES: [
+      { duration: 60000, interval: 10000, scanTime: 5000 },   // 第1阶段：前1分钟，每10秒扫5秒
+      { duration: 300000, interval: 30000, scanTime: 10000 },  // 第2阶段：接下来5分钟，每30秒扫10秒
+      { duration: Infinity, interval: 60000, scanTime: 10000 } // 第3阶段：之后，每60秒扫10秒
+    ],
+    currentPhaseIndex: 0, // 当前阶段索引
+    phaseStartTime: null, // 阶段开始时间
   },
   
   onLaunch() {
@@ -110,12 +128,12 @@ App({
           this.globalData.bleAdapterInitialized = res.available;
           
           if (!res.available) {
-            this.stopBleScan();
+            this.stopPeriodicScan();
           }
         });
         
-        // 自动开始扫描
-        this.startBleScan();
+        // 启动定时扫描
+        this.startPeriodicScan();
       },
       fail: (err) => {
         console.error('[BLE Manager] 蓝牙适配器初始化失败:', err);
@@ -125,7 +143,142 @@ App({
   },
   
   /**
-   * 开始蓝牙扫描
+   * 启动定时扫描
+   */
+  startPeriodicScan() {
+    console.log('[BLE Manager] 启动智能定时扫描机制');
+    
+    // 重置阶段
+    this.globalData.currentPhaseIndex = 0;
+    this.globalData.phaseStartTime = Date.now();
+    
+    // 立即执行一次扫描
+    this.executeScan();
+    
+    // 设置定时器，根据当前阶段动态调整间隔
+    this.scheduleNextScan();
+  },
+  
+  /**
+   * 调度下一次扫描
+   */
+  scheduleNextScan() {
+    // 清除旧定时器（setTimeout）
+    if (this.globalData.scanTimer) {
+      clearTimeout(this.globalData.scanTimer);
+    }
+    
+    // 获取当前阶段的配置
+    const phase = this.globalData.SCAN_PHASES[this.globalData.currentPhaseIndex];
+    const elapsed = Date.now() - this.globalData.phaseStartTime;
+    
+    // 检查是否需要切换到下一阶段
+    if (elapsed >= phase.duration && this.globalData.currentPhaseIndex < this.globalData.SCAN_PHASES.length - 1) {
+      this.globalData.currentPhaseIndex++;
+      this.globalData.phaseStartTime = Date.now();
+      console.log('[BLE Manager] 切换到扫描阶段', this.globalData.currentPhaseIndex + 1);
+    }
+    
+    const currentPhase = this.globalData.SCAN_PHASES[this.globalData.currentPhaseIndex];
+    console.log(`[BLE Manager] 当前阶段 ${this.globalData.currentPhaseIndex + 1}: 间隔${currentPhase.interval/1000}秒, 扫描${currentPhase.scanTime/1000}秒`);
+    
+    // 关键：在扫描间隔期间，保持当前状态
+    // - 如果已发现设备，保持online（不因为扫描间隙而变成offline）
+    // - 如果未发现设备，保持scanning（表示正在监听）
+    if (this.globalData.scaleDeviceFound) {
+      // 已发现设备，保持online状态
+      this.globalData.scaleConnectionStatus = 'online';
+    } else {
+      // 未发现设备，保持scanning状态
+      this.globalData.scaleConnectionStatus = 'scanning';
+    }
+    
+    // 设置下一次扫描
+    this.globalData.scanTimer = setTimeout(() => {
+      this.executeScan();
+      this.scheduleNextScan(); // 递归调度
+    }, currentPhase.interval);
+  },
+  
+  /**
+   * 执行单次扫描
+   */
+  executeScan() {
+    if (this.globalData.bleScanning) {
+      console.log('[BLE Manager] 上次扫描仍在进行，跳过');
+      return;
+    }
+    
+    if (!this.globalData.bleAdapterInitialized) {
+      console.log('[BLE Manager] 蓝牙未初始化，跳过扫描');
+      return;
+    }
+    
+    // 获取当前阶段的扫描时长
+    const currentPhase = this.globalData.SCAN_PHASES[this.globalData.currentPhaseIndex];
+    const scanDuration = currentPhase.scanTime;
+    
+    console.log('[BLE Manager] 开始单次扫描（持续', scanDuration / 1000, '秒）');
+    
+    // 关键：只在未发现设备时显示scanning
+    // 如果已发现设备，保持online状态不变
+    if (!this.globalData.scaleDeviceFound) {
+      this.globalData.scaleConnectionStatus = 'scanning';
+    }
+    
+    wx.startBluetoothDevicesDiscovery({
+      allowDuplicatesKey: true,
+      success: (res) => {
+        console.log('[BLE Manager] 扫描启动成功');
+        this.globalData.bleScanning = true;
+        
+        // 监听设备发现
+        wx.onBluetoothDeviceFound(this.handleDeviceFound.bind(this));
+        
+        // 设置定时器，scanDuration后停止扫描
+        setTimeout(() => {
+          this.stopBleScan();
+          // 扫描结束后，保持当前状态
+          console.log('[BLE Manager] 单次扫描结束，当前状态:', this.globalData.scaleConnectionStatus);
+        }, scanDuration);
+      },
+      fail: (err) => {
+        console.error('[BLE Manager] 扫描启动失败:', err);
+        this.globalData.bleScanning = false;
+        // 只在真正失败时设置为offline
+        if (!this.globalData.scaleDeviceFound) {
+          this.globalData.scaleConnectionStatus = 'offline';
+        }
+      }
+    });
+  },
+  
+  /**
+   * 停止定时扫描
+   */
+  stopPeriodicScan() {
+    console.log('[BLE Manager] 停止定时扫描');
+    
+    // 清除定时器（setTimeout）
+    if (this.globalData.scanTimer) {
+      clearTimeout(this.globalData.scanTimer);
+      this.globalData.scanTimer = null;
+    }
+    
+    // 停止当前扫描
+    this.stopBleScan();
+    
+    // 注意：不改变connectionStatus状态
+    // 如果已发现设备，保持online；否则保持scanning或offline
+    // 这样可以避免状态闪烁
+    
+    // 重置阶段索引（下次启动时从第1阶段开始）
+    this.globalData.currentPhaseIndex = 0;
+    this.globalData.phaseStartTime = null;
+  },
+  
+  /**
+   * 开始蓝牙扫描（保留原有方法，用于手动触发）
    */
   startBleScan() {
     if (this.globalData.bleScanning) {
@@ -145,6 +298,7 @@ App({
       success: (res) => {
         console.log('[BLE Manager] 扫描启动成功');
         this.globalData.bleScanning = true;
+        this.globalData.scaleConnectionStatus = 'scanning'; // 设置为扫描中
         
         // 监听设备发现
         wx.onBluetoothDeviceFound(this.handleDeviceFound.bind(this));
@@ -164,17 +318,66 @@ App({
       return;
     }
     
-    console.log('[BLE Manager] 停止扫描');
+    console.log('[BLE Manager] 停止单次扫描');
     
     wx.stopBluetoothDevicesDiscovery({
       success: () => {
         console.log('[BLE Manager] 扫描已停止');
         this.globalData.bleScanning = false;
+        // 注意：不在这里设置offline，由定时扫描机制控制
       },
       fail: (err) => {
         console.error('[BLE Manager] 停止扫描失败:', err);
       }
     });
+  },
+  
+  /**
+   * 更新设备在线状态
+   */
+  updateDeviceOnlineStatus(device) {
+    if (!device || !device.deviceId) return;
+    
+    // 生成设备key，这里使用设备ID作为唯一标识
+    const deviceKey = `ble_${device.deviceId.replace(/:/g, '_')}`;
+    
+    // 检查是否有广播数据或serviceData，这表示设备在线
+    const hasAdvertData = device.advertisData && device.advertisData.byteLength > 0;
+    const hasServiceData = device.serviceData && Object.keys(device.serviceData).length > 0;
+    const isOnline = hasAdvertData || hasServiceData;
+    
+    // 更新在线状态
+    this.globalData.deviceOnlineStatus[deviceKey] = {
+      online: isOnline,
+      lastSeen: Date.now(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      RSSI: device.RSSI
+    };
+    
+    console.log(`[BLE Manager] 设备在线状态更新: ${deviceKey}`, {
+      online: isOnline,
+      hasAdvertData,
+      hasServiceData
+    });
+    
+    // 通知首页更新设备状态
+    this.notifyDeviceStatusUpdate();
+  },
+  
+  /**
+   * 通知设备状态更新
+   */
+  notifyDeviceStatusUpdate() {
+    // 通过全局数据共享，页面可以通过轮询或直接读取获取最新状态
+    console.log('[BLE Manager] 设备在线状态已更新，当前状态:', this.globalData.deviceOnlineStatus);
+  },
+  
+  /**
+   * 获取设备在线状态
+   */
+  getDeviceOnlineStatus(deviceKey) {
+    return this.globalData.deviceOnlineStatus[deviceKey] || { online: false };
   },
   
   /**
@@ -194,31 +397,38 @@ App({
       
       if (!isScaleDevice) continue;
       
-      // 【精简日志】只在首次发现或数据变化时打印
+      // 更新设备在线状态
+      this.updateDeviceOnlineStatus(device);
+      
+      // 【关键】只要发现设备且有广播数据，就标记为在线
+      const hasAdvertData = device.advertisData && device.advertisData.byteLength > 0;
+      const hasServiceData = device.serviceData && Object.keys(device.serviceData).length > 0;
+      
+      if (hasAdvertData || hasServiceData) {
+        const wasOffline = !this.globalData.scaleDeviceFound;
+        this.globalData.scaleConnectionStatus = 'online';
+        this.globalData.scaleDeviceFound = true;
+        
+        // 如果刚从离线变为在线，优化扫描策略
+        if (wasOffline) {
+          console.log('[BLE Manager] 🎯 首次发现设备，优化扫描策略');
+          // 切换到第2阶段（中等频率），平衡实时性和电量
+          this.globalData.currentPhaseIndex = 1;
+          this.globalData.phaseStartTime = Date.now();
+        }
+      }
+      
+      // 完整打印设备对象（仅首次或RSSI变化大时）
       const lastDeviceId = this.globalData.lastDiscoveredDeviceId;
       const lastRSSI = this.globalData.lastDiscoveredRSSI;
       const isSameDevice = lastDeviceId === device.deviceId;
-      const rssiChanged = !lastRSSI || Math.abs(lastRSSI - device.RSSI) > 5; // RSSI变化超过5dBm才打印
+      const rssiChanged = !lastRSSI || Math.abs(lastRSSI - device.RSSI) > 5;
       
       if (!isSameDevice || rssiChanged) {
-        console.log('========== [BLE Manager] 发现体脂秤设备 ==========');
-        console.log('[BLE Manager] 设备名称:', device.name);
-        console.log('[BLE Manager] 设备ID:', device.deviceId);
-        console.log('[BLE Manager] 信号强度:', device.RSSI);
-        
+        console.log('[BLE] 发现设备:', device.name, 'RSSI:', device.RSSI);
         this.globalData.lastDiscoveredDeviceId = device.deviceId;
         this.globalData.lastDiscoveredRSSI = device.RSSI;
       }
-      
-      // 完整打印设备对象
-      console.log('[BLE Manager] 完整设备对象:', JSON.stringify({
-        name: device.name,
-        deviceId: device.deviceId,
-        RSSI: device.RSSI,
-        advertisDataLength: device.advertisData ? device.advertisData.byteLength : 0,
-        hasServiceData: !!device.serviceData,
-        hasManufacturerData: !!device.manufacturerData
-      }, null, 2));
       
       // 解析广播数据
       const advertisData = device.advertisData;
@@ -267,15 +477,11 @@ App({
       }
       
       // 尝试解析 advertisData
-      console.log('[BLE Manager] --- 开始解析 advertisData ---');
       const advertScaleData = bleUtils.parseScaleData(advertisData);
       if (advertScaleData) {
-        console.log('[BLE Manager] ✅ advertisData 解析成功:', JSON.stringify(advertScaleData));
-        console.log('[BLE Manager]    - weight:', advertScaleData.weight, 'kg');
-        console.log('[BLE Manager]    - isStabilized:', advertScaleData.isStabilized);
-        console.log('[BLE Manager]    - impedance:', advertScaleData.impedance || 0);
+        console.log('[BLE] advertisData:', `${advertScaleData.weight}kg`, advertScaleData.isStabilized ? '稳定' : '未稳定');
       } else {
-        console.log('[BLE Manager] ❌ advertisData 解析失败');
+        console.log('[BLE] ⚠️ advertisData解析失败');
       }
       
       // 优先解析 serviceData（包含完整数据：体重+阻抗+时间戳）
@@ -321,28 +527,16 @@ App({
       console.log(`[BLE Manager] ✅ 使用数据源: ${usedDataSource}`);
       console.log('[BLE Manager] ==========================================');
       
-      // 【新增】检查 Service Data 时间戳新鲜度（过滤过期广播数据）
+      // 【新增】检查 Service Data 时间戳新鲜度
       if (finalData.timestamp) {
         const now = Date.now();
-        // 体脂秤的 timestamp 是 UTC 时间，需要转换为本地时间
-        // JavaScript 的 Date 对象会自动处理时区，直接相减即可
-        const dataAge = now - finalData.timestamp;
-        const maxAge = SCALE_CONFIG.DATA_DEBOUNCE_TIME; // 3秒
-        
-        console.log('[BLE Manager] 🕒 时间戳检查', {
-          currentTime: new Date(now).toLocaleTimeString(),
-          dataTimestamp: new Date(finalData.timestamp).toLocaleTimeString(),
-          dataAge: `${(dataAge / 1000).toFixed(1)}s`,
-          maxAge: `${(maxAge / 1000).toFixed(1)}s`,
-          isExpired: dataAge > maxAge
-        });
+        const dataAge = Math.abs(now - finalData.timestamp);
+        const maxAge = 10000; // 10秒
         
         if (dataAge > maxAge) {
-          console.log('[BLE Manager] ⚠️ 数据过期，跳过处理');
-          continue; // 跳过这条过期数据
+          console.log('[BLE] ⚠️ 数据过期', `${(dataAge / 1000).toFixed(1)}s`);
+          continue;
         }
-        
-        console.log('[BLE Manager] ✅ 数据新鲜度检查通过');
       }
       
       // 【防抖】如果体重和稳定状态都没变化，跳过处理（减少日志）
@@ -362,19 +556,19 @@ App({
         // 仍然通知回调（页面需要实时更新）
         this.notifyScaleDataUpdate(this.globalData.latestScaleData);
         
-        // 检查稳定性
+        // 检查稳定性（仅用于日志，不影响跳转）
         const isStableByFlag = finalData.isStabilized;
         const isStableByHistory = this.isWeightStable(3);
         
-        // 只有体重超过阈值且稳定时才跳转
+        // 只要体重超过阈值就跳转（去掉稳定状态检查）
         const isAdultWeight = finalData.weight >= LIMITS.MIN_WEIGHT; // 30kg
-        if ((isStableByFlag || isStableByHistory) && isAdultWeight) {
-          console.log('[BLE Manager] 📊 数据防抖 - 检测到稳定有效体重，准备跳转', {
+        if (isAdultWeight) {
+          console.log('[BLE Manager] 📊 数据防抖 - 检测到有效体重，准备跳转', {
             weight: finalData.weight,
             isStabilized: finalData.isStabilized
           });
           this.checkAndNavigateToScalePage();
-        } else if ((isStableByFlag || isStableByHistory) && !isAdultWeight) {
+        } else {
           console.log('[BLE Manager] ⚠️ 数据防抖 - 体重低于阈值，跳过跳转', {
             weight: finalData.weight,
             threshold: LIMITS.MIN_WEIGHT
@@ -403,23 +597,28 @@ App({
       // 通知所有注册的回调
       this.notifyScaleDataUpdate(this.globalData.latestScaleData);
       
-      // 【增强】体重超过30kg且数据稳定才跳转
+      // 【增强】体重超过30kg且数据新鲜就跳转（去掉稳定状态检查）
       const hasWeight = finalData.weight > 0;
       const isAdultWeight = finalData.weight >= LIMITS.MIN_WEIGHT; // 30kg
-      const isStable = finalData.isStabilized;
       
-      if (hasWeight && isAdultWeight && isStable) {
-        console.log('[BLE Manager] 📊 检测到有效稳定体重，准备跳转到体脂秤页面', {
+      if (hasWeight && isAdultWeight) {
+        console.log('[BLE Manager] 📊 检测到有效体重，准备跳转到体脂秤页面', {
           weight: finalData.weight,
           isStabilized: finalData.isStabilized,
           impedance: finalData.impedance || 0
         });
-        this.checkAndNavigateToScalePage();
-      } else if (hasWeight && isAdultWeight && !isStable) {
-        console.log('[BLE Manager] ⏳ 体重有效但未稳定，等待稳定数据', {
-          weight: finalData.weight,
-          isStabilized: false
-        });
+        
+        // 【关键】如果阻抗为0，尝试建立BLE连接获取完整数据
+        if (!finalData.impedance || finalData.impedance === 0) {
+          console.log('[BLE Manager] ⚠️ 阻抗为0，尝试建立BLE连接');
+          this.connectToDevice(device.deviceId, () => {
+            // 连接成功后再跳转
+            this.checkAndNavigateToScalePage();
+          });
+        } else {
+          // 有阻抗数据，直接跳转
+          this.checkAndNavigateToScalePage();
+        }
       } else if (hasWeight && !isAdultWeight) {
         console.log('[BLE Manager] ⚠️ 体重低于阈值，跳过跳转', {
           weight: finalData.weight,
@@ -427,6 +626,37 @@ App({
         });
       }
     }
+  },
+  
+  /**
+   * 连接到体脂秤设备
+   * @param {String} deviceId - 设备ID
+   * @param {Function} callback - 连接成功后的回调
+   */
+  connectToDevice(deviceId, callback) {
+    console.log('[BLE Manager] 尝试连接设备:', deviceId);
+    
+    wx.createBLEConnection({
+      deviceId: deviceId,
+      timeout: 10000, // 10秒超时
+      success: (res) => {
+        console.log('[BLE Manager] ✅ 连接成功');
+        
+        // 延迟一下再回调，让设备有时间发送完整数据
+        setTimeout(() => {
+          if (callback && typeof callback === 'function') {
+            callback();
+          }
+        }, 1000);
+      },
+      fail: (err) => {
+        console.error('[BLE Manager] ❌ 连接失败:', err);
+        // 即使连接失败，也执行回调（使用广播数据）
+        if (callback && typeof callback === 'function') {
+          callback();
+        }
+      }
+    });
   },
   
   /**

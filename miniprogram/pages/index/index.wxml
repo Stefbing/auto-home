@@ -166,22 +166,39 @@
                        class="device-card scale-card"
                        bindlongpress="onLongPressDevice"
                        data-device-key="{{item.device_key}}"
-                       data-device-name="{{item.display_name || (item.device_name === 'xiaomi' ? '小米体脂秤' : '体脂秤')}}">
+                       data-device-name="{{item.display_name || 'MIBFS'}}">
               <view class="card-left">
                 <view class="card-icon-wrapper scale">
                   <text class="card-icon">⚖️</text>
-                  <view class="status-indicator {{item.status === 'active' ? 'online' : 'offline'}}"></view>
+                  <view class="status-indicator {{item.connectionStatus === 'online' ? 'online' : (item.connectionStatus === 'scanning' ? 'scanning' : 'offline')}}"></view>
                 </view>
                 <view class="card-info">
-                  <text class="card-name">{{item.device_name === 'xiaomi' ? '小米体脂秤' : '体脂秤'}}</text>
+                  <text class="card-name">{{item.display_name || 'MIBFS'}}</text>
                   <view class="card-status">
-                    <text class="status-text">{{item.status === 'active' ? '在线' : '待配置'}}</text>
+                    <text class="status-text">{{item.connectionStatus === 'online' ? '在线' : (item.connectionStatus === 'scanning' ? '扫描中' : '离线')}}</text>
                   </view>
                 </view>
               </view>
 
-              <view class="card-chevron">
-                <text class="chevron-icon">›</text>
+              <view class="card-right">
+                <view class="card-stats">
+                  <view class="stat-item" wx:if="{{item.today_measurements > 0}}">
+                    <text class="stat-value">{{item.today_measurements}}</text>
+                    <text class="stat-unit">次</text>
+                    <text class="stat-label">今日测量</text>
+                  </view>
+                  <view class="stat-item" wx:if="{{item.latest_body_fat}}">
+                    <text class="stat-value">{{item.latest_body_fat}}</text>
+                    <text class="stat-unit">%</text>
+                    <text class="stat-label">体脂率</text>
+                  </view>
+                  <view class="stat-empty" wx:if="{{!item.today_measurements && !item.latest_body_fat}}">
+                    <text class="empty-text">暂无数据</text>
+                  </view>
+                </view>
+                <view class="card-chevron">
+                  <text class="chevron-icon">›</text>
+                </view>
               </view>
             </navigator>
           </block>

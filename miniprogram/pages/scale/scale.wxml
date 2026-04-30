@@ -1,3 +1,6 @@
+<!-- 自定义导航栏 -->
+<custom-nav />
+
  <view class="page">
   <!-- Hero卡片 - 设备状态 -->
   <view class="hero-card">
@@ -56,8 +59,8 @@
      </view>
    </view>
 
-  <!-- 家庭成员选择 -->
-  <view class="member-section">
+  <!-- 家庭成员选择 - 只在测量完成后显示 -->
+  <view class="member-section" wx:if="{{isStabilized && impedance > 0}}">
     <view class="section-header">
       <text class="section-title">家庭成员</text>
       <button class="add-member-btn" bindtap="showAddMemberModal">

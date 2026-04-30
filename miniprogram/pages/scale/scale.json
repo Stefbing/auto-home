@@ -1,6 +1,6 @@
 {
-  "usingComponents": {},
-  "navigationBarTitleText": "体脂秤",
-  "navigationBarBackgroundColor": "#3B82F6",
-  "navigationBarTextStyle": "white"
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "custom-nav": "/components/custom-nav/custom-nav"
+  }
 }

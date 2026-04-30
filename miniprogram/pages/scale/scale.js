@@ -122,7 +122,10 @@ Page({
     // 检查是否有最新的蓝牙数据
     const app = getApp();
     if (app.globalData.latestScaleData) {
+      console.log('[Scale Page] onShow - 发现最新数据，立即处理');
       this.handleScaleDataUpdate(app.globalData.latestScaleData);
+    } else {
+      console.log('[Scale Page] onShow - 暂无最新数据，等待回调');
     }
     
     // 设置超时断连机制（60秒无数据则断开）
@@ -253,24 +256,16 @@ Page({
       return;
     }
     
-    // 【新增】检查 Service Data 时间戳新鲜度（过滤过期广播数据）
+    // 【新增】检查 Service Data 时间戳新鲜度
     if (data.timestamp) {
       const now = Date.now();
-      const dataAge = now - data.timestamp;
-      const maxAge = TIMING.DEBOUNCE; // 使用防抖时间作为阈值（3秒）
+      const dataAge = Math.abs(now - data.timestamp); // 使用绝对值，兼容时钟不同步
+      const maxAge = 10000; // 放宽到10秒
       
       if (dataAge > maxAge) {
-        console.log('[Scale Page] ⚠️ 数据过期，跳过处理', {
-          timestamp: data.timestamp,
-          dataAge: `${(dataAge / 1000).toFixed(1)}s`,
-          maxAge: `${(maxAge / 1000).toFixed(1)}s`
-        });
+        console.log('[Scale Page] ⚠️ 数据过期', `${(dataAge / 1000).toFixed(1)}s`);
         return;
       }
-      
-      console.log('[Scale Page] ✅ 数据新鲜度检查通过', {
-        dataAge: `${(dataAge / 1000).toFixed(1)}s`
-      });
     }
     
     // 【锁定检查】如果已锁定，忽略新数据
@@ -355,14 +350,20 @@ Page({
       console.log('[Scale Page] 📊 数据未稳定，仅更新显示');
       return;
     }
-      
-    // 【关键】数据稳定后，锁定测量，等待用户选择成员
-    console.log('[Scale Page] 🔒 数据已稳定，锁定测量');
     
-    // 如果已经锁定且已选择成员，且体重变化不大，不重复提示
+    // 【关键】检查是否有阻抗数据
+    if (!data.impedance || data.impedance === 0) {
+      console.log('[Scale Page] ⏳ 等待阻抗数据');
+      return;
+    }
+      
+    // 【关键】数据稳定且有阻抗后，锁定测量并自动匹配成员
+    console.log('[Scale Page] 🔒 测量完成，开始匹配成员');
+    
+    // 如果已经锁定且已选择成员，且体重变化不大，不重复处理
     const weightChanged = Math.abs(this.data.lockedWeight - data.weight) > MATCHING.DEDUPLICATION_THRESHOLD;
     if (this.data.measurementLocked && this.data.currentMember && !weightChanged) {
-      console.log('[Scale Page] ✅ 已锁定且已选择成员，体重无显著变化，跳过提示');
+      console.log('[Scale Page] ✅ 已处理，跳过');
       return;
     }
     
@@ -371,39 +372,20 @@ Page({
       lockedWeight: data.weight,
       lockedImpedance: data.impedance
     });
-      
-    // 只有未选择成员时才提示
+    
+    // 自动匹配成员
     if (!this.data.currentMember) {
-      wx.showToast({
-        title: '请选择成员',
-        icon: 'none',
-        duration: 2000
-      });
-    } else {
-      console.log('[Scale Page] ✅ 已有选中成员，直接计算体脂');
-      this.calculateBodyMetrics();
-      return; // 已处理，不再执行后续逻辑
-    }
-      
-    // 如果体重稳定且不是相同数据，才重新计算和匹配
-    if (!isSameData) {
-      // 确保当前已选择成员
-      if (!this.data.currentMember) {
-        console.log('[Scale Page] 👤 未选择成员，等待用户操作');
-          
-        // 如果成员列表为空，等待加载完成
-        if (this.data.members.length === 0) {
-          console.log('[Scale Page] ⚠️ 成员列表未加载，等待...');
-          return;
-        }
-          
-        // 不自动选择，等待用户手动选择
-        console.log('[Scale Page] ⏳ 等待用户选择成员');
-      } else {
-        // 已有选中成员，直接计算体脂
-        console.log('[Scale Page] 🧮 已有成员，计算体脂');
-        this.calculateBodyMetrics();
+      if (this.data.members.length === 0) {
+        console.log('[Scale Page] ⚠️ 成员列表未加载');
+        return;
       }
+      
+      // 执行自动匹配
+      this.autoMatchMember(data.weight);
+    } else {
+      // 已有选中成员，直接计算体脂
+      console.log('[Scale Page] 🧮 已有成员，计算体脂');
+      this.calculateBodyMetrics();
     }
   },
   
@@ -444,65 +426,80 @@ Page({
     if (bestMatch) {
       console.log(`[自动匹配] 找到匹配成员: ${bestMatch.member.name} (差异: ${minDiff.toFixed(1)}kg)`);
       this.selectMemberByIndex(bestMatch.index);
-      wx.showToast({
-        title: `已选择: ${bestMatch.member.name}`,
-        icon: 'success',
-        duration: 1500
-      });
     } else {
-      // 没有找到匹配的成员，检查是否有成员的历史体重
-      const hasHistoryMembers = members.some(m => m.lastWeight && m.lastWeight > 0);
-      
-      if (hasHistoryMembers) {
-        // 有历史成员但体重差距大，提示用户
-        console.log('[自动匹配] 体重差距过大，提示用户选择');
-        
-        // 找出体重最接近的成员（即使超过容差）
-        let closestMatch = null;
-        let closestDiff = Infinity;
-        
-        members.forEach((member, index) => {
-          if (member.lastWeight && member.lastWeight > 0) {
-            const diff = Math.abs(member.lastWeight - currentWeight);
-            if (diff < closestDiff) {
-              closestDiff = diff;
-              closestMatch = { member, index };
-            }
+      // 没有找到匹配的成员，提示创建访客
+      console.log('[自动匹配] 体重差距过大，提示创建访客');
+          
+      wx.showModal({
+        title: '未识别成员',
+        content: `当前体重 ${currentWeight}kg 与所有成员的历史体重差异较大\n\n是否创建访客记录？`,
+        confirmText: '创建访客',
+        cancelText: '手动选择',
+        success: (res) => {
+          if (res.confirm) {
+            // 创建访客成员
+            this.createGuestMember(currentWeight);
+          } else {
+            // 提示手动选择
+            wx.showToast({
+              title: '请从列表选择',
+              icon: 'none'
+            });
           }
+        }
+      });
+    }
+  },
+  
+  /**
+   * 创建访客成员
+   */
+  async createGuestMember(weight) {
+    console.log('[Scale Page] 创建访客成员');
+    
+    const guestName = `访客${new Date().getTime().toString().slice(-4)}`;
+    
+    try {
+      // 调用后端API创建成员
+      const res = await cloudRequest.callContainer({
+        path: `/api/family-members?user_id=${this.data.userInfo.user_id}`,
+        method: 'POST',
+        data: {
+          name: guestName,
+          gender: 'unknown',
+          age: null,
+          height: null,
+          is_active: true
+        }
+      });
+      
+      console.log('[Scale Page] 访客成员创建成功:', res);
+      
+      // 重新加载成员列表
+      await this.loadMembers();
+      
+      // 自动选择新创建的访客
+      const newMember = this.data.members.find(m => m.name === guestName);
+      if (newMember) {
+        this.setData({
+          selectedMemberId: newMember.id,
+          currentMember: newMember
         });
         
-        if (closestMatch) {
-          wx.showModal({
-            title: '体重差异较大',
-            content: `当前体重 ${currentWeight}kg 与 ${closestMatch.member.name} 的历史体重 ${closestMatch.member.lastWeight}kg 相差 ${closestDiff.toFixed(1)}kg\n\n是否仍选择该成员？`,
-            confirmText: '选择',
-            cancelText: '切换',
-            success: (res) => {
-              if (res.confirm) {
-                // 用户确认选择
-                this.selectMemberByIndex(closestMatch.index);
-              } else {
-                // 用户取消，提示手动选择或添加新成员
-                wx.showModal({
-                  title: '选择成员',
-                  content: '请从下方列表中选择成员，或点击右上角“+”添加新成员',
-                  showCancel: false,
-                  confirmText: '知道了'
-                });
-              }
-            }
-          });
-        }
-      } else {
-        // 所有成员都没有历史体重，选择第一个（通常是"自己"）
-        console.log('[自动匹配] 所有成员无历史体重，选择第一个');
-        this.selectMemberByIndex(0);
+        // 计算体脂
+        this.calculateBodyMetrics();
+        
         wx.showToast({
-          title: `已选择: ${members[0].name}`,
-          icon: 'success',
-          duration: 1500
+          title: `已创建: ${guestName}`,
+          icon: 'success'
         });
       }
+    } catch (err) {
+      console.error('[Scale Page] 创建访客失败:', err);
+      wx.showToast({
+        title: '创建失败',
+        icon: 'error'
+      });
     }
   },
   

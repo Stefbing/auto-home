@@ -33,11 +33,20 @@ Page({
       if (hasScaleDevice && !app.globalData.bleAdapterInitialized) {
         console.log('[首页 onShow] 检测到体脂秤设备且蓝牙未初始化，开始初始化')
         app.checkAndInitBluetooth()
+      } else if (hasScaleDevice && app.globalData.bleAdapterInitialized) {
+        // 如果蓝牙已初始化但扫描已停止，重新启动扫描
+        if (!app.globalData.scanTimer) {
+          console.log('[首页 onShow] 重新启动蓝牙定时扫描')
+          app.startPeriodicScan()
+        }
       }
+      
+      // 注册设备状态更新监听
+      this.registerDeviceStatusListener();
     }
   },
   
-  // 更新时间问候语
+  // 注册时间问候语
   updateGreeting() {
     const hour = new Date().getHours()
     let greeting = ''
@@ -57,6 +66,63 @@ Page({
     }
     
     this.setData({ greeting })
+  },
+  
+  /**
+   * 注册设备状态更新监听
+   */
+  registerDeviceStatusListener() {
+    // 在页面显示时检查设备状态
+    this.checkCurrentDeviceStatus();
+    
+    // 设置定时器定期检查设备状态（每5秒）
+    if (!this.deviceStatusTimer) {
+      this.deviceStatusTimer = setInterval(() => {
+        this.checkCurrentDeviceStatus();
+      }, 5000);
+    }
+  },
+  
+  /**
+   * 检查当前设备在线状态
+   */
+  checkCurrentDeviceStatus() {
+    const app = getApp();
+    const status = app.globalData.scaleConnectionStatus || 'offline';
+    console.log('[首页] 检查设备状态:', status);
+    
+    const healthDevices = this.data.healthDevices.map(device => {
+      if (device.device_type === 'scale') {
+        // 对于体脂秤，使用全局扫描状态
+        return {
+          ...device,
+          connectionStatus: status
+        };
+      }
+      return device;
+    });
+    
+    this.setData({ healthDevices });
+  },
+  
+  /**
+   * 更新设备在线状态
+   */
+  updateDeviceOnlineStatus(onlineStatusMap) {
+    const app = getApp();
+    const healthDevices = this.data.healthDevices.map(device => {
+      if (device.device_type === 'scale') {
+        // 使用全局扫描状态
+        return {
+          ...device,
+          connectionStatus: app.globalData.scaleConnectionStatus || 'offline'
+        };
+      }
+      return device;
+    });
+    
+    this.setData({ healthDevices });
+    console.log('[首页] 设备在线状态已更新:', healthDevices);
   },
   
   // 检查登录状态
@@ -242,10 +308,21 @@ Page({
           device_key: 'xiaomi_xiaomi',
           device_type: 'scale',
           device_name: 'xiaomi',
-          display_name: '小米体脂秤',
+          display_name: 'MIBFS', // 首页显示短名称
           platform: 'xiaomi',
-          status: 'active'
+          status: 'active',
+          online: false, // 默认离线，后续通过蓝牙状态更新
+          today_measurements: 0, // 今日测量次数
+          latest_body_fat: null // 最新体脂率
         }
+        
+        // 从 dashboardData 中获取体脂秤统计数据
+        const scaleStats = dashboardData.scale_stats || {}
+        if (scaleStats) {
+          scaleDevice.today_measurements = scaleStats.today_count || 0
+          scaleDevice.latest_body_fat = scaleStats.latest_body_fat || null
+        }
+        
         healthDevices.push(scaleDevice)
         userDevices.push(scaleDevice)
       }
@@ -435,11 +512,11 @@ Page({
       if (deviceType === 'scale') {
         await this.softDeleteScaleMembers()
         
-        // 停止全局蓝牙扫描
+        // 停止全局蓝牙定时扫描
         const app = getApp();
-        if (app && app.stopBleScan) {
-          console.log('[首页] 删除体脂秤，停止蓝牙扫描');
-          app.stopBleScan();
+        if (app && app.stopPeriodicScan) {
+          console.log('[首页] 删除体脂秤，停止蓝牙定时扫描');
+          app.stopPeriodicScan();
           app.globalData.bleAdapterInitialized = false;
         }
       }
@@ -511,6 +588,19 @@ Page({
       content: '确定要退出登录吗？',
       success: (res) => {
         if (res.confirm) {
+          // 清除设备状态检查定时器
+          if (this.deviceStatusTimer) {
+            clearInterval(this.deviceStatusTimer);
+            this.deviceStatusTimer = null;
+          }
+          
+          // 停止蓝牙定时扫描
+          const app = getApp();
+          if (app && app.stopPeriodicScan) {
+            console.log('[首页] 退出登录，停止蓝牙定时扫描');
+            app.stopPeriodicScan();
+          }
+          
           wx.removeStorageSync('userInfo')
           this.setData({ 
             userInfo: null,
@@ -522,5 +612,28 @@ Page({
         }
       }
     })
+  },
+  
+  onHide() {
+    // 页面隐藏时清除定时器
+    if (this.deviceStatusTimer) {
+      clearInterval(this.deviceStatusTimer);
+      this.deviceStatusTimer = null;
+    }
+    
+    // 注意：不在这里停止蓝牙扫描
+    // 因为用户可能跳转到体脂秤页面，需要持续的蓝牙数据
+    // 只在退出登录或删除设备时才停止扫描
+  },
+  
+  onUnload() {
+    // 页面卸载时清除定时器
+    if (this.deviceStatusTimer) {
+      clearInterval(this.deviceStatusTimer);
+      this.deviceStatusTimer = null;
+    }
+    
+    // 注意：不在这里停止蓝牙扫描
+    // 保持扫描运行，供其他页面使用
   }
 })
