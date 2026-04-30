@@ -247,15 +247,35 @@ Page({
   handleScaleDataUpdate(data) {
     console.log('[Scale Page] 收到原始数据:', JSON.stringify(data));
       
-    // 【锁定检查】如果已锁定，忽略新数据
-    if (this.data.measurementLocked) {
-      console.log('[Scale Page] ⚠️ 测量已锁定，忽略新数据');
-      return;
-    }
-        
     // 【关键验证】检查数据有效性
     if (!data || !data.weight || data.weight <= 0) {
       console.log('[Scale Page] ❌ 无效数据:', data);
+      return;
+    }
+    
+    // 【新增】检查 Service Data 时间戳新鲜度（过滤过期广播数据）
+    if (data.timestamp) {
+      const now = Date.now();
+      const dataAge = now - data.timestamp;
+      const maxAge = TIMING.DEBOUNCE; // 使用防抖时间作为阈值（3秒）
+      
+      if (dataAge > maxAge) {
+        console.log('[Scale Page] ⚠️ 数据过期，跳过处理', {
+          timestamp: data.timestamp,
+          dataAge: `${(dataAge / 1000).toFixed(1)}s`,
+          maxAge: `${(maxAge / 1000).toFixed(1)}s`
+        });
+        return;
+      }
+      
+      console.log('[Scale Page] ✅ 数据新鲜度检查通过', {
+        dataAge: `${(dataAge / 1000).toFixed(1)}s`
+      });
+    }
+    
+    // 【锁定检查】如果已锁定，忽略新数据
+    if (this.data.measurementLocked) {
+      console.log('[Scale Page] ⚠️ 测量已锁定，忽略新数据');
       return;
     }
         
@@ -298,16 +318,10 @@ Page({
       isSameData
     });
         
-    // 【防抖】如果刚刚保存过（3秒内）且数据相同，跳过处理
-    const now = Date.now();
-    if (this.lastSaveTime && (now - this.lastSaveTime) < TIMING.DEBOUNCE && isSameData) {
-      console.log('[Scale Page] ⏱️ 防抖：距离上次保存不足3秒且数据相同，跳过');
-      return;
-    }
-        
     console.log('[Scale Page] ✅ 数据通过验证，开始更新UI');
     
-    // 更新页面数据（CSS会自动动画）
+    // 【实时】始终更新页面数据显示（保证仪表盘动态效果）
+    const now = Date.now();
     this.setData({
       device: data.deviceName || '小米体脂秤',
       weight: data.weight,
@@ -329,6 +343,12 @@ Page({
     this.resetScanTimeout();
       
     this.log(`体重: ${data.weight}kg | 阻抗: ${data.impedance || 0}Ω | 稳定: ${data.isStabilized ? '是' : '否'}`);
+    
+    // 【防抖】如果刚刚保存过（3秒内）且数据相同，跳过后续处理（但不影响UI显示）
+    if (this.lastSaveTime && (now - this.lastSaveTime) < TIMING.DEBOUNCE && isSameData) {
+      console.log('[Scale Page] ⏱️ 防抖：距离上次保存不足3秒且数据相同，跳过后续处理');
+      return;
+    }
         
     // 只有数据稳定时才进行后续处理
     if (!data.isStabilized) {
@@ -338,18 +358,32 @@ Page({
       
     // 【关键】数据稳定后，锁定测量，等待用户选择成员
     console.log('[Scale Page] 🔒 数据已稳定，锁定测量');
+    
+    // 如果已经锁定且已选择成员，且体重变化不大，不重复提示
+    const weightChanged = Math.abs(this.data.lockedWeight - data.weight) > MATCHING.DEDUPLICATION_THRESHOLD;
+    if (this.data.measurementLocked && this.data.currentMember && !weightChanged) {
+      console.log('[Scale Page] ✅ 已锁定且已选择成员，体重无显著变化，跳过提示');
+      return;
+    }
+    
     this.setData({
       measurementLocked: true,
       lockedWeight: data.weight,
       lockedImpedance: data.impedance
     });
       
-    // 提示用户选择成员
-    wx.showToast({
-      title: '请选择成员',
-      icon: 'none',
-      duration: 2000
-    });
+    // 只有未选择成员时才提示
+    if (!this.data.currentMember) {
+      wx.showToast({
+        title: '请选择成员',
+        icon: 'none',
+        duration: 2000
+      });
+    } else {
+      console.log('[Scale Page] ✅ 已有选中成员，直接计算体脂');
+      this.calculateBodyMetrics();
+      return; // 已处理，不再执行后续逻辑
+    }
       
     // 如果体重稳定且不是相同数据，才重新计算和匹配
     if (!isSameData) {

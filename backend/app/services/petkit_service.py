@@ -411,10 +411,13 @@ class PetKitService:
 
             if hasattr(entity, 'device_stats'):
                 device_stats = entity.device_stats
-                state_summary['today_visits'] = getattr(device_stats, 'times', 0)
+                # 优先使用今日统计数据，如果没有则使用累计数据并标记警告
+                today_times = getattr(device_stats, 'times', 0)
+                state_summary['today_visits'] = today_times
                 state_summary['avg_duration'] = getattr(device_stats, 'avg_time', 0)
                 state_summary['total_duration'] = getattr(device_stats, 'total_time', 0)
-
+                
+                # 检查是否有更详细的统计信息来验证今日数据
                 if hasattr(device_stats, 'statistic_info') and device_stats.statistic_info:
                     stat_info = device_stats.statistic_info
                     if stat_info and len(stat_info) > 0:
@@ -634,16 +637,52 @@ class PetKitService:
             return {"today_visits": 0, "last_visit": "N/A", "error": "Device not found"}
 
         try:
+            # 从多个数据源获取猫砂和除臭剂信息
+            sand_percent = getattr(target_entity, 'sand_percent', None)
+            deodorant_days = getattr(target_entity, 'deodorant_left_days', None)
+            
+            logger.info(f"Device {target_entity.name} - Initial sand_percent: {sand_percent}, deodorant_days: {deodorant_days}")
+            
+            # 如果实体属性中没有，尝试从 data 字典中获取
+            if (sand_percent == 0 or sand_percent is None) and hasattr(target_entity, 'data') and isinstance(target_entity.data, dict):
+                sand_percent = target_entity.data.get('sand_percent', 0)
+            
+            if (deodorant_days == 0 or deodorant_days is None) and hasattr(target_entity, 'data') and isinstance(target_entity.data, dict):
+                deodorant_days = target_entity.data.get('deodorant_left_days', 0)
+            
+            # 如果还是没有，从 state 的 raw_state 字符串中提取
+            if (sand_percent == 0 or sand_percent is None) and hasattr(target_entity, 'state'):
+                state_obj = target_entity.state
+                raw_state_str = str(state_obj)
+                extracted = {}
+                self._extract_info_from_raw_state(raw_state_str, extracted)
+                if 'sand_percent' in extracted:
+                    sand_percent = extracted['sand_percent']
+                    logger.info(f"Device {target_entity.name} - Extracted sand_percent from raw_state: {sand_percent}")
+                if 'deodorant_left_days' in extracted:
+                    deodorant_days = extracted['deodorant_left_days']
+                    logger.info(f"Device {target_entity.name} - Extracted deodorant_left_days from raw_state: {deodorant_days}")
+            
+            # 确保最终值不为 None
+            sand_percent = sand_percent if sand_percent is not None else 0
+            deodorant_days = deodorant_days if deodorant_days is not None else 0
+            
+            logger.info(f"Device {target_entity.name} - Final sand_percent: {sand_percent}, deodorant_days: {deodorant_days}")
+            
             result = {
                 "device_name": getattr(target_entity, 'name', 'Unknown'),
-                "sand_percent": getattr(target_entity, 'sand_percent', 0),
-                "deodorant_days": getattr(target_entity, 'deodorant_left_days', 0)
+                "sand_percent": sand_percent,
+                "deodorant_days": deodorant_days
             }
 
             if hasattr(target_entity, 'device_stats'):
                 device_stats = target_entity.device_stats
+                # 获取今日统计数据
+                today_times = getattr(device_stats, 'times', 0)
+                logger.info(f"Device {target_entity.name} - today_visits from device_stats.times: {today_times}")
+                logger.info(f"Device {target_entity.name} - device_stats attributes: {dir(device_stats)}")
                 result.update({
-                    "today_visits": getattr(device_stats, 'times', 0),
+                    "today_visits": today_times,
                     "avg_duration": getattr(device_stats, 'avg_time', 0),
                     "total_duration": getattr(device_stats, 'total_time', 0),
                     "statistic_time": getattr(device_stats, 'statistic_time', None)

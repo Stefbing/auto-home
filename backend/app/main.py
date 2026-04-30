@@ -267,6 +267,9 @@ async def clear_all_cache():
 async def get_dashboard_data(user_id: Optional[int] = None):
     """Get aggregated dashboard data (cached, user-specific)"""
     try:
+        # 提前导入，避免作用域问题
+        from .utils.config_manager import get_config_from_db
+        
         # If no user_id provided, try to get from first configured user
         if not user_id:
             user_id = await _get_first_user_with_platform("cloudpets") or await _get_first_user_with_platform("petkit")
@@ -287,7 +290,6 @@ async def get_dashboard_data(user_id: Optional[int] = None):
             await cache_manager.set(f'{cache_prefix}_petkit_devices', petkit_devices, ttl=300)
         elif not petkit_devices:
             # Try to initialize service for this user
-            from .utils.config_manager import get_config_from_db
             username = await get_config_from_db("account", user_id=user_id, platform="petkit")
             password = await get_config_from_db("password", user_id=user_id, platform="petkit")
             if username and password:
@@ -314,7 +316,6 @@ async def get_dashboard_data(user_id: Optional[int] = None):
         # CloudPets servings (user-specific)
         cloudpets_servings = await cache_manager.get(f'{cache_prefix}_cloudpets_servings')
         if not cloudpets_servings:
-            from .utils.config_manager import get_config_from_db
             account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
             password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
             
@@ -351,7 +352,6 @@ async def get_dashboard_data(user_id: Optional[int] = None):
         dashboard_data['cloudpets_plans'] = cloudpets_plans or []
         
         # Xiaomi scale config check
-        from .utils.config_manager import get_config_from_db
         xiaomi_account = await get_config_from_db("account", user_id=user_id, platform="xiaomi")
         xiaomi_password = await get_config_from_db("password", user_id=user_id, platform="xiaomi")
         dashboard_data['xiaomi_config'] = bool(xiaomi_account and xiaomi_password)
@@ -498,20 +498,29 @@ async def petkit_devices_with_stats(service: PetKitService = Depends(get_petkit)
         for device in devices:
             device_id = getattr(device, 'id', '') if hasattr(device, 'id') else ''
             if device_id:
+                # 始终使用 get_daily_stats 获取最新的今日数据，确保数据准确性
                 stats_cache_key = f'petkit_stats_{device_id}'
+                # 缩短缓存时间，确保数据及时性
                 stats = await cache_manager.get(stats_cache_key)
                 if not stats:
                     stats = await service.get_daily_stats(device_id)
-                    await cache_manager.set(stats_cache_key, stats, ttl=180)
+                    await cache_manager.set(stats_cache_key, stats, ttl=60)  # 缩短为60秒
+                
+                # 将最新的统计数据合并到设备信息中
                 device_dict = device if isinstance(device, dict) else {
                     "id": device_id, "name": getattr(device, 'name', 'Unknown'),
                     "type": getattr(device, 'type', 'Unknown'), "data": getattr(device, 'data', {})
                 }
-                device_dict['state_summary'] = stats if isinstance(stats, dict) else {}
+                # 确保 state_summary 使用最新的统计数据
+                if isinstance(stats, dict):
+                    # 保留设备原有信息，但用最新统计数据覆盖关键字段
+                    existing_summary = device_dict.get('state_summary', {})
+                    merged_summary = {**existing_summary, **stats}
+                    device_dict['state_summary'] = merged_summary
                 result.append(device_dict)
             else:
                 result.append(device)
-        await cache_manager.set('petkit_devices_with_stats', result, ttl=120)
+        await cache_manager.set('petkit_devices_with_stats', result, ttl=60)  # 缩短为60秒
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取设备和统计数据失败：{str(e)}")

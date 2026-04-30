@@ -84,7 +84,9 @@ function parseShortFormat(data) {
     impedance: 0, // 8字节格式不包含阻抗数据
     isStabilized: isStabilized,
     unit: unit,
-    format: '8-byte'
+    format: '8-byte',
+    // 8字节格式没有时间戳，使用当前时间
+    timestamp: Date.now()
   };
   
   console.log('[BLE] ✅ 8字节格式解析成功:', JSON.stringify(result));
@@ -155,7 +157,8 @@ function parseFullFormat(data) {
     impedance: validImpedance ? impedance : 0,
     isStabilized: isStabilized,
     unit: unit,
-    timestamp: new Date(year, month - 1, day, data[6], data[7], data[8]).getTime()
+    // 体脂秤广播的是 UTC 时间，使用 Date.UTC 创建
+    timestamp: Date.UTC(year, month - 1, day, data[6], data[7], data[8])
   };
   
   console.log('[BLE] 解析成功:', JSON.stringify(result));

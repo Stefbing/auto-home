@@ -27,6 +27,13 @@ Page({
     this.updateGreeting()
     if (this.data.userInfo) {
       this.loadUserDevices()
+      
+      // 每次显示首页时，检查是否需要初始化蓝牙
+      const hasScaleDevice = this.data.healthDevices.some(d => d.device_type === 'scale');
+      if (hasScaleDevice && !app.globalData.bleAdapterInitialized) {
+        console.log('[首页 onShow] 检测到体脂秤设备且蓝牙未初始化，开始初始化')
+        app.checkAndInitBluetooth()
+      }
     }
   },
   
@@ -94,10 +101,8 @@ Page({
       // 自动加载设备（后端已自动初始化服务）
       await this.loadUserDevices()
       
-      // 重新检查是否有体脂秤设备（以最新设备列表为准）
+      // 登录成功后，检查是否有体脂秤设备并初始化蓝牙
       const hasScaleDevice = this.data.healthDevices.some(d => d.device_type === 'scale');
-      
-      // 登录成功后，如果用户有体脂秤设备，立即初始化蓝牙
       if (hasScaleDevice) {
         console.log('[首页] 检测到用户有体脂秤设备，立即初始化蓝牙')
         app.checkAndInitBluetooth()
@@ -216,8 +221,8 @@ Page({
             stats = litterboxPetkitDevice.state_summary
           }
           
-          // 今日如厕次数
-          litterboxDevice.today_visits = stats.today_visits || stats.used_times || 0
+          // 今日如厕次数 - 只使用 today_visits，不使用 used_times（累计值）
+          litterboxDevice.today_visits = stats.today_visits !== undefined ? stats.today_visits : 0
           
           // 猫砂余量百分比
           litterboxDevice.sand_level = stats.sand_percent || 0

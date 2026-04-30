@@ -39,8 +39,17 @@ App({
       }
     });
     
-    // 不自动初始化蓝牙，等待用户登录且有体脂秤设备时再初始化
-    console.log('[BLE Manager] 等待登录后按需初始化蓝牙');
+    // 检查是否有登录信息，如果有则尝试初始化蓝牙
+    const userInfo = wx.getStorageSync('userInfo');
+    if (userInfo && userInfo.user_id) {
+      console.log('[BLE Manager] 检测到用户已登录，检查是否需要初始化蓝牙');
+      // 延迟执行，确保页面加载完成
+      setTimeout(() => {
+        this.checkAndInitBluetooth();
+      }, 500);
+    } else {
+      console.log('[BLE Manager] 用户未登录，等待登录后初始化蓝牙');
+    }
   },
   
   /**
@@ -53,14 +62,35 @@ App({
       return;
     }
     
-    // 直接检查 has_configured 字段（表示已配置体脂秤设备）
-    if (!userInfo.has_configured) {
-      console.log('[BLE Manager] 用户未配置体脂秤设备，跳过蓝牙初始化');
+    // 优先检查 has_configured 字段
+    if (userInfo.has_configured) {
+      console.log('[BLE Manager] 用户已配置体脂秤设备（has_configured=true），开始初始化蓝牙');
+      this.initBluetoothManager();
       return;
     }
     
-    console.log('[BLE Manager] 用户已登录且有体脂秤设备，开始初始化蓝牙');
-    this.initBluetoothManager();
+    // 如果 has_configured 不存在或为 false，尝试从后端获取设备列表确认
+    console.log('[BLE Manager] has_configured 未设置，尝试从后端获取设备列表...');
+    const cloudRequest = require('./utils/cloud_request.js');
+    
+    cloudRequest.callContainer({
+      path: `/api/dashboard/data?user_id=${userInfo.user_id}`,
+      method: 'GET',
+      success: (res) => {
+        const healthDevices = res.health_devices || [];
+        const hasScaleDevice = healthDevices.some(d => d.device_type === 'scale');
+        
+        if (hasScaleDevice) {
+          console.log('[BLE Manager] 后端返回有体脂秤设备，开始初始化蓝牙');
+          this.initBluetoothManager();
+        } else {
+          console.log('[BLE Manager] 后端返回无体脂秤设备，跳过蓝牙初始化');
+        }
+      },
+      fail: (err) => {
+        console.error('[BLE Manager] 获取设备列表失败:', err);
+      }
+    });
   },
   
   /**
@@ -291,6 +321,30 @@ App({
       console.log(`[BLE Manager] ✅ 使用数据源: ${usedDataSource}`);
       console.log('[BLE Manager] ==========================================');
       
+      // 【新增】检查 Service Data 时间戳新鲜度（过滤过期广播数据）
+      if (finalData.timestamp) {
+        const now = Date.now();
+        // 体脂秤的 timestamp 是 UTC 时间，需要转换为本地时间
+        // JavaScript 的 Date 对象会自动处理时区，直接相减即可
+        const dataAge = now - finalData.timestamp;
+        const maxAge = SCALE_CONFIG.DATA_DEBOUNCE_TIME; // 3秒
+        
+        console.log('[BLE Manager] 🕒 时间戳检查', {
+          currentTime: new Date(now).toLocaleTimeString(),
+          dataTimestamp: new Date(finalData.timestamp).toLocaleTimeString(),
+          dataAge: `${(dataAge / 1000).toFixed(1)}s`,
+          maxAge: `${(maxAge / 1000).toFixed(1)}s`,
+          isExpired: dataAge > maxAge
+        });
+        
+        if (dataAge > maxAge) {
+          console.log('[BLE Manager] ⚠️ 数据过期，跳过处理');
+          continue; // 跳过这条过期数据
+        }
+        
+        console.log('[BLE Manager] ✅ 数据新鲜度检查通过');
+      }
+      
       // 【防抖】如果体重和稳定状态都没变化，跳过处理（减少日志）
       const lastData = this.globalData.latestScaleData;
       if (lastData && 
@@ -312,8 +366,19 @@ App({
         const isStableByFlag = finalData.isStabilized;
         const isStableByHistory = this.isWeightStable(3);
         
-        if (isStableByFlag || isStableByHistory) {
+        // 只有体重超过阈值且稳定时才跳转
+        const isAdultWeight = finalData.weight >= LIMITS.MIN_WEIGHT; // 30kg
+        if ((isStableByFlag || isStableByHistory) && isAdultWeight) {
+          console.log('[BLE Manager] 📊 数据防抖 - 检测到稳定有效体重，准备跳转', {
+            weight: finalData.weight,
+            isStabilized: finalData.isStabilized
+          });
           this.checkAndNavigateToScalePage();
+        } else if ((isStableByFlag || isStableByHistory) && !isAdultWeight) {
+          console.log('[BLE Manager] ⚠️ 数据防抖 - 体重低于阈值，跳过跳转', {
+            weight: finalData.weight,
+            threshold: LIMITS.MIN_WEIGHT
+          });
         }
         
         continue; // 跳过后续日志输出
@@ -338,16 +403,28 @@ App({
       // 通知所有注册的回调
       this.notifyScaleDataUpdate(this.globalData.latestScaleData);
       
-      // 【增强】只要有体重数据就跳转（实时+稳定），让用户看到动态过程
+      // 【增强】体重超过30kg且数据稳定才跳转
       const hasWeight = finalData.weight > 0;
+      const isAdultWeight = finalData.weight >= LIMITS.MIN_WEIGHT; // 30kg
+      const isStable = finalData.isStabilized;
       
-      if (hasWeight) {
-        console.log('[BLE Manager] 📊 检测到体重数据，准备跳转到体脂秤页面', {
+      if (hasWeight && isAdultWeight && isStable) {
+        console.log('[BLE Manager] 📊 检测到有效稳定体重，准备跳转到体脂秤页面', {
           weight: finalData.weight,
           isStabilized: finalData.isStabilized,
           impedance: finalData.impedance || 0
         });
         this.checkAndNavigateToScalePage();
+      } else if (hasWeight && isAdultWeight && !isStable) {
+        console.log('[BLE Manager] ⏳ 体重有效但未稳定，等待稳定数据', {
+          weight: finalData.weight,
+          isStabilized: false
+        });
+      } else if (hasWeight && !isAdultWeight) {
+        console.log('[BLE Manager] ⚠️ 体重低于阈值，跳过跳转', {
+          weight: finalData.weight,
+          threshold: LIMITS.MIN_WEIGHT
+        });
       }
     }
   },

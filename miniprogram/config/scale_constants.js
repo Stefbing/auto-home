@@ -27,6 +27,9 @@ export const SCALE_CONFIG = {
   /** 自动计算延迟（ms）- 成员加载完成后延迟计算体脂 */
   AUTO_CALCULATE_DELAY: 500,
   
+  /** 数据新鲜度阈值（ms）- Service Data 时间戳超过此值视为过期数据 */
+  DATA_FRESHNESS_THRESHOLD: 10000, // 10秒
+  
   // ========== 稳定性检测 ==========
   /** 稳定性检测阈值（次数）- 连续N次相同值判定为稳定 */
   STABLE_THRESHOLD: 3,
@@ -70,6 +73,9 @@ export const SCALE_CONFIG = {
   BONE_MASS_RATIO: 0.04,
   
   // ========== 体重范围 ==========
+  /** 最小有效体重（kg）- 低于此值不触发跳转，过滤无效数据 */
+  MIN_EFFECTIVE_WEIGHT: 30,
+  
   /** 仪表盘最大体重（kg） */
   GAUGE_MAX_WEIGHT: 150,
   
@@ -186,7 +192,8 @@ export const TIMING = {
 export const LIMITS = {
   HISTORY: SCALE_CONFIG.MAX_HISTORY_RECORDS,
   CHART_POINTS: SCALE_CONFIG.CHART_MAX_POINTS,
-  LOGS: SCALE_CONFIG.MAX_LOG_ENTRIES
+  LOGS: SCALE_CONFIG.MAX_LOG_ENTRIES,
+  MIN_WEIGHT: SCALE_CONFIG.MIN_EFFECTIVE_WEIGHT
 };
 
 export default SCALE_CONFIG;
