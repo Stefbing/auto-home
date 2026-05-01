@@ -10,6 +10,8 @@ Page({
     weightDisplay: '0.00', // 格式化后的体重显示
     impedance: 0,
     isStabilized: false,
+    stabilityProgress: 0,
+    stabilitySteps: [1, 2, 3, 4, 5],
     logs: [],
     userInfo: null,
     autoSaved: false, // 标记是否已自动保存
@@ -50,6 +52,11 @@ Page({
 
   onLoad() {
     this.checkLoginStatus();
+    
+    // 【新增】标记用户已访问体脂秤页面，允许自动跳转
+    const app = getApp();
+    app.globalData.hasVisitedScalePage = true;
+    console.log('[Scale Page] 标记用户已访问体脂秤页面');
     
     // 检查并初始化蓝牙（三个条件：已登录 + 有体脂秤设备 + 未初始化）
     this.checkAndInitBluetoothIfNeeded();
@@ -243,6 +250,7 @@ Page({
       weightDisplay: '0.00',
       impedance: 0,
       isStabilized: false,
+      stabilityProgress: 0,
       autoSaved: false,
       measurementLocked: false,
       lockedWeight: null,
@@ -302,6 +310,40 @@ Page({
   /**
    * 处理蓝牙数据更新
    */
+  getStabilityState(newWeight, isHardwareStable = false) {
+    const history = [
+      ...this.data.weightHistory,
+      {
+        weight: newWeight,
+        timestamp: Date.now()
+      }
+    ].slice(-10);
+
+    const totalSteps = SCALE_CONFIG.STABILITY_PROGRESS_STEPS || 5;
+    let progress = history.length > 0 ? 1 : 0;
+
+    for (let i = history.length - 1; i > 0 && progress < totalSteps; i--) {
+      const diff = Math.abs(history[i].weight - history[i - 1].weight);
+      if (diff < MATCHING.DEDUPLICATION_THRESHOLD) {
+        progress += 1;
+      } else {
+        break;
+      }
+    }
+
+    if (isHardwareStable) {
+      progress = totalSteps;
+    }
+
+    const isStable = progress >= totalSteps;
+
+    return {
+      history,
+      progress,
+      isStable
+    };
+  },
+
   handleScaleDataUpdate(data) {
     console.log('[Scale Page] 收到原始数据:', JSON.stringify(data));
       
@@ -311,11 +353,11 @@ Page({
       return;
     }
     
-    // 【新增】检查 Service Data 时间戳新鲜度
-    if (data.timestamp) {
+    // 【新增】检查数据新鲜度（使用接收时间而非设备时间，避免时钟不同步问题）
+    if (data.receiveTime) {
       const now = Date.now();
-      const dataAge = Math.abs(now - data.timestamp); // 使用绝对值，兼容时钟不同步
-      const maxAge = 10000; // 放宽到10秒
+      const dataAge = now - data.receiveTime; // 计算从接收到现在的时间差
+      const maxAge = 15000; // 放宽到15秒
       
       if (dataAge > maxAge) {
         console.log('[Scale Page] ⚠️ 数据过期', `${(dataAge / 1000).toFixed(1)}s`);
@@ -341,7 +383,11 @@ Page({
     
     // 【关键】使用软件层面判断稳定性（硬件标志位不可靠）
     const isHardwareStable = data.isStabilized;
-    const isSoftwareStable = this.checkSoftwareStability(data.weight);
+    const stabilityState = this.getStabilityState(data.weight, isHardwareStable);
+    const isSoftwareStable = stabilityState.isStable;
+    const stabilityProgress = isHardwareStable
+      ? (SCALE_CONFIG.STABILITY_PROGRESS_STEPS || 5)
+      : stabilityState.progress;
     // 任一稳定即认为稳定
     const isStable = isHardwareStable || isSoftwareStable;
     
@@ -351,11 +397,12 @@ Page({
       hasImpedance,
       isHardwareStable,
       isSoftwareStable,
+      stabilityProgress,
       isStable
     });
     
     // 如果数据稳定但没有阻抗，说明可能不是真正的体脂秤数据
-    if (isStable && !hasImpedance) {
+    if (false && isStable && !hasImpedance) {
       console.log('[Scale Page] ⚠️ 数据稳定但无阻抗，等待下一次数据');
       return;
     }
@@ -387,17 +434,19 @@ Page({
       weightDisplay: data.weight.toFixed(2), // 格式化显示
       impedance: data.impedance || 0,
       isStabilized: isStable, // 使用软件判断的稳定状态
+      stabilityProgress: stabilityProgress,
       scanning: true,
       autoSaved: false, // 重置自动保存状态
       lastDataTime: now, // 记录最后一次收到数据的时间
-      weightHistory: this.data.weightHistory // 更新历史记录
+      weightHistory: stabilityState.history // 更新历史记录
     });
     
     console.log('[Scale Page] UI更新完成:', {
       weight: data.weight,
       weightDisplay: data.weight.toFixed(2),
       isStabilized: isStable,
-      isSoftwareStable
+      isSoftwareStable,
+      stabilityProgress
     });
         
     // 重置超时定时器

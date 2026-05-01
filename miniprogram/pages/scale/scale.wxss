@@ -437,6 +437,51 @@ page {
   animation: breathe 1.5s infinite ease-in-out;
 }
 
+.stability-progress {
+  width: 100%;
+  margin-top: 18rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.progress-caption {
+  font-size: 22rpx;
+  color: #64748B;
+  font-weight: 600;
+}
+
+.progress-track {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.progress-step {
+  width: 44rpx;
+  height: 10rpx;
+  border-radius: 999rpx;
+  background: #E2E8F0;
+  transition: all 0.2s ease;
+}
+
+.progress-step.active {
+  background: linear-gradient(90deg, #60A5FA 0%, #2563EB 100%);
+  box-shadow: 0 0 10rpx rgba(37, 99, 235, 0.18);
+}
+
+.progress-step.done {
+  background: linear-gradient(90deg, #34D399 0%, #10B981 100%);
+  box-shadow: 0 0 10rpx rgba(16, 185, 129, 0.18);
+}
+
+.progress-value {
+  font-size: 22rpx;
+  color: #475569;
+  font-weight: 700;
+}
+
 @keyframes breathe {
   0%, 100% { opacity: 1; transform: scale(1.1); }
   50% { opacity: 0.3; transform: scale(0.8); }

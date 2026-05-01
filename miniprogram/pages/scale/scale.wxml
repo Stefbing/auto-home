@@ -48,7 +48,17 @@
            </view>
            <view class="status-pill {{isStabilized ? 'pill-stable' : 'pill-scan'}}">
              <view class="dot"></view>
-             <text>{{isStabilized ? '测量完成' : '实时测量中'}}</text>
+             <text>{{isStabilized ? (impedance > 0 ? '测量完成' : '已稳定，等待阻抗') : '实时测量中'}}</text>
+           </view>
+
+           <view class="stability-progress">
+<!--             <text class="progress-caption">{{isStabilized ? (impedance > 0 ? '稳定完成' : '稳定完成，等待阻抗') : '稳定进度'}}</text>-->
+             <view class="progress-track">
+               <block wx:for="{{stabilitySteps}}" wx:key="*this">
+                 <view class="progress-step {{item <= stabilityProgress ? (isStabilized ? 'done' : 'active') : ''}}"></view>
+               </block>
+             </view>
+<!--             <text class="progress-value" wx:if="{{!isStabilized}}">{{stabilityProgress}}/5</text>-->
            </view>
          </view>
 

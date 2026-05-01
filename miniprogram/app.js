@@ -14,6 +14,8 @@ App({
     latestScaleData: null,
     scaleDataHistory: [], // 用于稳定性检测
     bleCallbacks: [], // 回调函数列表
+    scalePageNavigationInFlight: false,
+    lastScalePageNavigateAt: 0,
     
     // 日志优化：记录上次发现的设备信息
     lastDiscoveredDeviceId: null,
@@ -24,6 +26,9 @@ App({
     
     // 体脂秤扫描状态：'offline' | 'scanning' | 'online'
     scaleConnectionStatus: 'offline',
+    
+    // 【新增】标记用户是否访问过体脂秤页面（防止首页误跳转）
+    hasVisitedScalePage: false,
     
     // 定时扫描控制
     scanTimer: null, // 扫描定时器
@@ -535,8 +540,9 @@ App({
       console.log(`[BLE] ✅ 使用数据源: ${usedDataSource}`);
       console.log('[BLE] ==========================================');
       
-      // 【关键】只处理有阻抗数据的完整测量结果
-      if (!finalData.impedance || finalData.impedance === 0) {
+      // Keep live weight updates flowing even before impedance is available.
+      const requireImpedanceBeforeUiUpdate = false;
+      if (requireImpedanceBeforeUiUpdate && (!finalData.impedance || finalData.impedance === 0)) {
         console.log('[BLE] ⚠️ 阻抗为0，跳过（等待完整测量数据）');
         continue;
       }
@@ -585,7 +591,8 @@ App({
       
       // 【关键】只有有阻抗数据且体重有效时才跳转
       const hasWeight = finalData.weight > 0;
-      const isAdultWeight = finalData.weight >= LIMITS.MIN_WEIGHT; // 30kg
+      const navigateThreshold = SCALE_CONFIG.MIN_NAVIGATE_WEIGHT || LIMITS.MIN_WEIGHT;
+      const isAdultWeight = finalData.weight >= navigateThreshold;
       
       if (hasWeight && isAdultWeight) {
         console.log('[BLE Manager] 📊 检测到完整测量数据，立即跳转', {
@@ -599,7 +606,7 @@ App({
       } else if (hasWeight && !isAdultWeight) {
         console.log('[BLE Manager] ⚠️ 体重低于阈值，跳过跳转', {
           weight: finalData.weight,
-          threshold: LIMITS.MIN_WEIGHT
+          threshold: navigateThreshold
         });
       }
     }
@@ -676,13 +683,24 @@ App({
    * 检测并跳转到体脂秤页面
    */
   checkAndNavigateToScalePage() {
+    const now = Date.now();
+    if (this.globalData.scalePageNavigationInFlight && (now - this.globalData.lastScalePageNavigateAt) < 2000) {
+      return;
+    }
     // 获取当前页面栈
     const pages = getCurrentPages();
     const currentPage = pages[pages.length - 1];
     
-    // 如果已经在体脂秤页面，不跳转
+    // 【关键】如果已经在体脂秤页面，不跳转
     if (currentPage && currentPage.route === 'pages/scale/scale') {
       console.log('[BLE Manager] 已在体脂秤页面，无需跳转');
+      return;
+    }
+    
+    // 【新增】检查是否从体脂秤页面返回（通过全局标记判断）
+    // 只有在用户曾经访问过体脂秤页面后，才允许自动跳转
+    if (!this.globalData.hasVisitedScalePage) {
+      console.log('[BLE Manager] ⚠️ 用户未访问过体脂秤页面，跳过自动跳转');
       return;
     }
     
@@ -690,13 +708,22 @@ App({
     console.log('[BLE Manager] ✅ 检测到有效体重，立即跳转到体脂秤页面');
     
     // 使用navigateTo保留页面栈，确保有返回按钮
+    this.globalData.scalePageNavigationInFlight = true;
+    this.globalData.lastScalePageNavigateAt = now;
+    const releaseNavigationLock = () => {
+      setTimeout(() => {
+        this.globalData.scalePageNavigationInFlight = false;
+      }, 800);
+    };
     wx.navigateTo({
       url: '/pages/scale/scale',
+      complete: releaseNavigationLock,
       fail: (err) => {
         console.error('[BLE Manager] 跳转失败:', err);
         // 如果navigateTo失败（页面栈满），尝试redirectTo
         wx.redirectTo({
           url: '/pages/scale/scale',
+          complete: releaseNavigationLock,
           fail: (err2) => {
             console.error('[BLE Manager] redirectTo也失败:', err2);
           }

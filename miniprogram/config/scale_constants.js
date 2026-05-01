@@ -33,6 +33,7 @@ export const SCALE_CONFIG = {
   // ========== 稳定性检测 ==========
   /** 稳定性检测阈值（次数）- 连续N次相同值判定为稳定 */
   STABLE_THRESHOLD: 3,
+  STABILITY_PROGRESS_STEPS: 5,
   
   // ========== 数据限制 ==========
   /** 最大历史记录数 - 保留最近N条用于稳定性检测 */
@@ -75,6 +76,7 @@ export const SCALE_CONFIG = {
   // ========== 体重范围 ==========
   /** 最小有效体重（kg）- 低于此值不触发跳转，过滤无效数据 */
   MIN_EFFECTIVE_WEIGHT: 30,
+  MIN_NAVIGATE_WEIGHT: 20,
   
   /** 仪表盘最大体重（kg） */
   GAUGE_MAX_WEIGHT: 150,
