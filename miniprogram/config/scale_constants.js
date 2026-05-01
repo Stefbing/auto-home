@@ -19,7 +19,7 @@ export const SCALE_CONFIG = {
   SCAN_TIMEOUT: 60000,
   
   /** 跳转延迟时间（ms）- 检测到稳定体重后延迟跳转 */
-  NAVIGATE_DELAY: 500,
+  NAVIGATE_DELAY: 0,
   
   /** 图表绘制延迟（ms）- 数据加载完成后延迟绘制 */
   CHART_DRAW_DELAY: 300,

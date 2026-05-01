@@ -394,6 +394,7 @@ page {
   color: #1E293B;
   font-family: "DIN Alternate", -apple-system, sans-serif;
   letter-spacing: -2rpx;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .weight-unit {
@@ -946,4 +947,20 @@ page {
 .submit-btn:active {
   transform: scale(0.98);
   box-shadow: 0 4rpx 12rpx rgba(16, 185, 129, 0.2);
+}
+
+/* ========== 淡入动画 ========== */
+.fade-in {
+  animation: fadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

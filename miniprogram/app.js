@@ -124,7 +124,7 @@ App({
         
         // 监听蓝牙适配器状态变化
         wx.onBluetoothAdapterStateChange((res) => {
-          console.log('[BLE Manager] 适配器状态变化:', res);
+          // console.log('[BLE Manager] 适配器状态变化:', res);  // 弱化此日志
           this.globalData.bleAdapterInitialized = res.available;
           
           if (!res.available) {
@@ -356,9 +356,9 @@ App({
     };
     
     console.log(`[BLE Manager] 设备在线状态更新: ${deviceKey}`, {
-      online: isOnline,
-      hasAdvertData,
-      hasServiceData
+      online: isOnline
+      // hasAdvertData,  // 弱化详细日志
+      // hasServiceData
     });
     
     // 通知首页更新设备状态
@@ -370,7 +370,7 @@ App({
    */
   notifyDeviceStatusUpdate() {
     // 通过全局数据共享，页面可以通过轮询或直接读取获取最新状态
-    console.log('[BLE Manager] 设备在线状态已更新，当前状态:', this.globalData.deviceOnlineStatus);
+    // console.log('[BLE Manager] 设备在线状态已更新');  // 弱化此日志
   },
   
   /**
@@ -425,61 +425,69 @@ App({
       const rssiChanged = !lastRSSI || Math.abs(lastRSSI - device.RSSI) > 5;
       
       if (!isSameDevice || rssiChanged) {
-        console.log('[BLE] 发现设备:', device.name, 'RSSI:', device.RSSI);
+        console.log('[BLE] 🔍 发现设备:', device.name, '| RSSI:', device.RSSI);
+        console.log('[BLE]    deviceId:', device.deviceId);
         this.globalData.lastDiscoveredDeviceId = device.deviceId;
         this.globalData.lastDiscoveredRSSI = device.RSSI;
       }
       
-      // 解析广播数据
+      // ========== 详细打印所有广播数据 ==========
+      console.log('[BLE] ========== 广播数据详情 ==========');
+      
+      // 1. advertisData
       const advertisData = device.advertisData;
-      if (!advertisData) {
-        console.log('[BLE Manager] ⚠️ 设备无 advertisData');
-        continue;
+      if (advertisData && advertisData.byteLength > 0) {
+        const advertArray = Array.from(new Uint8Array(advertisData));
+        const advertHex = advertArray.map(b => b.toString(16).padStart(2, '0')).join(' ');
+        console.log('[BLE] 📦 advertisData:');
+        console.log('   - 长度:', advertisData.byteLength, '字节');
+        console.log('   - 原始数组:', advertArray);
+        console.log('   - Hex:', advertHex);
+        console.log('   - 二进制:', advertArray.map(b => b.toString(2).padStart(8, '0')).join(' '));
+      } else {
+        console.log('[BLE] ⚠️ 无 advertisData');
       }
       
-      console.log('[BLE Manager] advertisData 长度:', advertisData.byteLength);
-      console.log('[BLE Manager] advertisData 原始数组:', Array.from(new Uint8Array(advertisData)));
-      console.log('[BLE Manager] advertisData Hex:', Array.from(new Uint8Array(advertisData)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-      
-      // 检查 serviceData
-      if (device.serviceData) {
-        console.log('[BLE Manager] ✅ 发现 serviceData');
-        console.log('[BLE Manager] serviceData 对象:', device.serviceData);
-        
-        // 遍历所有 service UUID
+      // 2. serviceData
+      if (device.serviceData && Object.keys(device.serviceData).length > 0) {
+        console.log('[BLE] 📦 serviceData:');
         for (let uuid in device.serviceData) {
           const serviceData = device.serviceData[uuid];
-          console.log(`[BLE Manager] Service UUID ${uuid}:`, {
-            length: serviceData.byteLength,
-            array: Array.from(new Uint8Array(serviceData)),
-            hex: Array.from(new Uint8Array(serviceData)).map(b => b.toString(16).padStart(2, '0')).join(' ')
-          });
+          const serviceArray = Array.from(new Uint8Array(serviceData));
+          const serviceHex = serviceArray.map(b => b.toString(16).padStart(2, '0')).join(' ');
+          console.log(`   - UUID: ${uuid}`);
+          console.log(`     长度: ${serviceData.byteLength} 字节`);
+          console.log(`     原始数组:`, serviceArray);
+          console.log(`     Hex:`, serviceHex);
+          console.log(`     二进制:`, serviceArray.map(b => b.toString(2).padStart(8, '0')).join(' '));
         }
       } else {
-        console.log('[BLE Manager] ⚠️ 无 serviceData');
+        console.log('[BLE] ⚠️ 无 serviceData');
       }
       
-      // 检查 manufacturerData
-      if (device.manufacturerData) {
-        console.log('[BLE Manager] ✅ 发现 manufacturerData');
-        console.log('[BLE Manager] manufacturerData 对象:', device.manufacturerData);
-        
+      // 3. manufacturerData
+      if (device.manufacturerData && Object.keys(device.manufacturerData).length > 0) {
+        console.log('[BLE] 📦 manufacturerData:');
         for (let manuId in device.manufacturerData) {
           const manuData = device.manufacturerData[manuId];
-          console.log(`[BLE Manager] Manufacturer ID ${manuId}:`, {
-            length: manuData.byteLength,
-            array: Array.from(new Uint8Array(manuData)),
-            hex: Array.from(new Uint8Array(manuData)).map(b => b.toString(16).padStart(2, '0')).join(' ')
-          });
+          const manuArray = Array.from(new Uint8Array(manuData));
+          const manuHex = manuArray.map(b => b.toString(16).padStart(2, '0')).join(' ');
+          console.log(`   - Manufacturer ID: ${manuId}`);
+          console.log(`     长度: ${manuData.byteLength} 字节`);
+          console.log(`     原始数组:`, manuArray);
+          console.log(`     Hex:`, manuHex);
+          console.log(`     二进制:`, manuArray.map(b => b.toString(2).padStart(8, '0')).join(' '));
         }
       } else {
-        console.log('[BLE Manager] ⚠️ 无 manufacturerData');
+        console.log('[BLE] ⚠️ 无 manufacturerData');
       }
+      
+      console.log('[BLE] ==========================================');
       
       // 尝试解析 advertisData
       const advertScaleData = bleUtils.parseScaleData(advertisData);
       if (advertScaleData) {
-        console.log('[BLE] advertisData:', `${advertScaleData.weight}kg`, advertScaleData.isStabilized ? '稳定' : '未稳定');
+        console.log('[BLE] 📡 advertisData:', `${advertScaleData.weight}kg`, advertScaleData.isStabilized ? '✅稳定' : '⏳未稳定');
       } else {
         console.log('[BLE] ⚠️ advertisData解析失败');
       }
@@ -498,46 +506,43 @@ App({
           
           const serviceScaleData = bleUtils.parseScaleData(serviceData);
           if (serviceScaleData) {
-            console.log('[BLE Manager] ✅ Service 数据解析成功:', JSON.stringify(serviceScaleData));
-            console.log('[BLE Manager]    - weight:', serviceScaleData.weight, 'kg');
-            console.log('[BLE Manager]    - isStabilized:', serviceScaleData.isStabilized);
-            console.log('[BLE Manager]    - impedance:', serviceScaleData.impedance || 0);
-            console.log('[BLE Manager]    - timestamp:', serviceScaleData.timestamp ? new Date(serviceScaleData.timestamp).toLocaleString() : 'N/A');
+            console.log('[BLE] 🎯 Service数据解析成功:');
+            console.log('   - 体重:', serviceScaleData.weight, 'kg');
+            console.log('   - 稳定状态:', serviceScaleData.isStabilized ? '✅' : '⏳');
+            console.log('   - 阻抗:', serviceScaleData.impedance || 0, 'Ω');
+            console.log('   - 时间戳:', serviceScaleData.timestamp ? new Date(serviceScaleData.timestamp).toLocaleTimeString() : 'N/A');
             finalData = serviceScaleData;
             usedDataSource = `Service ${uuid}`;
             break; // 使用第一个成功的Service数据
           } else {
-            console.log('[BLE Manager] ❌ Service 数据解析失败');
+            console.log('[BLE] ❌ Service 数据解析失败');
           }
         }
       }
       
       // 如果Service数据解析失败，回退到advertisData
       if (!finalData && advertScaleData) {
-        console.log('[BLE Manager] ⚠️ Service不可用，回退使用 advertisData');
+        console.log('[BLE] ⚠️ Service不可用，回退使用 advertisData');
         finalData = advertScaleData;
         usedDataSource = 'advertisData';
       }
 
       if (!finalData) {
-        console.log('[BLE Manager] ❌ 所有数据源解析失败');
+        console.log('[BLE] ❌ 所有数据源解析失败');
         continue;
       }
       
-      console.log(`[BLE Manager] ✅ 使用数据源: ${usedDataSource}`);
-      console.log('[BLE Manager] ==========================================');
+      console.log(`[BLE] ✅ 使用数据源: ${usedDataSource}`);
+      console.log('[BLE] ==========================================');
       
-      // 【新增】检查 Service Data 时间戳新鲜度
-      if (finalData.timestamp) {
-        const now = Date.now();
-        const dataAge = Math.abs(now - finalData.timestamp);
-        const maxAge = 10000; // 10秒
-        
-        if (dataAge > maxAge) {
-          console.log('[BLE] ⚠️ 数据过期', `${(dataAge / 1000).toFixed(1)}s`);
-          continue;
-        }
+      // 【关键】只处理有阻抗数据的完整测量结果
+      if (!finalData.impedance || finalData.impedance === 0) {
+        console.log('[BLE] ⚠️ 阻抗为0，跳过（等待完整测量数据）');
+        continue;
       }
+      
+      // 【优化】使用接收时间而非设备时间戳（避免时钟不同步问题）
+      const receiveTime = Date.now();
       
       // 【防抖】如果体重和稳定状态都没变化，跳过处理（减少日志）
       const lastData = this.globalData.latestScaleData;
@@ -550,30 +555,11 @@ App({
           deviceName: device.name,
           deviceId: device.deviceId,
           RSSI: device.RSSI,
-          receiveTime: Date.now()
+          receiveTime: receiveTime
         };
         
         // 仍然通知回调（页面需要实时更新）
         this.notifyScaleDataUpdate(this.globalData.latestScaleData);
-        
-        // 检查稳定性（仅用于日志，不影响跳转）
-        const isStableByFlag = finalData.isStabilized;
-        const isStableByHistory = this.isWeightStable(3);
-        
-        // 只要体重超过阈值就跳转（去掉稳定状态检查）
-        const isAdultWeight = finalData.weight >= LIMITS.MIN_WEIGHT; // 30kg
-        if (isAdultWeight) {
-          console.log('[BLE Manager] 📊 数据防抖 - 检测到有效体重，准备跳转', {
-            weight: finalData.weight,
-            isStabilized: finalData.isStabilized
-          });
-          this.checkAndNavigateToScalePage();
-        } else {
-          console.log('[BLE Manager] ⚠️ 数据防抖 - 体重低于阈值，跳过跳转', {
-            weight: finalData.weight,
-            threshold: LIMITS.MIN_WEIGHT
-          });
-        }
         
         continue; // 跳过后续日志输出
       }
@@ -585,7 +571,7 @@ App({
         deviceName: device.name,
         deviceId: device.deviceId,
         RSSI: device.RSSI,
-        receiveTime: Date.now()
+        receiveTime: receiveTime
       };
       
       // 记录历史数据（用于稳定性检测）
@@ -597,28 +583,19 @@ App({
       // 通知所有注册的回调
       this.notifyScaleDataUpdate(this.globalData.latestScaleData);
       
-      // 【增强】体重超过30kg且数据新鲜就跳转（去掉稳定状态检查）
+      // 【关键】只有有阻抗数据且体重有效时才跳转
       const hasWeight = finalData.weight > 0;
       const isAdultWeight = finalData.weight >= LIMITS.MIN_WEIGHT; // 30kg
       
       if (hasWeight && isAdultWeight) {
-        console.log('[BLE Manager] 📊 检测到有效体重，准备跳转到体脂秤页面', {
+        console.log('[BLE Manager] 📊 检测到完整测量数据，立即跳转', {
           weight: finalData.weight,
-          isStabilized: finalData.isStabilized,
-          impedance: finalData.impedance || 0
+          impedance: finalData.impedance,
+          isStabilized: finalData.isStabilized
         });
         
-        // 【关键】如果阻抗为0，尝试建立BLE连接获取完整数据
-        if (!finalData.impedance || finalData.impedance === 0) {
-          console.log('[BLE Manager] ⚠️ 阻抗为0，尝试建立BLE连接');
-          this.connectToDevice(device.deviceId, () => {
-            // 连接成功后再跳转
-            this.checkAndNavigateToScalePage();
-          });
-        } else {
-          // 有阻抗数据，直接跳转
-          this.checkAndNavigateToScalePage();
-        }
+        // 直接跳转，不需要连接设备
+        this.checkAndNavigateToScalePage();
       } else if (hasWeight && !isAdultWeight) {
         console.log('[BLE Manager] ⚠️ 体重低于阈值，跳过跳转', {
           weight: finalData.weight,
@@ -709,33 +686,23 @@ App({
       return;
     }
     
-    // 检查是否在后台或首页
-    console.log('[BLE Manager] ✅ 检测到稳定体重，准备跳转到体脂秤页面');
+    // 立即跳转，无延迟
+    console.log('[BLE Manager] ✅ 检测到有效体重，立即跳转到体脂秤页面');
     
-    // 显示提示
-    wx.showToast({
-      title: '检测到称重，正在跳转...',
-      icon: 'none',
-      duration: 1500
+    // 使用navigateTo保留页面栈，确保有返回按钮
+    wx.navigateTo({
+      url: '/pages/scale/scale',
+      fail: (err) => {
+        console.error('[BLE Manager] 跳转失败:', err);
+        // 如果navigateTo失败（页面栈满），尝试redirectTo
+        wx.redirectTo({
+          url: '/pages/scale/scale',
+          fail: (err2) => {
+            console.error('[BLE Manager] redirectTo也失败:', err2);
+          }
+        });
+      }
     });
-    
-    // 延迟跳转，给用户反应时间
-    setTimeout(() => {
-      // 使用navigateTo保留页面栈，确保有返回按钮
-      wx.navigateTo({
-        url: '/pages/scale/scale',
-        fail: (err) => {
-          console.error('[BLE Manager] 跳转失败:', err);
-          // 如果navigateTo失败（页面栈满），尝试redirectTo
-          wx.redirectTo({
-            url: '/pages/scale/scale',
-            fail: (err2) => {
-              console.error('[BLE Manager] redirectTo也失败:', err2);
-            }
-          });
-        }
-      });
-    }, SCALE_CONFIG.NAVIGATE_DELAY);
   },
   
   /**

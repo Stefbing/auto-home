@@ -1,7 +1,4 @@
-<!-- 自定义导航栏 -->
-<custom-nav />
-
- <view class="page">
+<view class="page">
   <!-- Hero卡片 - 设备状态 -->
   <view class="hero-card">
     <view class="device-header">
@@ -60,7 +57,7 @@
    </view>
 
   <!-- 家庭成员选择 - 只在测量完成后显示 -->
-  <view class="member-section" wx:if="{{isStabilized && impedance > 0}}">
+  <view class="member-section {{isStabilized && impedance > 0 ? 'fade-in' : ''}}" wx:if="{{isStabilized && impedance > 0}}">
     <view class="section-header">
       <text class="section-title">家庭成员</text>
       <button class="add-member-btn" bindtap="showAddMemberModal">
@@ -107,7 +104,7 @@
   </view>
 
   <!-- 健康数据统计 -->
-  <view class="stats-grid" wx:if="{{currentMember && bodyFat}}">
+  <view class="stats-grid {{currentMember && bodyFat ? 'fade-in' : ''}}" wx:if="{{currentMember && bodyFat}}">
     <view class="stat-card">
       <view class="stat-icon">⚖️</view>
       <view class="stat-content">
@@ -196,17 +193,6 @@
         </view>
         <text class="stat-range">正常: 1-9</text>
       </view>
-    </view>
-  </view>
-
-  <!-- 历史趋势图表（体重+体脂合并） -->
-  <view class="chart-section" wx:if="{{currentMember && currentMember.weightHistory && currentMember.weightHistory.length > 0}}">
-    <view class="section-header">
-      <text class="section-title">健康趋势</text>
-      <text class="chart-count">最近{{currentMember.weightHistory.length}}次</text>
-    </view>
-    <view class="chart-container">
-      <canvas canvas-id="combinedChart" id="combinedChart" class="weight-chart"></canvas>
     </view>
   </view>
 
