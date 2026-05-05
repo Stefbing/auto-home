@@ -1459,3 +1459,151 @@ async def get_member_history(member_id: int, user_id: str, limit: int = 30, sess
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取历史记录失败：{str(e)}")
 
+# --- Scale Measurement APIs (小程序专用) ---
+class ScaleMeasurementRequest(BaseModel):
+    member_id: int
+    weight: float
+    impedance: int = 0
+    bmi: Optional[float] = None
+    body_fat: Optional[float] = None
+    water: Optional[float] = None
+    muscle_mass: Optional[float] = None
+    protein: Optional[float] = None
+    bmr: Optional[float] = None
+    visceral_fat: Optional[float] = None
+
+@app.post("/api/scale/measurements")
+async def create_scale_measurement(request: ScaleMeasurementRequest, session: Session = Depends(get_session)):
+    """Create a new scale measurement record"""
+    try:
+        # Verify member exists and is active
+        member = session.get(FamilyMember, request.member_id)
+        if not member or not member.is_active:
+            raise HTTPException(status_code=404, detail="家庭成员不存在或已禁用")
+        
+        # Create weight record
+        record = WeightRecord(
+            user_id=member.user_id,
+            member_id=request.member_id,
+            weight=request.weight,
+            impedance=request.impedance,
+            bmi=request.bmi,
+            body_fat=request.body_fat,
+            water=request.water,
+            muscle=request.muscle_mass,
+            protein=request.protein,
+            bmr=request.bmr,
+            bone_mass=None,
+            visceral_fat=request.visceral_fat,
+            timestamp=int(time.time() * 1000),
+            created_at=int(time.time() * 1000)
+        )
+        
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        
+        logger.info(f"Created scale measurement for member {request.member_id}: {request.weight}kg")
+        
+        # If Xiaomi service is initialized, push data
+        if state.xiaomi_initialized:
+            user = session.get(User, member.user_id)
+            asyncio.create_task(_safe_create_push_task(record, user))
+        
+        return {
+            "code": 200,
+            "message": "保存成功",
+            "data": {
+                "id": record.id,
+                "weight": record.weight,
+                "timestamp": record.timestamp
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Failed to create scale measurement: {e}")
+        raise HTTPException(status_code=500, detail=f"保存失败：{str(e)}")
+
+@app.get("/api/scale/members")
+async def get_scale_members(user_id: Optional[int] = None, session: Session = Depends(get_session)):
+    """Get all active family members for scale page"""
+    try:
+        if not user_id:
+            # Try to get from first configured user
+            user_id = await _get_first_user_with_platform("cloudpets") or await _get_first_user_with_platform("petkit")
+            if not user_id:
+                return {"code": 200, "data": []}
+        
+        stmt = select(FamilyMember).where(
+            FamilyMember.user_id == user_id,
+            FamilyMember.is_active == True
+        ).order_by(FamilyMember.sort_order, FamilyMember.created_at)
+        members = session.exec(stmt).all()
+        
+        result = []
+        for member in members:
+            # Get latest weight for this member
+            weight_stmt = select(WeightRecord).where(
+                WeightRecord.member_id == member.id
+            ).order_by(WeightRecord.timestamp.desc()).limit(1)
+            latest_record = session.exec(weight_stmt).first()
+            
+            # Get weight history count
+            history_stmt = select(WeightRecord).where(
+                WeightRecord.member_id == member.id
+            )
+            history_count = len(session.exec(history_stmt).all())
+            
+            result.append({
+                "id": member.id,
+                "name": member.name,
+                "gender": member.gender,
+                "age": member.age,
+                "height": member.height,
+                "avatar_color": member.avatar_color,
+                "relationship": member.relationship,
+                "last_weight": latest_record.weight if latest_record else None,
+                "weight_history": [{
+                    "date": record.timestamp,
+                    "weight": record.weight
+                } for record in session.exec(select(WeightRecord).where(
+                    WeightRecord.member_id == member.id
+                ).order_by(WeightRecord.timestamp.desc()).limit(10)).all()],
+                "sort_order": member.sort_order
+            })
+        
+        return {"code": 200, "data": result}
+    except Exception as e:
+        logger.error(f"Failed to get scale members: {e}")
+        raise HTTPException(status_code=500, detail=f"获取成员列表失败：{str(e)}")
+
+@app.put("/api/scale/members/{member_id}")
+async def update_scale_member(member_id: int, request: FamilyMemberRequest, session: Session = Depends(get_session)):
+    """Update a family member (alias for PUT /api/family-members/{member_id})"""
+    try:
+        member = session.get(FamilyMember, member_id)
+        if not member:
+            raise HTTPException(status_code=404, detail="家庭成员不存在")
+        
+        member.name = request.name
+        member.gender = request.gender
+        member.age = request.age
+        member.height = request.height
+        member.avatar_color = request.avatar_color
+        member.relationship = request.relationship
+        member.updated_at = int(time.time() * 1000)
+        
+        session.add(member)
+        session.commit()
+        session.refresh(member)
+        
+        return {"code": 200, "message": "修改成功", "data": {"id": member.id}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Failed to update member: {e}")
+        raise HTTPException(status_code=500, detail=f"修改失败：{str(e)}")
+

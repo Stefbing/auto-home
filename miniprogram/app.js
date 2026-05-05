@@ -408,9 +408,9 @@ App({
         this.notifyScaleDataUpdate(this.globalData.latestScaleData);
       }
 
-      // 4. 智能跳转逻辑：站上即跳[cite: 1]
-      const navigateThreshold = SCALE_CONFIG.MIN_NAVIGATE_WEIGHT || 5.0;
-      if (finalData.weight >= navigateThreshold) {
+      // 4. 智能跳转逻辑：稳定状态且体重≥30kg才跳转（过滤缓存数据）
+      const navigateThreshold = SCALE_CONFIG.MIN_NAVIGATE_WEIGHT || 30.0;
+      if (finalData.isStabilized && finalData.weight >= navigateThreshold) {
         this.checkAndNavigateToScalePage();
       }
     }
