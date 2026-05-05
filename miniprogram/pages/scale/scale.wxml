@@ -12,10 +12,15 @@
           </view>
         </view>
       </view>
-      <button class="refresh-btn {{scanning ? 'loading' : ''}}" bindtap="refreshDevices" loading="{{scanning}}" disabled="{{false}}">
-        <text wx:if="{{!scanning}}">刷新</text>
-        <text wx:else>扫描中</text>
-      </button>
+      <view class="action-buttons">
+        <button class="debug-btn {{debugMode ? 'active' : ''}}" bindtap="toggleDebugMode">
+          <text>{{debugMode ? '🔍 调试中' : '🔍 调试'}}</text>
+        </button>
+        <button class="refresh-btn {{scanning ? 'loading' : ''}}" bindtap="refreshDevices" loading="{{scanning}}" disabled="{{false}}">
+          <text wx:if="{{!scanning}}">刷新</text>
+          <text wx:else>扫描中</text>
+        </button>
+      </view>
     </view>
   </view>
 
@@ -254,5 +259,38 @@
 
       <button class="submit-btn" bindtap="submitAddMember">{{editingMemberId ? '保存修改' : '确认添加'}}</button>
     </view>
+  </view>
+  
+  <!-- 【新增】蓝牙广播调试面板 -->
+  <view wx:if="{{debugMode}}" class="debug-panel">
+    <view class="debug-header">
+      <text class="debug-title">📡 原始广播报文</text>
+      <button class="clear-btn" bindtap="clearAdvertisements">清空</button>
+    </view>
+    
+    <scroll-view class="debug-content" scroll-y>
+      <view wx:if="{{rawAdvertisements.length === 0}}" class="empty-tip">
+        <text>暂无广播数据，请站在体脂秤上...</text>
+      </view>
+      
+      <view wx:for="{{rawAdvertisements}}" wx:key="index" class="advertisement-item {{item.success ? 'success' : 'failed'}}">
+        <view class="adv-header">
+          <text class="adv-time">{{item.time}}</text>
+          <text class="adv-name">{{item.name}}</text>
+        </view>
+        <view class="adv-info">
+          <text class="info-tag">RSSI: {{item.rssi}}dBm</text>
+          <text class="info-tag">{{item.length}}B</text>
+          <text class="info-tag status-{{item.success ? 'ok' : 'error'}}">{{item.success ? '✅ 成功' : '❌ 失败'}}</text>
+        </view>
+        <view class="adv-parsed">
+          <text class="parsed-text">{{item.parsed}}</text>
+        </view>
+        <view class="adv-data">
+          <text class="data-label">Hex:</text>
+          <text class="data-hex">{{item.hex}}</text>
+        </view>
+      </view>
+    </scroll-view>
   </view>
 </view>

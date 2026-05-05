@@ -162,6 +162,12 @@ page {
   transform: scale(0.96);
 }
 
+.debug-btn.active {
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  color: #FFFFFF;
+  box-shadow: 0 4rpx 12rpx rgba(245, 158, 11, 0.3);
+}
+
 /* ========== 实时体重显示 ========== */
 .weight-hero {
   margin: 0 32rpx 24rpx;
@@ -1008,4 +1014,186 @@ page {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ========== 【新增】蓝牙广播调试面板 ========== */
+.debug-panel {
+  margin: 24rpx 32rpx;
+  background: #FFFFFF;
+  border-radius: 24rpx;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08),
+              0 0 0 1rpx rgba(0, 0, 0, 0.05) inset;
+  overflow: hidden;
+}
+
+.debug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24rpx 32rpx;
+  background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+  border-bottom: 1rpx solid rgba(0, 0, 0, 0.05);
+}
+
+.debug-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.clear-btn {
+  padding: 0 24rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.9);
+  color: #DC2626;
+  font-size: 24rpx;
+  font-weight: 600;
+  border: none;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
+  transition: all 0.3s;
+}
+
+.clear-btn::after {
+  border: none;
+}
+
+.clear-btn:active {
+  background: #FFFFFF;
+  transform: scale(0.96);
+}
+
+.debug-content {
+  max-height: 800rpx;
+  padding: 16rpx;
+}
+
+.empty-tip {
+  padding: 80rpx 32rpx;
+  text-align: center;
+  color: #94A3B8;
+  font-size: 26rpx;
+}
+
+.advertisement-item {
+  padding: 20rpx;
+  margin-bottom: 16rpx;
+  background: #F8FAFC;
+  border-radius: 16rpx;
+  border-left: 4rpx solid #F59E0B;
+  transition: all 0.3s;
+}
+
+.advertisement-item.success {
+  border-left-color: #10B981;
+  background: linear-gradient(135deg, #F0FDF4 0%, #F8FAFC 100%);
+}
+
+.advertisement-item.failed {
+  border-left-color: #EF4444;
+  background: linear-gradient(135deg, #FEF2F2 0%, #F8FAFC 100%);
+}
+
+.advertisement-item:last-child {
+  margin-bottom: 0;
+}
+
+.advertisement-item:active {
+  background: #F1F5F9;
+  transform: scale(0.99);
+}
+
+.adv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12rpx;
+}
+
+.adv-time {
+  font-size: 22rpx;
+  color: #64748B;
+  font-weight: 500;
+}
+
+.adv-name {
+  font-size: 26rpx;
+  color: #1E293B;
+  font-weight: 600;
+  max-width: 400rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adv-info {
+  display: flex;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
+}
+
+.info-tag {
+  padding: 4rpx 12rpx;
+  background: rgba(245, 158, 11, 0.1);
+  color: #D97706;
+  font-size: 22rpx;
+  font-weight: 500;
+  border-radius: 8rpx;
+}
+
+.info-tag.status-ok {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.info-tag.status-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #DC2626;
+}
+
+.adv-parsed {
+  padding: 12rpx 16rpx;
+  margin: 12rpx 0;
+  background: rgba(16, 185, 129, 0.05);
+  border-radius: 12rpx;
+  border-left: 3rpx solid #10B981;
+}
+
+.parsed-text {
+  font-size: 24rpx;
+  color: #059669;
+  font-weight: 600;
+  font-family: 'Courier New', monospace;
+}
+
+.adv-data {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  margin-top: 8rpx;
+}
+
+.data-label {
+  font-size: 22rpx;
+  color: #94A3B8;
+  font-weight: 600;
+  min-width: 60rpx;
+  flex-shrink: 0;
+}
+
+.data-hex {
+  font-size: 22rpx;
+  color: #1E293B;
+  font-family: 'Courier New', monospace;
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+.data-binary {
+  font-size: 20rpx;
+  color: #64748B;
+  font-family: 'Courier New', monospace;
+  word-break: break-all;
+  line-height: 1.6;
 }
