@@ -7,6 +7,8 @@ Page({
   data: {
     scanning: false, device: null, weight: 0, weightDisplay: '0.00',
     impedance: 0, isStabilized: false, stabilityProgress: 0,
+    showMemberModal: false, // 控制成员选择弹窗
+    hasTriggeredSelection: false, // 防抖锁：防止一次称重多次弹窗
     stabilitySteps: [1, 2, 3, 4, 5], logs: [], userInfo: null,
     autoSaved: false, scanTimeout: null, measurementLocked: false,
     lockedWeight: null, lockedImpedance: null, lastDataTime: null,
@@ -64,11 +66,10 @@ Page({
   },
 
   registerBleCallback() {
-    if (this.bleCallback) return;
     const app = getApp();
+    // 统一指向 handleScaleDataUpdate
     this.bleCallback = (data) => this.handleScaleDataUpdate(data);
     app.registerScaleCallback(this.bleCallback);
-    if (this.data.debugMode) this.startRawAdvertisementListener();
   },
 
   unregisterBleCallback() {
@@ -117,41 +118,64 @@ Page({
   },
 
   handleScaleDataUpdate(data) {
-    // 1. 数据合法性过滤
-    if (!data || data.weight < 0.1) return;
+    if (!data || data.weight < 0.1 || data.weight > 300) return;
 
-    // 2. 实时更新 UI 数值（即便没稳定也要显示，给用户实时反馈）
+    const isHardwareStable = data.isStabilized;
+    const stabilityState = this.getStabilityState(data.weight, isHardwareStable);
+    const isStable = isHardwareStable || stabilityState.isStable;
+    const stabilityProgress = isHardwareStable ? 5 : stabilityState.progress;
+
+    if (data.impedance > 0 && (data.impedance < 100 || data.impedance > 3000)) return;
+
     this.setData({
-      weightDisplay: data.weight.toFixed(2),
+      device: data.deviceName || '小米体脂秤',
       weight: data.weight,
-      scanning: true
+      weightDisplay: data.weight.toFixed(2),
+      impedance: data.impedance || 0,
+      isStabilized: isStable,
+      stabilityProgress,
+      scanning: true,
+      autoSaved: false,
+      lastDataTime: Date.now(),
+      weightHistory: stabilityState.history
     });
 
-    // 3. 只有当秤端标志位 isStabilized 为 true 时，才执行锁定逻辑
-    if (data.isStabilized) {
-      // 增加一个 300ms 的视觉延迟，让用户看清最后的数字
-      if (!this.data.isStabilized) {
-        this.setData({
-          isStabilized: true,
-          stabilityProgress: 5
-        });
+    this.resetScanTimeout();
+    this.log(`体重: ${data.weight}kg | 阻抗: ${data.impedance || 0}Ω | 稳定: ${isStable ? '是' : '否'}`);
 
-        // 触发震动反馈，提升感知
-        wx.vibrateShort();
+    console.log('[Scale Page] 状态:', { isStable, impedance: data.impedance, locked: this.data.measurementLocked, member: !!this.data.currentMember });
 
-        // 如果阻抗也出来了，或者等待阻抗完成
-        if (data.impedance > 0) {
-          this.setData({ impedance: data.impedance });
-          this.calculateBodyMetrics(); // 开始计算体脂
-        }
+    if (!isStable) return;
+
+    if (!data.impedance) {
+      console.log('[Scale Page] ⏳ 等待阻抗');
+      return;
+    }
+
+    if (this.data.measurementLocked && this.data.currentMember) {
+      console.log('[Scale Page] ✅ 已完成');
+      return;
+    }
+
+    if (this.data.measurementLocked && !this.data.currentMember) {
+      console.log('[Scale Page] 🔓 解锁重新匹配');
+      this.setData({ measurementLocked: false });
+    }
+
+    console.log('[Scale Page] 🔒 锁定');
+    this.setData({ measurementLocked: true, lockedWeight: data.weight, lockedImpedance: data.impedance });
+
+    if (!this.data.currentMember) {
+      if (this.data.members.length === 0) {
+        console.log('[Scale Page] ⚠️ 成员未加载');
+        return;
       }
+      console.log('[Scale Page] 🎯 自动匹配');
+      this.autoMatchMember(data.weight);
     } else {
-      // 动态进度条模拟（0-4阶段）
-      const progress = Math.min(4, Math.floor(this.data.stabilityProgress + 1));
-      this.setData({
-        isStabilized: false,
-        stabilityProgress: progress
-      });
+      console.log('[Scale Page] ✅ 直接计算');
+      wx.showLoading({ title: '计算中...', mask: true });
+      this.calculateBodyMetrics(() => wx.hideLoading());
     }
   },
 
@@ -160,33 +184,27 @@ Page({
     if (!members?.length) return;
 
     if (members.length === 1) {
-      this.selectAndSwitch(members[0], false);
+      this.performSwitch(members[0], true);
       return;
     }
 
     let bestMatch = null, minDiff = Infinity;
-    members.forEach((member, index) => {
+    members.forEach(member => {
       if (member.lastWeight > 0) {
         const diff = Math.abs(member.lastWeight - currentWeight);
         if (diff <= MATCHING.TOLERANCE && diff < minDiff) {
           minDiff = diff;
-          bestMatch = { member, index };
+          bestMatch = member;
         }
       }
     });
 
     if (bestMatch) {
-      this.selectAndSwitch(bestMatch.member, false);
+      console.log(`[Scale] 自动匹配: ${bestMatch.name}`);
+      this.performSwitch(bestMatch, true);
     } else {
-      wx.showModal({
-        title: '未识别成员',
-        content: `当前体重 ${currentWeight}kg 与所有成员差异较大\n\n是否创建访客记录？`,
-        confirmText: '创建访客', cancelText: '手动选择',
-        success: (res) => {
-          if (res.confirm) this.createGuestMember(currentWeight);
-          else wx.showToast({ title: '请从列表选择', icon: 'none' });
-        }
-      });
+      this.setData({ showMemberModal: true });
+      wx.showToast({ title: '请手动选择成员', icon: 'none' });
     }
   },
 

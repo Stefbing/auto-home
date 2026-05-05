@@ -404,7 +404,7 @@ App({
         receiveTime: Date.now()
       };
 
-      if (!isDuplicate) {
+      if (!isDuplicate || (finalData.isStabilized && !lastData.isStabilized)) {
         this.notifyScaleDataUpdate(this.globalData.latestScaleData);
       }
 
