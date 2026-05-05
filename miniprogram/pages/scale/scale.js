@@ -33,7 +33,7 @@ Page({
       const res = await cloudRequest.callContainer({
         path: `/api/dashboard/data?user_id=${userInfo.user_id}`, method: 'GET'
       });
-      
+
       if (!res.xiaomi_config) {
         wx.showModal({
           title: '未配置设备', content: '请先在首页添加体脂秤设备',
@@ -117,51 +117,53 @@ Page({
   },
 
   handleScaleDataUpdate(data) {
-    if (!data?.weight || data.weight <= 0 || data.weight < 0.1 || data.weight > 300) return;
-    if (data.receiveTime && (Date.now() - data.receiveTime) > 15000) return;
-    if (this.data.measurementLocked) return;
-    
-    const hasImpedance = data.impedance > 0;
-    const isHardwareStable = data.isStabilized;
-    const stabilityState = this.getStabilityState(data.weight, isHardwareStable);
-    const isStable = isHardwareStable || stabilityState.isStable;
-    const stabilityProgress = isHardwareStable ? (SCALE_CONFIG.STABILITY_PROGRESS_STEPS || 5) : stabilityState.progress;
-    
-    if (hasImpedance && (data.impedance < 100 || data.impedance > 3000)) return;
-    
-    const now = Date.now();
+    // 1. 数据合法性过滤
+    if (!data || data.weight < 0.1) return;
+
+    // 2. 实时更新 UI 数值（即便没稳定也要显示，给用户实时反馈）
     this.setData({
-      device: data.deviceName || '小米体脂秤', weight: data.weight,
-      weightDisplay: data.weight.toFixed(2), impedance: data.impedance || 0,
-      isStabilized: isStable, stabilityProgress, scanning: true,
-      autoSaved: false, lastDataTime: now, weightHistory: stabilityState.history
+      weightDisplay: data.weight.toFixed(2),
+      weight: data.weight,
+      scanning: true
     });
-    
-    this.resetScanTimeout();
-    this.log(`体重: ${data.weight}kg | 阻抗: ${data.impedance || 0}Ω | 稳定: ${isStable ? '是' : '否'}`);
-    
-    if (this.lastSaveTime && (now - this.lastSaveTime) < TIMING.DEBOUNCE) return;
-    if (!isStable || !data.impedance) return;
-    
-    const weightChanged = Math.abs(this.data.lockedWeight - data.weight) > MATCHING.DEDUPLICATION_THRESHOLD;
-    if (this.data.measurementLocked && this.data.currentMember && !weightChanged) return;
-    
-    this.setData({ measurementLocked: true, lockedWeight: data.weight, lockedImpedance: data.impedance });
-    
-    if (!this.data.currentMember && this.data.members.length > 0) {
-      this.autoMatchMember(data.weight);
+
+    // 3. 只有当秤端标志位 isStabilized 为 true 时，才执行锁定逻辑
+    if (data.isStabilized) {
+      // 增加一个 300ms 的视觉延迟，让用户看清最后的数字
+      if (!this.data.isStabilized) {
+        this.setData({
+          isStabilized: true,
+          stabilityProgress: 5
+        });
+
+        // 触发震动反馈，提升感知
+        wx.vibrateShort();
+
+        // 如果阻抗也出来了，或者等待阻抗完成
+        if (data.impedance > 0) {
+          this.setData({ impedance: data.impedance });
+          this.calculateBodyMetrics(); // 开始计算体脂
+        }
+      }
+    } else {
+      // 动态进度条模拟（0-4阶段）
+      const progress = Math.min(4, Math.floor(this.data.stabilityProgress + 1));
+      this.setData({
+        isStabilized: false,
+        stabilityProgress: progress
+      });
     }
   },
 
   autoMatchMember(currentWeight) {
     const members = this.data.members;
     if (!members?.length) return;
-    
+
     if (members.length === 1) {
       this.selectAndSwitch(members[0], false);
       return;
     }
-    
+
     let bestMatch = null, minDiff = Infinity;
     members.forEach((member, index) => {
       if (member.lastWeight > 0) {
@@ -172,7 +174,7 @@ Page({
         }
       }
     });
-    
+
     if (bestMatch) {
       this.selectAndSwitch(bestMatch.member, false);
     } else {
@@ -244,7 +246,7 @@ Page({
       wx.showToast({ title: `已选择: ${member.name}`, icon: 'success' });
       return;
     }
-    
+
     wx.showLoading({ title: '计算中...', mask: true });
     if (this.data.measurementLocked && this.data.lockedWeight) {
       const tempW = this.data.weight, tempI = this.data.impedance;
@@ -290,7 +292,7 @@ Page({
     if (this.data.isLoadingMembers || !this.data.userInfo?.user_id) return;
     this.setData({ isLoadingMembers: true });
     const userId = this.data.userInfo.user_id;
-    
+
     cloudRequest.callContainer({
       path: `/api/family-members?user_id=${userId}`, method: 'GET',
       success: (res) => {
@@ -321,7 +323,7 @@ Page({
       if (typeof callback === 'function') callback();
       return;
     }
-    
+
     const promises = members.map(member => new Promise((resolve) => {
       cloudRequest.callContainer({
         path: `/api/family-members/${member.id}/history?user_id=${this.data.userInfo.user_id}&limit=7`,
@@ -342,7 +344,7 @@ Page({
         fail: () => resolve(member)
       });
     }));
-    
+
     Promise.all(promises).then(updatedMembers => {
       updatedMembers = updatedMembers.map(m => {
         if (m.weightHistory?.length > 0) {
@@ -354,18 +356,18 @@ Page({
         }
         return m;
       });
-      
-      this.setData({ 
+
+      this.setData({
         members: updatedMembers,
         selectedMemberId: updatedMembers[0]?.id || null,
         currentMember: updatedMembers[0] || null,
         isLoadingMembers: false
       });
-      
+
       if (this.data.weight > 0 && this.data.isStabilized) {
         setTimeout(() => this.calculateBodyMetrics(), TIMING.CALCULATE_DELAY);
       }
-      
+
       const app = getApp();
       if (app.globalData.latestScaleData && !this.data.isStabilized) {
         this.handleScaleDataUpdate(app.globalData.latestScaleData);
@@ -447,7 +449,7 @@ Page({
   },
 
   closeAddMemberModal() {
-    this.setData({ 
+    this.setData({
       showAddMemberDialog: false, editingMemberId: null,
       newMemberName: '', newMemberAge: '', newMemberHeight: '',
       newMemberGender: '', newMemberGenderIndex: -1
@@ -480,10 +482,10 @@ Page({
     };
 
     wx.showLoading({ title: editingMemberId ? '保存中...' : '添加中...' });
-    const apiPath = editingMemberId 
+    const apiPath = editingMemberId
       ? `/api/family-members/${editingMemberId}?user_id=${this.data.userInfo.user_id}`
       : `/api/family-members?user_id=${this.data.userInfo.user_id}`;
-    
+
     cloudRequest.callContainer({
       path: apiPath, method: editingMemberId ? 'PUT' : 'POST',
       data: memberData,
@@ -524,13 +526,13 @@ Page({
       if (typeof callback === 'function') callback();
       return;
     }
-    
+
     const { age, gender, height } = currentMember;
     const missing = [];
     if (!age || age <= 0) missing.push('年龄');
     if (!height || height <= 0) missing.push('身高');
     if (!gender) missing.push('性别');
-    
+
     if (missing.length > 0) {
       if (this.data.showAddMemberDialog && this.data.editingMemberId === currentMember.id) {
         if (typeof callback === 'function') callback();
@@ -547,11 +549,11 @@ Page({
       });
       return;
     }
-    
+
     const bmi = this.calcBMI(weight, height);
     let bodyFat = 0;
     const sex = gender === 'male' ? 1 : 0;
-    
+
     if (impedance > 0 && height > 0) {
       bodyFat = (1.20 * bmi) + (0.23 * age) - (10.8 * sex) - 5.4;
       bodyFat += ((height * height) / impedance) * 0.001;
@@ -559,28 +561,28 @@ Page({
       bodyFat = (1.20 * bmi) + (0.23 * age) - (10.8 * sex) - 5.4 + 1.0;
     }
     bodyFat = Math.max(SCALE_CONFIG.BODY_FAT_MIN, Math.min(SCALE_CONFIG.BODY_FAT_MAX, bodyFat));
-    
+
     let water = gender === 'male' ? 68 - (bodyFat - 10) * 0.7 : 63 - (bodyFat - 15) * 0.7;
     water = Math.max(SCALE_CONFIG.WATER_MIN, Math.min(SCALE_CONFIG.WATER_MAX, water));
-    
+
     const boneRatio = SCALE_CONFIG.BONE_MASS_RATIO;
     const muscleMass = weight * (1 - bodyFat / 100 - boneRatio);
-    
+
     let protein = gender === 'male' ? 22 - (bodyFat - 15) * 0.3 : 20 - (bodyFat - 20) * 0.3;
     protein = Math.max(SCALE_CONFIG.PROTEIN_MIN, Math.min(SCALE_CONFIG.PROTEIN_MAX, protein));
-    
+
     let bmr = gender === 'male'
       ? 10 * weight + 6.25 * height - 5 * age + 5 - 80
       : 10 * weight + 6.25 * height - 5 * age - 161 - 60;
     bmr = Math.round(bmr);
-    
+
     const boneMass = weight * boneRatio;
-    
+
     let visceralFat = gender === 'male'
       ? (bmi - 20) * 2.5 + (age - 25) * 0.3
       : (bmi - 19) * 2.5 + (age - 25) * 0.3;
     visceralFat = Math.max(SCALE_CONFIG.VISCERAL_FAT_MIN, Math.min(SCALE_CONFIG.VISCERAL_FAT_MAX, Math.round(visceralFat * 10) / 10));
-    
+
     this.setData({
       bmi: parseFloat(parseFloat(bmi).toFixed(1)),
       bodyFat: parseFloat(parseFloat(bodyFat).toFixed(1)),
@@ -592,7 +594,7 @@ Page({
     }, () => {
       if (typeof callback === 'function') callback();
     });
-    
+
     this.log(`BMI: ${parseFloat(bmi).toFixed(1)} | 体脂率: ${parseFloat(bodyFat).toFixed(1)}%`);
     if (this.data.isStabilized && this.data.currentMember) this.autoSaveToDatabase();
   },
@@ -663,15 +665,15 @@ Page({
     if (!this.data.currentMember || !this.data.isStabilized || this.data.weight <= 0) return;
     const member = this.data.currentMember;
     const lastWeight = member.lastWeight || 0;
-    
+
     if (lastWeight > 0 && Math.abs(this.data.weight - lastWeight) >= SCALE_CONFIG.AUTO_SAVE_WEIGHT_DIFF) {
       wx.showToast({ title: '体重波动过大，请确认', icon: 'none', duration: 2000 });
       return;
     }
-    
+
     if (!this.data.bmi) this.calculateBodyMetrics();
     if (!this.data.bmi || !this.data.bodyFat) return;
-    
+
     cloudRequest.callContainer({
       path: '/api/scale/record', method: 'POST',
       data: {
@@ -701,7 +703,7 @@ Page({
     if (!this.data.currentMember) { wx.showToast({ title: '请选择成员', icon: 'none' }); return; }
     if (!this.data.bmi) this.calculateBodyMetrics();
     if (!this.data.bmi || !this.data.bodyFat) { wx.showToast({ title: '请先完善成员信息', icon: 'none' }); return; }
-    
+
     wx.showLoading({ title: '上传中...' });
     cloudRequest.callContainer({
       path: '/api/scale/record', method: 'POST',
@@ -790,10 +792,10 @@ Page({
     if (!device.advertisData || device.advertisData.byteLength === 0) return;
     const bytes = new Uint8Array(device.advertisData);
     if (bytes.length !== 8 && bytes.length !== 13) return;
-    
+
     const timestamp = new Date().toLocaleTimeString();
     const hexString = Array.from(bytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-    
+
     console.log('\n========== MIBFS ==========');
     console.log('⏰', timestamp);
     console.log('📱', device.name || 'Unknown');
@@ -801,7 +803,7 @@ Page({
     console.log('📏 Length:', bytes.length, 'bytes');
     console.log('🔢 Hex:', hexString);
     console.log('🔣 Bytes:', JSON.stringify(Array.from(bytes)));
-    
+
     console.log('\n--- Parse ---');
     try {
       const parsed = parseScaleData(device.advertisData);
@@ -814,7 +816,7 @@ Page({
       } else console.log('❌ Parse failed');
     } catch (e) { console.log('❌ Error:', e.message); }
     console.log('==============================\n');
-    
+
     const ads = this.data.rawAdvertisements;
     ads.unshift({
       time: timestamp, name: device.name || 'Unknown',
