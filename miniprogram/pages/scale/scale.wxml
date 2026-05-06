@@ -1,7 +1,7 @@
 <view class="page">
     <!-- 顶部状态栏 -->
     <view class="status-bar">
-        <view class="ble-badge {{bleScanning ? 'scanning' : (connectedDevice ? 'connected' : 'idle')}}">
+        <view class="ble-badge {{bleBadgeClass}}">
             <view class="ble-dot"></view>
             <text class="ble-text">{{stateDisplay}}</text>
         </view>
@@ -15,11 +15,11 @@
     <view class="hero-card {{pulseAnimation ? 'pulse' : ''}}">
         <view class="device-header">
             <view class="device-info">
-                <view class="device-icon">{{stateIcon === 'scan' ? '🔍' : (stateIcon === 'bluetooth' ? '🔵' : (stateIcon === 'user' ? '👤' : (stateIcon === 'activity' ? '⚡' : (stateIcon === 'check-circle' ? '✓' : (stateIcon === 'loader' ? '⏳' : (stateIcon === 'check' ? '✅' : '⚖️'))))))}}</view>
+                <view class="device-icon">{{stateIconEmoji}}</view>
                 <view class="device-text">
                     <text class="device-name">{{connectedDevice ? connectedDevice.name : '智能体脂秤'}}</text>
                     <view class="device-status">
-                        <view class="status-dot {{appState === 'measuring' || appState === 'stabilizing' || appState === 'locked' ? 'connected' : (appState === 'completed' ? 'success' : 'disconnected')}}"></view>
+                        <view class="status-dot {{statusDotClass}}"></view>
                         <text class="status-text">{{stateDisplay}}</text>
                     </view>
                 </view>
@@ -35,9 +35,9 @@
         <view class="impedance-waiting" wx:if="{{impedanceWaiting}}">
             <view class="impedance-label">正在测量体脂，请保持站立...</view>
             <view class="impedance-track">
-                <view class="impedance-fill" style="width: {{(impedanceWaitProgress / impedanceWaitTotal) * 100}}%"></view>
+                <view class="impedance-fill" style="width: {{impedanceWaitPercent}}%"></view>
             </view>
-            <view class="impedance-hint">保持光脚站立，测量进度 {{Math.round((impedanceWaitProgress / impedanceWaitTotal) * 100)}}%</view>
+            <view class="impedance-hint">保持光脚站立，测量进度 {{impedanceWaitPercent}}%</view>
         </view>
     </view>
 
@@ -57,7 +57,7 @@
                     </view>
                 </view>
 
-                <view class="needle-layer" style="transform: rotate({{(weight / 150) * 180 - 90}}deg);">
+                <view class="needle-layer" style="transform: rotate({{needleAngle}}deg);">
                     <view class="needle-blade"></view>
                 </view>
 
@@ -80,7 +80,7 @@
                     <!-- 状态药丸 -->
                     <view class="status-pill {{isStabilized ? 'pill-stable' : 'pill-scan'}}" wx:if="{{appState !== 'completed'}}">
                         <view class="pill-dot {{appState === 'measuring' ? 'breathing-dot' : ''}}"></view>
-                        <text>{{isStabilized ? (impedance > 0 ? '测量完成' : '已稳定，分析中...') : '实时测量中'}}</text>
+                        <text>{{statusPillText}}</text>
                     </view>
 
                     <!-- 阻抗显示 -->
@@ -106,7 +106,7 @@
     </view>
 
     <!-- 家庭成员选择 -->
-    <view class="member-section {{(isStabilized || appState === 'completed') ? 'fade-in' : ''}}" wx:if="{{members.length > 0}}">
+    <view class="member-section {{showMemberSection ? 'fade-in' : ''}}" wx:if="{{members.length > 0}}">
         <view class="section-header">
             <text class="section-title">家庭成员</text>
             <view class="section-actions">
@@ -124,7 +124,7 @@
 
         <scroll-view class="member-list" scroll-x wx:else>
             <view wx:for="{{members}}" wx:key="id"
-                  class="member-card {{selectedMemberId === item.id ? 'active' : ''}} {{matchedMember && matchedMember.id === item.id ? 'matched' : ''}}"
+                  class="member-card {{selectedMemberId === item.id ? 'active' : ''}} {{item.isMatched ? 'matched' : ''}}"
                   bindtap="selectMember"
                   bindlongpress="onLongPressMember"
                   data-id="{{item.id}}"
@@ -152,18 +152,18 @@
     <!-- 身体评分环 -->
     <view class="score-section {{appState === 'completed' ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && bodyScore > 0}}">
         <view class="score-card">
-            <view class="score-ring" style="--score: {{bodyScore}}; --score-color: {{bodyScore >= 90 ? '#10B981' : (bodyScore >= 80 ? '#3B82F6' : (bodyScore >= 70 ? '#F59E0B' : '#EF4444'))}}">
+            <view class="score-ring" style="--score: {{bodyScore}}; --score-color: {{bodyScoreColor}}">
                 <view class="score-inner">
                     <text class="score-value">{{bodyScore}}</text>
                     <text class="score-label">身体评分</text>
                 </view>
                 <svg class="score-svg" viewBox="0 0 120 120">
                     <circle class="score-track" cx="60" cy="60" r="52"/>
-                    <circle class="score-bar" cx="60" cy="60" r="52" style="stroke-dashoffset: {{326.73 - (bodyScore / 100) * 326.73}}"/>
+                    <circle class="score-bar" cx="60" cy="60" r="52" style="stroke-dashoffset: {{scoreBarOffset}}"/>
                 </svg>
             </view>
             <view class="score-detail">
-                <text class="score-grade">{{bodyScore >= 90 ? '优秀' : (bodyScore >= 80 ? '良好' : (bodyScore >= 70 ? '一般' : '需改善'))}}</text>
+                <text class="score-grade">{{bodyScoreGrade}}</text>
                 <text class="score-compare">标准体重 {{standardWeight}}kg</text>
             </view>
         </view>
@@ -178,7 +178,7 @@
                 <view class="stat-value">
                     <text class="stat-number">{{bmi}}</text>
                 </view>
-                <text class="stat-range {{bmi < 18.5 || bmi >= 24 ? 'warning' : ''}}">{{bmi < 18.5 ? '偏瘦' : (bmi < 24 ? '正常' : (bmi < 28 ? '超重' : '肥胖'))}}</text>
+                <text class="stat-range {{bmiRangeClass}}">{{bmiRangeText}}</text>
             </view>
         </view>
 
@@ -190,7 +190,7 @@
                     <text class="stat-number">{{bodyFat}}</text>
                     <text class="stat-unit">%</text>
                 </view>
-                <text class="stat-range {{bodyFat > (currentMember.gender === 'male' ? 20 : 28) ? 'warning' : ''}}">{{currentMember.gender === 'male' ? '男' : '女'}}: {{currentMember.gender === 'male' ? '10-20%' : '18-28%'}}</text>
+                <text class="stat-range {{bodyFatRangeClass}}">{{genderLabel}}: {{bodyFatNormalRange}}</text>
             </view>
         </view>
 
@@ -214,7 +214,7 @@
                     <text class="stat-number">{{muscleMass}}</text>
                     <text class="stat-unit">kg</text>
                 </view>
-                <text class="stat-range">占体重 {{(muscleMass / weight * 100).toFixed(1)}}%</text>
+                <text class="stat-range">占体重 {{muscleMassPercent}}%</text>
             </view>
         </view>
 
@@ -249,7 +249,7 @@
                 <view class="stat-value">
                     <text class="stat-number">{{visceralFat}}</text>
                 </view>
-                <text class="stat-range {{visceralFat > 9 ? 'warning' : ''}}">{{visceralFat <= 9 ? '正常' : (visceralFat <= 14 ? '偏高' : '过高')}}: 1-9</text>
+                <text class="stat-range {{visceralFat > 9 ? 'warning' : ''}}">{{visceralFatText}}: 1-9</text>
             </view>
         </view>
 
@@ -261,7 +261,7 @@
                     <text class="stat-number">{{boneMass}}</text>
                     <text class="stat-unit">kg</text>
                 </view>
-                <text class="stat-range">占体重 {{(boneMass / weight * 100).toFixed(1)}}%</text>
+                <text class="stat-range">占体重 {{boneMassPercent}}%</text>
             </view>
         </view>
     </view>
@@ -270,7 +270,7 @@
     <view class="advice-section {{appState === 'completed' ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && advice}}">
         <view class="advice-card {{adviceLevel}}">
             <view class="advice-header">
-                <text class="advice-icon">{{adviceLevel === 'normal' ? '✅' : (adviceLevel === 'warning' ? '⚠️' : '🚨')}}</text>
+                <text class="advice-icon">{{adviceIcon}}</text>
                 <text class="advice-title">健康建议</text>
             </view>
             <view class="advice-body">
@@ -284,10 +284,10 @@
 
     <!-- 保存状态 -->
     <view class="save-section {{appState === 'completed' ? 'fade-in' : ''}}" wx:if="{{appState === 'completed'}}">
-        <view class="save-card {{autoSaved ? 'saved' : (saving ? 'saving' : '')}}">
+        <view class="save-card {{saveCardClass}}">
             <view class="save-spinner" wx:if="{{saving}}"></view>
             <text class="save-icon" wx:elif="{{autoSaved}}">✓</text>
-            <text class="save-text">{{saving ? '正在保存...' : (autoSaved ? '已保存到云端' : '准备保存')}}</text>
+            <text class="save-text">{{saveStatusText}}</text>
         </view>
     </view>
 

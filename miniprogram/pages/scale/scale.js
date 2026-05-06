@@ -137,6 +137,39 @@ Page({
     connectedDevice: null,
     rssi: 0,
 
+    // ===== 预计算百分比（供 WXML 绑定） =====
+    muscleMassPercent: 0,
+    boneMassPercent: 0,
+    impedanceWaitPercent: 0,
+
+    // ===== 状态图标 Emoji（供 WXML 绑定） =====
+    stateIconEmoji: '⚖️',
+
+    // ===== BMI/体脂范围文本（供 WXML 绑定） =====
+    bmiRangeClass: '',
+    bmiRangeText: '',
+    bodyFatRangeClass: '',
+    genderLabel: '',
+    bodyFatNormalRange: '',
+
+    // ===== 状态类/文本（供 WXML 绑定） =====
+    statusDotClass: 'disconnected',
+    statusPillText: '实时测量中',
+    bleBadgeClass: 'idle',
+    saveCardClass: '',
+    saveStatusText: '准备保存',
+    adviceIcon: '✅',
+    showMemberSection: false,
+
+    // ===== 评分相关（供 WXML 绑定） =====
+    bodyScoreColor: '#10B981',
+    bodyScoreGrade: '优秀',
+    visceralFatText: '正常',
+
+    // ===== 仪表盘角度（供 WXML 绑定） =====
+    needleAngle: -90,
+    scoreBarOffset: 326.73,
+
     // ===== 诊断信息（调试用，可隐藏） =====
     debugInfo: {
       ctrlRaw: '',
@@ -343,10 +376,31 @@ Page({
   // 状态机工具函数
   // ======================
   transitionState(newState, display, icon, pulse) {
+    const stateIconEmoji = icon === 'scan' ? '🔍' :
+        icon === 'bluetooth' ? '🔵' :
+            icon === 'user' ? '👤' :
+                icon === 'activity' ? '⚡' :
+                    icon === 'check-circle' ? '✓' :
+                        icon === 'loader' ? '⏳' :
+                            icon === 'check' ? '✅' : '⚖️';
+
+    // 计算状态点类
+    const statusDotClass = newState === 'measuring' || newState === 'stabilizing' || newState === 'locked'
+        ? 'connected'
+        : (newState === 'completed' ? 'success' : 'disconnected');
+
+    // 计算 ble 徽章类
+    const bleBadgeClass = this.data.bleScanning
+        ? 'scanning'
+        : (this.data.connectedDevice ? 'connected' : 'idle');
+
     this.setData({
       appState: newState,
       stateDisplay: display,
       stateIcon: icon,
+      stateIconEmoji,
+      statusDotClass,
+      bleBadgeClass,
       pulseAnimation: pulse
     });
   },
@@ -427,6 +481,12 @@ Page({
     });
 
     // 更新显示（实时）
+    const showMemberSection = isStable || this.data.appState === 'completed';
+    const statusPillText = isStable
+        ? (data.impedance > 0 ? '测量完成' : '已稳定，分析中...')
+        : '实时测量中';
+    const needleAngle = (smoothedWeight / 150) * 180 - 90;
+
     this.setData({
       weight: smoothedWeight,
       weightDisplay: smoothedWeight.toFixed(2),
@@ -435,7 +495,10 @@ Page({
       stabilityProgress,
       isStabilized: isStable,
       isMeasuring: data.isMeasuring || false,
-      impedance: data.impedance || 0
+      impedance: data.impedance || 0,
+      showMemberSection,
+      statusPillText,
+      needleAngle
     });
 
     // 状态机转换
@@ -540,7 +603,11 @@ Page({
 
     this.impedanceTimer = setInterval(() => {
       progress++;
-      this.setData({ impedanceWaitProgress: progress });
+      const impedanceWaitPercent = Math.round((progress / totalSteps) * 100);
+      this.setData({
+        impedanceWaitProgress: progress,
+        impedanceWaitPercent
+      });
 
       if (progress >= totalSteps) {
         // 超时：使用无阻抗计算
@@ -636,10 +703,17 @@ Page({
     });
 
     if (bestMatch) {
+      // 更新成员列表中的匹配标记
+      const members = this.data.members.map(m => ({
+        ...m,
+        isMatched: m.id === bestMatch.id
+      }));
+
       this.setData({
         matchedMember: bestMatch,
         matchConfidence,
         selectedMemberId: bestMatch.id,
+        members,
         currentMember: {
           height: bestMatch.height,
           age: bestMatch.age,
@@ -800,6 +874,39 @@ Page({
       adviceLevel = 'danger';
     }
 
+    // 预计算百分比（供 WXML 绑定，WXML 不支持复杂表达式）
+    const muscleMassPercent = weight > 0 ? round((muscleMass / weight) * 100, 1) : 0;
+    const boneMassPercent = weight > 0 ? round((boneMass / weight) * 100, 1) : 0;
+
+    // 预计算 BMI 范围
+    const bmiRangeClass = bmi < 18.5 || bmi >= 24 ? 'warning' : '';
+    const bmiRangeText = bmi < 18.5 ? '偏瘦' : (bmi < 24 ? '正常' : (bmi < 28 ? '超重' : '肥胖'));
+
+    // 预计算体脂范围（复用上面的 isMale）
+    const bodyFatRangeClass = clampedBodyFat > (isMale ? 20 : 28) ? 'warning' : '';
+    const genderLabel = isMale ? '男' : '女';
+    const bodyFatNormalRange = isMale ? '10-20%' : '18-28%';
+
+    // 预计算评分颜色和等级
+    const bodyScoreColor = bodyScore >= 90 ? '#10B981' :
+        (bodyScore >= 80 ? '#3B82F6' :
+            (bodyScore >= 70 ? '#F59E0B' : '#EF4444'));
+    const bodyScoreGrade = bodyScore >= 90 ? '优秀' :
+        (bodyScore >= 80 ? '良好' :
+            (bodyScore >= 70 ? '一般' : '需改善'));
+
+    // 预计算内脏脂肪文本
+    const visceralFatText = visceralFat <= 9 ? '正常' :
+        (visceralFat <= 14 ? '偏高' : '过高');
+
+    // 预计算建议图标
+    const adviceIcon = adviceLevel === 'normal' ? '✅' :
+        (adviceLevel === 'warning' ? '⚠️' : '🚨');
+
+    // 预计算保存状态
+    const saveCardClass = autoSaved ? 'saved' : (saving ? 'saving' : '');
+    const saveStatusText = saving ? '正在保存...' : (autoSaved ? '已保存到云端' : '准备保存');
+
     // 更新数据并触发动画
     this.setData({
       appState: APP_STATE.COMPLETED,
@@ -819,6 +926,23 @@ Page({
       bodyScore: Math.round(bodyScore),
       advice,
       adviceLevel,
+
+      // WXML 预计算字段
+      muscleMassPercent,
+      boneMassPercent,
+      stateIconEmoji,
+      bmiRangeClass,
+      bmiRangeText,
+      bodyFatRangeClass,
+      genderLabel,
+      bodyFatNormalRange,
+      bodyScoreColor,
+      bodyScoreGrade,
+      visceralFatText,
+      adviceIcon,
+      saveCardClass,
+      saveStatusText,
+      scoreBarOffset: 326.73 - (bodyScore / 100) * 326.73,
 
       showResultPanel: true,
       slideIn: true
@@ -853,7 +977,8 @@ Page({
           avatarColor: this.getRandomAvatarColor(),
           lastWeight: m.last_weight || null,
           lastMeasureTime: m.last_measure_time ? new Date(m.last_measure_time).getTime() : null,
-          weightHistory: m.weight_history || []
+          weightHistory: m.weight_history || [],
+          isMatched: false
         }));
 
         this.setData({ members });
@@ -931,7 +1056,9 @@ Page({
       if (res.code === 200) {
         this.setData({
           autoSaved: true,
-          saving: false
+          saving: false,
+          saveCardClass: 'saved',
+          saveStatusText: '已保存到云端'
         });
 
         // 更新成员最近体重
