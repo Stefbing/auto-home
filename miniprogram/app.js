@@ -414,9 +414,16 @@ App({
       // 即使数据重复，也要保证页面状态同步
       this.notifyScaleDataUpdate(this.globalData.latestScaleData);
 
-      // 4. 智能跳转逻辑：稳定状态且体重≥30kg才跳转（过滤缓存数据）
-      const navigateThreshold = SCALE_CONFIG.MIN_NAVIGATE_WEIGHT || 30.0;
-      if (finalData.isStabilized && finalData.weight >= navigateThreshold) {
+      // 4. 智能跳转逻辑：基于 RSSI 信号强度判断设备在线
+      // 真在线：-40 ~ -70dBm，小幅波动
+      const isDeviceOnline = device.RSSI && device.RSSI >= -70 && device.RSSI <= -40;
+      
+      if (finalData.isStabilized && isDeviceOnline) {
+        console.log('[BLE Manager] ✅ 设备在线且数据稳定，准备跳转', {
+          rssi: device.RSSI,
+          weight: finalData.weight,
+          isStabilized: finalData.isStabilized
+        });
         this.checkAndNavigateToScalePage();
       }
     }

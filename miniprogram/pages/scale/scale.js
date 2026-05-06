@@ -30,6 +30,9 @@ const CONFIG = {
   // 防重复触发：2 秒内相同体重忽略
   LOCK_COOLDOWN: 2000,
 
+  // 称重完成后自动重置倒计时（秒）
+  RESET_COUNTDOWN: 10,
+
   // 体重变化阈值：> 0.15kg 视为有效变化
   WEIGHT_CHANGE_THRESHOLD: 0.15,
 
@@ -45,8 +48,9 @@ const CONFIG = {
   // 成员匹配容差：8kg
   MATCH_TOLERANCE: 8,
 
-  // 蓝牙信号强度阈值（-70dBm 以内视为近距离）
-  RSSI_THRESHOLD: -70
+  // 蓝牙信号强度阈值（真在线范围：-40 ~ -70dBm）
+  RSSI_MIN: -70,   // 最小可接受信号
+  RSSI_MAX: -40    // 最大可接受信号
 };
 
 Page({
@@ -125,6 +129,11 @@ Page({
     // ===== 自动保存 =====
     autoSaved: false,
     saving: false,
+
+    // ===== 重置控制 =====
+    showResetHint: false,       // 显示重置提示
+    resetCountdown: 0,          // 重置倒计时（秒）
+    canReset: false,            // 是否允许重置
 
     // ===== 动画控制 =====
     pulseAnimation: false,
@@ -238,6 +247,13 @@ Page({
     console.log('[Scale] 📄 页面隐藏');
     this.unregisterBleCallback();
     this.stopImpedanceTimer();
+    
+    // 清理重置定时器
+    if (this.resetTimer) {
+      clearInterval(this.resetTimer);
+      this.resetTimer = null;
+    }
+    
     this.lastExitTime = Date.now();
     // 不重置状态，保持当前测量数据
   },
@@ -245,6 +261,12 @@ Page({
   onUnload() {
     this.unregisterBleCallback();
     this.stopImpedanceTimer();
+    
+    // 清理重置定时器
+    if (this.resetTimer) {
+      clearInterval(this.resetTimer);
+      this.resetTimer = null;
+    }
   },
 
   // ======================
@@ -353,10 +375,11 @@ Page({
         if (this.isScaleDevice(device)) {
           console.log('[Scale] 🔵 发现体脂秤:', device.name, 'RSSI:', device.RSSI);
           
-          // 信号强度判断（近距离才响应，避免干扰）
-          if (device.RSSI && device.RSSI < CONFIG.RSSI_THRESHOLD) {
-            console.log('[Scale] ⚠️ 信号太弱，忽略:', device.RSSI);
-            return; // 信号太弱，忽略
+          // 信号强度判断（真在线：-40 ~ -70dBm）
+          const isOnline = device.RSSI && device.RSSI >= CONFIG.RSSI_MIN && device.RSSI <= CONFIG.RSSI_MAX;
+          if (!isOnline) {
+            console.log('[Scale] ⚠️ 信号不在有效范围，忽略:', device.RSSI);
+            return; // 信号不在有效范围，忽略
           }
 
           this.setData({
@@ -376,11 +399,27 @@ Page({
 
             setTimeout(() => {
               this.transitionState(APP_STATE.MEASURING, '请上秤', 'user', false);
+              
+              // 检查是否有全局数据需要处理
+              const app = getApp();
+              if (app.globalData.latestScaleData && 
+                  app.globalData.latestScaleData.weight >= CONFIG.MIN_VALID_WEIGHT) {
+                console.log('[Scale] 📊 处理设备发现时的最新数据');
+                this.handleBLE(app.globalData.latestScaleData);
+              }
             }, 600);
           } else if (this.data.appState === APP_STATE.IDLE) {
             // 如果处于 IDLE 状态，直接跳转到测量
             console.log('[Scale] ✅ 从 IDLE 直接跳转到测量');
             this.transitionState(APP_STATE.MEASURING, '请上秤', 'user', false);
+            
+            // 检查是否有全局数据需要处理
+            const app = getApp();
+            if (app.globalData.latestScaleData && 
+                app.globalData.latestScaleData.weight >= CONFIG.MIN_VALID_WEIGHT) {
+              console.log('[Scale] 📊 处理 IDLE 状态下的最新数据');
+              this.handleBLE(app.globalData.latestScaleData);
+            }
           }
         }
       });
@@ -748,6 +787,9 @@ Page({
     // 延迟计算（确保数据稳定）
     setTimeout(() => {
       this.calculateBodyMetrics();
+      
+      // 计算完成后，启动重置倒计时
+      this.startResetCountdown();
     }, 400);
   },
 
@@ -809,6 +851,165 @@ Page({
         duration: 2000
       });
     }
+  },
+
+  // ======================
+  // 重置倒计时
+  // ======================
+  startResetCountdown() {
+    console.log('[Scale] ⏱️ 启动重置倒计时:', CONFIG.RESET_COUNTDOWN, '秒');
+    
+    this.setData({
+      showResetHint: true,
+      resetCountdown: CONFIG.RESET_COUNTDOWN,
+      canReset: false
+    });
+
+    // 启动倒计时定时器
+    this.resetTimer = setInterval(() => {
+      const newCountdown = this.data.resetCountdown - 1;
+      
+      if (newCountdown <= 0) {
+        // 倒计时结束，自动重置
+        clearInterval(this.resetTimer);
+        this.resetTimer = null;
+        console.log('[Scale] 🔄 自动重置');
+        this.performReset();
+      } else {
+        this.setData({ resetCountdown: newCountdown });
+      }
+    }, 1000);
+  },
+
+  // ======================
+  // 执行重置
+  // ======================
+  performReset() {
+    console.log('[Scale] 🧹 执行重置，清空缓存');
+    
+    // 停止所有定时器
+    if (this.resetTimer) {
+      clearInterval(this.resetTimer);
+      this.resetTimer = null;
+    }
+    this.stopImpedanceTimer();
+    
+    // 清空测量数据
+    this.setData({
+      // 核心数据
+      weight: 0,
+      weightDisplay: '0.00',
+      impedance: 0,
+      isStabilized: false,
+      isMeasuring: false,
+      
+      // 状态机
+      appState: APP_STATE.IDLE,
+      stateDisplay: '准备就绪',
+      stateIcon: 'scan',
+      stateIconEmoji: '⚖️',
+      
+      // 稳定性
+      stabilityProgress: 0,
+      weightHistory: [],
+      
+      // 锁定机制
+      measurementLocked: false,
+      lockedWeight: null,
+      lockedImpedance: null,
+      lockTimestamp: 0,
+      
+      // 阻抗等待
+      impedanceWaiting: false,
+      impedanceWaitProgress: 0,
+      
+      // 健康指标
+      bmi: null,
+      bodyFat: null,
+      water: null,
+      muscleMass: null,
+      protein: null,
+      bmr: null,
+      visceralFat: null,
+      boneMass: null,
+      standardWeight: null,
+      bodyScore: 0,
+      advice: null,
+      adviceLevel: 'normal',
+      
+      // 保存状态
+      autoSaved: false,
+      saving: false,
+      
+      // 动画
+      pulseAnimation: false,
+      slideIn: false,
+      showResultPanel: false,
+      
+      // 重置控制
+      showResetHint: false,
+      resetCountdown: 0,
+      canReset: true,
+      
+      // 匹配
+      matchedMember: null,
+      matchConfidence: 0,
+      
+      // 仪表盘
+      needleAngle: -90,
+      scoreBarOffset: 326.73,
+      
+      // WXML 绑定字段
+      statusDotClass: 'disconnected',
+      statusPillText: '实时测量中',
+      bleBadgeClass: 'idle',
+      saveCardClass: '',
+      saveStatusText: '准备保存',
+      adviceIcon: '✅',
+      showMemberSection: false,
+      
+      // 调试信息
+      debugInfo: {
+        ctrlRaw: '',
+        weightRaw: 0,
+        impedanceRaw: 0,
+        dataQuality: 0,
+        trend: 'stable'
+      }
+    });
+    
+    // 清空全局最新数据
+    const app = getApp();
+    app.globalData.latestScaleData = null;
+    
+    // 清空本地存储的离线数据
+    wx.removeStorageSync('offlineMeasurements');
+    
+    // 震动反馈
+    wx.vibrateShort({ type: 'light' });
+    
+    wx.showToast({
+      title: '已重置，可以重新称重',
+      icon: 'success',
+      duration: 2000
+    });
+    
+    console.log('[Scale] ✅ 重置完成');
+  },
+
+  // ======================
+  // 手动重置
+  // ======================
+  manualReset() {
+    console.log('[Scale] 👆 手动触发重置');
+    
+    // 停止倒计时
+    if (this.resetTimer) {
+      clearInterval(this.resetTimer);
+      this.resetTimer = null;
+    }
+    
+    this.performReset();
   },
 
   // ======================

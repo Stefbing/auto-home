@@ -291,6 +291,22 @@
         </view>
     </view>
 
+    <!-- 重置提示 -->
+    <view class="reset-section {{showResetHint ? 'fade-in' : ''}}" wx:if="{{showResetHint}}">
+        <view class="reset-card">
+            <view class="reset-info">
+                <text class="reset-icon">⏱️</text>
+                <view class="reset-text-group">
+                    <text class="reset-title">准备下一次称重</text>
+                    <text class="reset-desc">{{resetCountdown > 0 ? resetCountdown + ' 秒后自动重置' : '可以开始新测量'}}</text>
+                </view>
+            </view>
+            <button class="reset-btn" bindtap="manualReset" wx:if="{{resetCountdown > 0}}">
+                <text class="reset-btn-text">立即重置</text>
+            </button>
+        </view>
+    </view>
+
     <!-- 空状态 / 引导 -->
     <view class="empty-state" wx:if="{{appState === 'idle' && members.length === 0}}">
         <view class="empty-icon">👨‍👩‍👧‍👦</view>

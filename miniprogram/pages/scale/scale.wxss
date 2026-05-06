@@ -1134,6 +1134,88 @@ to { transform: rotate(360deg); }
 }
 
 /* ======================
+   重置提示
+   ====================== */
+.reset-section {
+  margin: 0 32rpx 32rpx;
+  opacity: 0;
+  transform: translateY(20rpx);
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.reset-section.fade-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reset-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+  padding: 32rpx;
+  background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+  border-radius: 24rpx;
+  box-shadow: 0 8rpx 32rpx rgba(245, 158, 11, 0.15),
+    0 0 0 2rpx rgba(251, 191, 36, 0.3) inset;
+}
+
+.reset-info {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  flex: 1;
+}
+
+.reset-icon {
+  font-size: 48rpx;
+  flex-shrink: 0;
+}
+
+.reset-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.reset-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #92400E;
+}
+
+.reset-desc {
+  font-size: 24rpx;
+  color: #B45309;
+  font-weight: 500;
+}
+
+.reset-btn {
+  padding: 16rpx 32rpx;
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  border-radius: 16rpx;
+  border: none;
+  box-shadow: 0 4rpx 16rpx rgba(245, 158, 11, 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+.reset-btn::after {
+  border: none;
+}
+
+.reset-btn:active {
+  transform: scale(0.95);
+  box-shadow: 0 2rpx 8rpx rgba(245, 158, 11, 0.2);
+}
+
+.reset-btn-text {
+  font-size: 26rpx;
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+/* ======================
    空状态
    ====================== */
 .empty-state {
