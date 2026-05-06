@@ -21,6 +21,7 @@ Thumbs.db
 # WeChat Miniprogram
 node_modules/
 miniprogram_npm/
+miniprogram/project.private.config.json
 
 # Vercel
 .vercel/

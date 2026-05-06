@@ -1,5 +1,5 @@
 const cloudRequest = require('../../utils/cloud_request.js');
-const { parseScaleData, fastStabilityCheck, smoothWeight, detectWeightTrend, FLAGS } = require('../../utils/ble_scale.js');
+const BLEUtils = require('../../utils/ble_scale.js');
 
 // ======================
 // 状态机定义
@@ -15,9 +15,6 @@ const APP_STATE = {
   ERROR: 'error'          // 异常状态
 };
 
-// ======================
-// 配置常量（基于实测优化）
-// ======================
 const CONFIG = {
   // 稳定检测：连续 3 次差异 < 0.3kg
   STABILITY_THRESHOLD: 0.3,
@@ -437,17 +434,8 @@ Page({
   isScaleDevice(device) {
     const name = (device.name || '').toLowerCase();
     const localName = (device.localName || '').toLowerCase();
-
-    // 小米体脂秤特征判断
-    const isMiScale = name.includes('scale') || name.includes('体脂') ||
-        localName.includes('scale') || localName.includes('mi') ||
-        name.includes('xmtzc');
-
-    // 广播数据长度判断
-    const hasValidData = device.advertisData &&
-        (device.advertisData.byteLength === 8 ||
-            device.advertisData.byteLength >= 13);
-
+    const isMiScale = name.includes('scale') || name.includes('体脂') || localName.includes('scale') || localName.includes('mi') || name.includes('xmtzc');
+    const hasValidData = device.advertisData && (device.advertisData.byteLength === 8 || device.advertisData.byteLength >= 13);
     return isMiScale || hasValidData;
   },
 
@@ -455,29 +443,15 @@ Page({
   // 状态机工具函数
   // ======================
   transitionState(newState, display, icon, pulse) {
-    const stateIconEmoji = icon === 'scan' ? '🔍' :
-        icon === 'bluetooth' ? '🔵' :
-            icon === 'user' ? '👤' :
-                icon === 'activity' ? '⚡' :
-                    icon === 'check-circle' ? '✓' :
-                        icon === 'loader' ? '⏳' :
-                            icon === 'check' ? '✅' : '⚖️';
-
-    // 计算状态点类
-    const statusDotClass = newState === 'measuring' || newState === 'stabilizing' || newState === 'locked'
-        ? 'connected'
-        : (newState === 'completed' ? 'success' : 'disconnected');
-
-    // 计算 ble 徽章类
-    const bleBadgeClass = this.data.bleScanning
-        ? 'scanning'
-        : (this.data.connectedDevice ? 'connected' : 'idle');
+    const emojiMap = { scan: '🔍', bluetooth: '🔵', user: '👤', activity: '⚡', 'check-circle': '✓', loader: '⏳', check: '✅' };
+    const statusDotClass = ['measuring', 'stabilizing', 'locked'].includes(newState) ? 'connected' : (newState === 'completed' ? 'success' : 'disconnected');
+    const bleBadgeClass = this.data.bleScanning ? 'scanning' : (this.data.connectedDevice ? 'connected' : 'idle');
 
     this.setData({
       appState: newState,
       stateDisplay: display,
       stateIcon: icon,
-      stateIconEmoji,
+      stateIconEmoji: emojiMap[icon] || '⚖️',
       statusDotClass,
       bleBadgeClass,
       pulseAnimation: pulse
@@ -500,9 +474,9 @@ Page({
     let data;
     try {
       if (typeof rawData === 'object' && rawData.weight !== undefined) {
-        data = rawData; // 已解析的数据对象
+        data = rawData;
       } else {
-        data = parseScaleData(rawData.buffer || rawData, rawData.deviceId || rawData.macAddress);
+        data = BLEUtils.parse(rawData.buffer || rawData, rawData.deviceId || rawData.macAddress);
       }
     } catch (err) {
       console.error('[Scale] 数据解析失败:', err);
@@ -523,8 +497,8 @@ Page({
     const weight = data.weight;
     const now = Date.now();
 
-    // EWMA 平滑处理（减少显示跳动）
-    const smoothedWeight = smoothWeight(weight, this.data.lastWeight, CONFIG.SMOOTH_FACTOR);
+    // EWMA 平滑处理
+    const smoothedWeight = BLEUtils.smooth(weight, this.data.lastWeight, CONFIG.SMOOTH_FACTOR);
 
     // 更新历史记录
     let history = this.data.weightHistory;
@@ -537,11 +511,11 @@ Page({
     if (history.length > 5) history = history.slice(-5);
 
     // 快速稳定检测
-    const stability = fastStabilityCheck(history);
+    const stability = BLEUtils.checkStability(history);
     const isStable = stability.isStable || data.isStabilized;
 
-    // 体重趋势检测（上秤/下秤/稳定）
-    const trend = detectWeightTrend(history);
+    // 体重趋势检测
+    const trend = BLEUtils.detectTrend(history);
 
     // 计算稳定性进度（0-100%）
     let stabilityProgress = 0;
@@ -1017,136 +991,78 @@ Page({
   // ======================
   calculateBodyMetrics() {
     const { lockedWeight, lockedImpedance, currentMember } = this.data;
-
-    if (!lockedWeight || !currentMember) {
-      console.warn('[Scale] 缺少必要数据');
-      return;
-    }
+    if (!lockedWeight || !currentMember) return;
 
     const { height, age, gender } = currentMember;
     const weight = lockedWeight;
     const impedance = lockedImpedance || 0;
     const isMale = gender === 'male';
-
-    // 基础参数
     const heightM = height / 100;
-    const heightCm = height;
     const bmi = weight / (heightM ** 2);
 
-    // ===== 1. 去脂体重（FFM）- 基于 BIA 核心公式 [^5^] =====
+    // 去脂体重（FFM）
     let ffm;
     if (impedance > 100 && impedance < 1000) {
-      // 使用 BIA 阻抗公式（基于人群验证的回归模型）[^5^]
-      // FFM = 0.7374*(Ht²/R) + 0.1763*BW - 0.1773*Age + 0.1198*Xc - 2.4658
-      // 简化版（单频 BIA，无 reactance 数据）：
-      const h2r = (heightCm ** 2) / impedance;
-      ffm = 0.7374 * h2r + 0.1763 * weight - 0.1773 * age - 2.4658;
-
-      // 性别校正
-      ffm += isMale ? 2.5 : -1.5;
-
-      // 确保 FFM 在合理范围
+      const h2r = (height ** 2) / impedance;
+      ffm = 0.7374 * h2r + 0.1763 * weight - 0.1773 * age - 2.4658 + (isMale ? 2.5 : -1.5);
       ffm = Math.max(weight * 0.5, Math.min(weight * 0.95, ffm));
     } else {
-      // 无阻抗：使用 BMI 估算
       const sexFactor = isMale ? 1 : 0;
       ffm = weight * (1 - ((1.2 * bmi) + (0.23 * age) - (10.8 * sexFactor) - 5.4) / 100);
       ffm = Math.max(weight * 0.5, Math.min(weight * 0.9, ffm));
     }
 
-    // ===== 2. 体脂率 =====
-    const bodyFat = ((weight - ffm) / weight) * 100;
-    const clampedBodyFat = Math.max(5, Math.min(50, bodyFat));
+    const bodyFat = Math.max(5, Math.min(50, ((weight - ffm) / weight) * 100));
 
-    // ===== 3. 总水分（TBW）- 基于 Watson 公式 =====
-    let tbw;
-    if (isMale) {
-      tbw = 2.447 - 0.09516 * age + 0.1074 * heightCm + 0.3362 * weight;
-    } else {
-      tbw = -2.097 + 0.1069 * heightCm + 0.2466 * weight;
-    }
+    // 总水分（TBW）
+    let tbw = isMale 
+      ? 2.447 - 0.09516 * age + 0.1074 * height + 0.3362 * weight
+      : -2.097 + 0.1069 * height + 0.2466 * weight;
     const water = Math.max(45, Math.min(75, (tbw / weight) * 100));
 
-    // ===== 4. 肌肉量（骨骼肌）- 优化版 =====
-    // 骨骼肌约占 FFM 的 50-55%（去骨、去器官质量）
-    const muscleRatio = isMale ? 0.54 : 0.49;
-    const muscleMass = ffm * muscleRatio;
-
-    // ===== 5. 蛋白质 =====
-    // 蛋白质约占体重的 16-20%，与肌肉量正相关
+    // 肌肉量、蛋白质、BMR
+    const muscleMass = ffm * (isMale ? 0.54 : 0.49);
     const protein = Math.min(25, Math.max(12, (muscleMass / weight) * 22));
+    const bmr = 10 * weight + 6.25 * height - 5 * age + (isMale ? 5 : -161);
 
-    // ===== 6. 基础代谢率（Mifflin-St Jeor）=====
-    let bmr;
-    if (isMale) {
-      bmr = 10 * weight + 6.25 * heightCm - 5 * age + 5;
-    } else {
-      bmr = 10 * weight + 6.25 * heightCm - 5 * age - 161;
-    }
+    // 内脏脂肪、骨量、标准体重
+    const visceralFat = Math.max(1, Math.min(30, 0.74 * bmi + 0.15 * age + (isMale ? -10.5 : -16.0)));
+    const boneMass = weight * (0.035 + (height - 160) * 0.00008);
+    const standardWeight = (height - 100) * 0.9;
 
-    // ===== 7. 内脏脂肪等级 =====
-    let visceralFat;
-    if (isMale) {
-      visceralFat = 0.74 * bmi + 0.15 * age - 10.5;
-    } else {
-      visceralFat = 0.74 * bmi + 0.15 * age - 16.0;
-    }
-    visceralFat = Math.max(1, Math.min(30, visceralFat));
-
-    // ===== 8. 骨量 =====
-    // 成人骨量约占体重 3-5%
-    const boneMass = weight * (0.035 + (heightCm - 160) * 0.00008);
-
-    // ===== 9. 标准体重 =====
-    const standardWeight = (heightCm - 100) * 0.9;
-
-    // ===== 10. 身体评分（综合健康指数）=====
+    // 身体评分
     let bodyScore = 100;
-
-    // BMI 扣分
     if (bmi < 18.5) bodyScore -= 12;
     else if (bmi >= 28) bodyScore -= 15;
     else if (bmi >= 24) bodyScore -= 8;
-
-    // 体脂率扣分
+    
     const normalBodyFatMax = isMale ? 20 : 28;
     const normalBodyFatMin = isMale ? 10 : 18;
-    if (clampedBodyFat > normalBodyFatMax) bodyScore -= 10;
-    else if (clampedBodyFat < normalBodyFatMin) bodyScore -= 5;
-
-    // 内脏脂肪扣分
+    if (bodyFat > normalBodyFatMax) bodyScore -= 10;
+    else if (bodyFat < normalBodyFatMin) bodyScore -= 5;
     if (visceralFat > 10) bodyScore -= 12;
     else if (visceralFat > 8) bodyScore -= 6;
-
-    // 水分扣分
     if (water < 50) bodyScore -= 5;
-
-    // 肌肉量加分（相对于标准）
-    const standardMuscle = isMale ? weight * 0.42 : weight * 0.38;
-    if (muscleMass > standardMuscle * 1.1) bodyScore += 5;
-
+    if (muscleMass > (isMale ? weight * 0.42 : weight * 0.38) * 1.1) bodyScore += 5;
     bodyScore = Math.max(60, Math.min(100, bodyScore));
 
-    // ===== 11. 健康建议 =====
-    let advice = '';
-    let adviceLevel = 'normal';
-
+    // 健康建议
+    let advice = '', adviceLevel = 'normal';
     if (bmi < 18.5) {
       advice = '体重偏轻，建议增加优质蛋白摄入，配合力量训练增加肌肉量';
       adviceLevel = 'warning';
     } else if (bmi < 24) {
-      if (clampedBodyFat > normalBodyFatMax) {
+      if (bodyFat > normalBodyFatMax) {
         advice = '体重正常但体脂偏高，建议每周进行 150 分钟有氧运动，控制精制碳水摄入';
         adviceLevel = 'warning';
       } else if (visceralFat > 8) {
         advice = '体型良好，但内脏脂肪略高，注意减少久坐，增加核心肌群训练';
         adviceLevel = 'warning';
-      } else if (muscleMass < standardMuscle * 0.9) {
+      } else if (muscleMass < (isMale ? weight * 0.42 : weight * 0.38) * 0.9) {
         advice = '肌肉量不足，建议增加抗阻训练，补充足量蛋白质（每公斤体重 1.2-1.6g）';
         adviceLevel = 'warning';
       } else {
         advice = '各项指标良好，请继续保持规律运动和均衡饮食';
-        adviceLevel = 'normal';
       }
     } else if (bmi < 28) {
       advice = '体重超重，建议控制每日热量摄入（减少 300-500kcal），每周运动 200 分钟以上';
@@ -1156,50 +1072,14 @@ Page({
       adviceLevel = 'danger';
     }
 
-    // 预计算百分比（供 WXML 绑定，WXML 不支持复杂表达式）
-    const muscleMassPercent = weight > 0 ? round((muscleMass / weight) * 100, 1) : 0;
-    const boneMassPercent = weight > 0 ? round((boneMass / weight) * 100, 1) : 0;
-
-    // 预计算 BMI 范围
-    const bmiRangeClass = bmi < 18.5 || bmi >= 24 ? 'warning' : '';
-    const bmiRangeText = bmi < 18.5 ? '偏瘦' : (bmi < 24 ? '正常' : (bmi < 28 ? '超重' : '肥胖'));
-
-    // 预计算体脂范围（复用上面的 isMale）
-    const bodyFatRangeClass = clampedBodyFat > (isMale ? 20 : 28) ? 'warning' : '';
-    const genderLabel = isMale ? '男' : '女';
-    const bodyFatNormalRange = isMale ? '10-20%' : '18-28%';
-
-    // 预计算评分颜色和等级
-    const bodyScoreColor = bodyScore >= 90 ? '#10B981' :
-        (bodyScore >= 80 ? '#3B82F6' :
-            (bodyScore >= 70 ? '#F59E0B' : '#EF4444'));
-    const bodyScoreGrade = bodyScore >= 90 ? '优秀' :
-        (bodyScore >= 80 ? '良好' :
-            (bodyScore >= 70 ? '一般' : '需改善'));
-
-    // 预计算内脏脂肪文本
-    const visceralFatText = visceralFat <= 9 ? '正常' :
-        (visceralFat <= 14 ? '偏高' : '过高');
-
-    // 预计算建议图标
-    const adviceIcon = adviceLevel === 'normal' ? '✅' :
-        (adviceLevel === 'warning' ? '⚠️' : '🚨');
-
-    // 预计算保存状态
-    const autoSaved = this.data.autoSaved;
-    const saving = this.data.saving;
-    const saveCardClass = autoSaved ? 'saved' : (saving ? 'saving' : '');
-    const saveStatusText = saving ? '正在保存...' : (autoSaved ? '已保存到云端' : '准备保存');
-
-    // 更新数据并触发动画
-    this.setData({
+    // 预计算显示数据
+    const updates = {
       appState: APP_STATE.COMPLETED,
       stateDisplay: '测量完成',
       stateIcon: 'check',
       pulseAnimation: false,
-
       bmi: round(bmi, 1),
-      bodyFat: round(clampedBodyFat, 1),
+      bodyFat: round(bodyFat, 1),
       water: round(water, 1),
       muscleMass: round(muscleMass, 1),
       protein: round(protein, 1),
@@ -1210,29 +1090,25 @@ Page({
       bodyScore: Math.round(bodyScore),
       advice,
       adviceLevel,
-
-      // WXML 预计算字段
-      muscleMassPercent,
-      boneMassPercent,
-      stateIconEmoji: this.data.stateIconEmoji,
-      bmiRangeClass,
-      bmiRangeText,
-      bodyFatRangeClass,
-      genderLabel,
-      bodyFatNormalRange,
-      bodyScoreColor,
-      bodyScoreGrade,
-      visceralFatText,
-      adviceIcon,
-      saveCardClass,
-      saveStatusText,
+      muscleMassPercent: weight > 0 ? round((muscleMass / weight) * 100, 1) : 0,
+      boneMassPercent: weight > 0 ? round((boneMass / weight) * 100, 1) : 0,
+      bmiRangeClass: bmi < 18.5 || bmi >= 24 ? 'warning' : '',
+      bmiRangeText: bmi < 18.5 ? '偏瘦' : (bmi < 24 ? '正常' : (bmi < 28 ? '超重' : '肥胖')),
+      bodyFatRangeClass: bodyFat > (isMale ? 20 : 28) ? 'warning' : '',
+      genderLabel: isMale ? '男' : '女',
+      bodyFatNormalRange: isMale ? '10-20%' : '18-28%',
+      bodyScoreColor: bodyScore >= 90 ? '#10B981' : (bodyScore >= 80 ? '#3B82F6' : (bodyScore >= 70 ? '#F59E0B' : '#EF4444')),
+      bodyScoreGrade: bodyScore >= 90 ? '优秀' : (bodyScore >= 80 ? '良好' : (bodyScore >= 70 ? '一般' : '需改善')),
+      visceralFatText: visceralFat <= 9 ? '正常' : (visceralFat <= 14 ? '偏高' : '过高'),
+      adviceIcon: adviceLevel === 'normal' ? '✅' : (adviceLevel === 'warning' ? '⚠️' : '🚨'),
+      saveCardClass: this.data.autoSaved ? 'saved' : (this.data.saving ? 'saving' : ''),
+      saveStatusText: this.data.saving ? '正在保存...' : (this.data.autoSaved ? '已保存到云端' : '准备保存'),
       scoreBarOffset: 326.73 - (bodyScore / 100) * 326.73,
-
       showResultPanel: true,
       slideIn: true
-    });
+    };
 
-    // 自动保存
+    this.setData(updates);
     this.autoSaveMeasurement();
   },
 
@@ -1241,11 +1117,9 @@ Page({
   // ======================
   async loadMembers() {
     this.setData({ isLoadingMembers: true });
-
     try {
       const userInfo = wx.getStorageSync('userInfo');
       const userId = userInfo ? userInfo.user_id : null;
-
       const res = await cloudRequest.callContainer({
         path: `/api/scale/members${userId ? '?user_id=' + userId : ''}`,
         method: 'GET'
@@ -1253,18 +1127,13 @@ Page({
 
       if (res.code === 200 && res.data) {
         const members = res.data.map(m => ({
-          id: m.id,
-          name: m.name,
-          age: m.age,
-          height: m.height,
-          gender: m.gender,
+          id: m.id, name: m.name, age: m.age, height: m.height, gender: m.gender,
           avatarColor: this.getRandomAvatarColor(),
           lastWeight: m.last_weight || null,
           lastMeasureTime: m.last_measure_time ? new Date(m.last_measure_time).getTime() : null,
           weightHistory: m.weight_history || [],
           isMatched: false
         }));
-
         this.setData({ members });
         wx.setStorageSync('scaleMembers', members);
       }
@@ -1286,20 +1155,12 @@ Page({
 
     this.setData({
       selectedMemberId: memberId,
-      currentMember: {
-        height: member.height,
-        age: member.age,
-        gender: member.gender
-      },
+      currentMember: { height: member.height, age: member.age, gender: member.gender },
       matchedMember: null,
       matchConfidence: 0
     });
-
     wx.setStorageSync('lastSelectedMemberId', memberId);
-
-    if (this.data.lockedWeight) {
-      this.calculateBodyMetrics();
-    }
+    if (this.data.lockedWeight) this.calculateBodyMetrics();
   },
 
   // ======================
@@ -1307,14 +1168,9 @@ Page({
   // ======================
   async autoSaveMeasurement() {
     const { lockedWeight, lockedImpedance, selectedMemberId, bmi, bodyFat, water, muscleMass, protein, bmr, visceralFat, boneMass } = this.data;
-
-    if (!lockedWeight || !selectedMemberId) {
-      console.warn('[Scale] 无法保存：缺少体重或成员信息');
-      return;
-    }
+    if (!lockedWeight || !selectedMemberId) return;
 
     this.setData({ saving: true });
-
     const measurementData = {
       member_id: selectedMemberId,
       weight: lockedWeight,
@@ -1338,52 +1194,35 @@ Page({
       });
 
       if (res.code === 200) {
-        this.setData({
-          autoSaved: true,
-          saving: false,
-          saveCardClass: 'saved',
-          saveStatusText: '已保存到云端'
-        });
-
-        // 更新成员最近体重
         const members = this.data.members.map(m => {
           if (m.id === selectedMemberId) {
             return {
               ...m,
               lastWeight: lockedWeight,
               lastMeasureTime: Date.now(),
-              weightHistory: [...(m.weightHistory || []).slice(-29), {
-                date: new Date().toISOString(),
-                weight: lockedWeight
-              }]
+              weightHistory: [...(m.weightHistory || []).slice(-29), { date: new Date().toISOString(), weight: lockedWeight }]
             };
           }
           return m;
         });
 
-        this.setData({ members });
-        wx.setStorageSync('scaleMembers', members);
-
-        wx.showToast({
-          title: '保存成功',
-          icon: 'success',
-          duration: 1500
+        this.setData({
+          members,
+          autoSaved: true,
+          saving: false,
+          saveCardClass: 'saved',
+          saveStatusText: '已保存到云端'
         });
+        wx.setStorageSync('scaleMembers', members);
+        wx.showToast({ title: '保存成功', icon: 'success', duration: 1500 });
       }
     } catch (err) {
       console.error('[Scale] 保存失败:', err);
       this.setData({ saving: false });
-
-      // 离线缓存
       const offlineData = wx.getStorageSync('offlineMeasurements') || [];
       offlineData.push(measurementData);
       wx.setStorageSync('offlineMeasurements', offlineData);
-
-      wx.showToast({
-        title: '已离线保存，联网后同步',
-        icon: 'none',
-        duration: 2000
-      });
+      wx.showToast({ title: '已离线保存，联网后同步', icon: 'none', duration: 2000 });
     }
   },
 
@@ -1392,36 +1231,15 @@ Page({
   // ======================
   resetMeasurementState() {
     this.stopImpedanceTimer();
-
     this.setData({
-      measurementLocked: false,
-      lockedWeight: null,
-      lockedImpedance: null,
-      lockTimestamp: 0,
-      isStabilized: false,
-      stabilityProgress: 0,
-      weightHistory: [],
-      impedanceWaiting: false,
-      impedanceWaitProgress: 0,
-      autoSaved: false,
-      saving: false,
-      showResultPanel: false,
-      slideIn: false,
-      matchedMember: null,
-      matchConfidence: 0,
-
-      bmi: null,
-      bodyFat: null,
-      water: null,
-      muscleMass: null,
-      protein: null,
-      bmr: null,
-      visceralFat: null,
-      boneMass: null,
-      standardWeight: null,
-      bodyScore: 0,
-      advice: null,
-      adviceLevel: 'normal'
+      measurementLocked: false, lockedWeight: null, lockedImpedance: null, lockTimestamp: 0,
+      isStabilized: false, stabilityProgress: 0, weightHistory: [],
+      impedanceWaiting: false, impedanceWaitProgress: 0,
+      autoSaved: false, saving: false, showResultPanel: false, slideIn: false,
+      matchedMember: null, matchConfidence: 0,
+      bmi: null, bodyFat: null, water: null, muscleMass: null, protein: null,
+      bmr: null, visceralFat: null, boneMass: null, standardWeight: null,
+      bodyScore: 0, advice: null, adviceLevel: 'normal'
     });
   },
 
