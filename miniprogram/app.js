@@ -366,6 +366,12 @@ App({
       const isScaleDevice = SCALE_CONFIG.SCALE_DEVICE_KEYWORDS.some(keyword =>
           deviceName.includes(keyword)
       );
+      
+      // 调试日志：输出所有发现的设备
+      if (deviceName.includes('scale') || deviceName.includes('mi') || device.advertisData) {
+        console.log('[BLE Manager] 🔍 发现设备:', device.name, 'RSSI:', device.RSSI);
+      }
+      
       if (!isScaleDevice) continue;
 
       // 1. 发现设备立即切换到 Phase 1 (高频模式)
@@ -404,9 +410,9 @@ App({
         receiveTime: Date.now()
       };
 
-      if (!isDuplicate || (finalData.isStabilized && !lastData.isStabilized)) {
-        this.notifyScaleDataUpdate(this.globalData.latestScaleData);
-      }
+      // 【关键修复】总是通知回调，确保页面实时更新
+      // 即使数据重复，也要保证页面状态同步
+      this.notifyScaleDataUpdate(this.globalData.latestScaleData);
 
       // 4. 智能跳转逻辑：稳定状态且体重≥30kg才跳转（过滤缓存数据）
       const navigateThreshold = SCALE_CONFIG.MIN_NAVIGATE_WEIGHT || 30.0;

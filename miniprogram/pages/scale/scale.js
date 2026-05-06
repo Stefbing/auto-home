@@ -193,7 +193,12 @@ Page({
   },
 
   async onShow() {
+    console.log('[Scale] 📄 页面显示');
+    
+    // 先注册回调，确保能接收数据
     this.registerBleCallback();
+    
+    // 加载成员
     await this.loadMembers();
 
     const lastMemberId = wx.getStorageSync('lastSelectedMemberId');
@@ -204,14 +209,37 @@ Page({
       }
     }
 
+    // 检查 BLE 状态
     this.checkBLEState();
+    
+    // 【关键修复】如果全局已有最新数据，立即处理
+    const app = getApp();
+    if (app.globalData.latestScaleData) {
+      console.log('[Scale] 🚀 使用全局最新数据:', app.globalData.latestScaleData);
+      
+      // 如果数据已稳定且体重有效，直接跳转到测量状态
+      if (app.globalData.latestScaleData.isStabilized && 
+          app.globalData.latestScaleData.weight >= CONFIG.MIN_VALID_WEIGHT) {
+        console.log('[Scale] ⚡ 数据已稳定，直接转换到 MEASURING');
+        this.transitionState(APP_STATE.MEASURING, '测量中...', 'activity', true);
+      }
+      
+      this.handleBLE(app.globalData.latestScaleData);
+    }
+    
+    // 如果处于 IDLE 状态且蓝牙可用，立即开始扫描
+    if (this.data.bleAvailable && this.data.appState === APP_STATE.IDLE) {
+      console.log('[Scale] 🚀 主动启动扫描');
+      this.startBLEScan();
+    }
   },
 
   onHide() {
+    console.log('[Scale] 📄 页面隐藏');
     this.unregisterBleCallback();
     this.stopImpedanceTimer();
     this.lastExitTime = Date.now();
-    this.resetMeasurementState();
+    // 不重置状态，保持当前测量数据
   },
 
   onUnload() {
@@ -312,15 +340,22 @@ Page({
   // ======================
   registerBleCallback() {
     const app = getApp();
-    this.bleCallback = (data) => this.handleBLE(data);
+    this.bleCallback = (data) => {
+      console.log('[Scale] 📡 收到 BLE 数据:', data);
+      this.handleBLE(data);
+    };
     app.registerScaleCallback(this.bleCallback);
+    console.log('[Scale] ✅ BLE 回调已注册');
 
     // 监听蓝牙设备发现
     wx.onBluetoothDeviceFound((res) => {
       res.devices.forEach(device => {
         if (this.isScaleDevice(device)) {
+          console.log('[Scale] 🔵 发现体脂秤:', device.name, 'RSSI:', device.RSSI);
+          
           // 信号强度判断（近距离才响应，避免干扰）
           if (device.RSSI && device.RSSI < CONFIG.RSSI_THRESHOLD) {
+            console.log('[Scale] ⚠️ 信号太弱，忽略:', device.RSSI);
             return; // 信号太弱，忽略
           }
 
@@ -335,12 +370,17 @@ Page({
 
           // 状态转换：扫描 → 连接 → 测量
           if (this.data.appState === APP_STATE.SCANNING) {
+            console.log('[Scale] ✅ 停止扫描，准备连接');
             this.stopBLEScan();
             this.transitionState(APP_STATE.CONNECTING, '发现设备', 'bluetooth', true);
 
             setTimeout(() => {
               this.transitionState(APP_STATE.MEASURING, '请上秤', 'user', false);
             }, 600);
+          } else if (this.data.appState === APP_STATE.IDLE) {
+            // 如果处于 IDLE 状态，直接跳转到测量
+            console.log('[Scale] ✅ 从 IDLE 直接跳转到测量');
+            this.transitionState(APP_STATE.MEASURING, '请上秤', 'user', false);
           }
         }
       });
@@ -413,18 +453,27 @@ Page({
 
     // 冷却期检查
     if (this.lastExitTime && Date.now() - this.lastExitTime < 1500) {
+      console.log('[Scale] 冷却期内，忽略数据');
       return;
     }
 
     // 解析数据
     let data;
-    if (typeof rawData === 'object' && rawData.weight !== undefined) {
-      data = rawData; // 已解析的数据对象
-    } else {
-      data = parseScaleData(rawData.buffer || rawData, rawData.deviceId || rawData.macAddress);
+    try {
+      if (typeof rawData === 'object' && rawData.weight !== undefined) {
+        data = rawData; // 已解析的数据对象
+      } else {
+        data = parseScaleData(rawData.buffer || rawData, rawData.deviceId || rawData.macAddress);
+      }
+    } catch (err) {
+      console.error('[Scale] 数据解析失败:', err);
+      return;
     }
 
-    if (!data || data.weight < CONFIG.MIN_VALID_WEIGHT || data.weight > 300) return;
+    if (!data || data.weight < CONFIG.MIN_VALID_WEIGHT || data.weight > 300) {
+      console.log('[Scale] 数据过滤:', data ? `weight=${data.weight}` : 'null');
+      return;
+    }
 
     // 数据质量过滤（低于 60 分的数据可能是噪声）
     if (data.quality !== undefined && data.quality < 60) {
@@ -487,6 +536,14 @@ Page({
         : '实时测量中';
     const needleAngle = (smoothedWeight / 150) * 180 - 90;
 
+    console.log('[Scale] 📊 更新显示:', {
+      weight: smoothedWeight,
+      isStable,
+      impedance: data.impedance,
+      appState: this.data.appState,
+      stabilityProgress
+    });
+
     this.setData({
       weight: smoothedWeight,
       weightDisplay: smoothedWeight.toFixed(2),
@@ -502,6 +559,15 @@ Page({
     });
 
     // 状态机转换
+    console.log('[Scale] 🔄 处理状态机:', {
+      currentState: this.data.appState,
+      isStable,
+      isRealMeasurement,
+      impedance: data.impedance,
+      hasImpedance: data.hasImpedance,
+      impedanceValid: data.impedanceValid
+    });
+    
     this.processStateMachine({
       weight: smoothedWeight,
       impedance: data.impedance || 0,
@@ -524,12 +590,26 @@ Page({
     const currentState = this.data.appState;
     const now = Date.now();
 
+    console.log('[Scale] 🔄 状态机:', {
+      currentState,
+      weight,
+      isStabilized,
+      isRealMeasurement,
+      trend,
+      hasImpedance,
+      impedanceValid
+    });
+
     switch (currentState) {
       case APP_STATE.IDLE:
       case APP_STATE.SCANNING:
       case APP_STATE.CONNECTING:
+        console.log('[Scale] 🔀 检测到有效测量，准备转换状态');
         if (isRealMeasurement) {
+          console.log('[Scale] ✅ 执行状态转换: SCANNING → MEASURING');
           this.transitionState(APP_STATE.MEASURING, '测量中...', 'activity', true);
+        } else {
+          console.log('[Scale] ⚠️ isRealMeasurement=false，不转换');
         }
         break;
 
@@ -681,6 +761,7 @@ Page({
     let bestMatch = null;
     let minScore = Infinity;
     let matchConfidence = 0;
+    const now = Date.now(); // 修复：定义 now 变量
 
     members.forEach(member => {
       if (member.lastWeight) {
@@ -904,6 +985,8 @@ Page({
         (adviceLevel === 'warning' ? '⚠️' : '🚨');
 
     // 预计算保存状态
+    const autoSaved = this.data.autoSaved;
+    const saving = this.data.saving;
     const saveCardClass = autoSaved ? 'saved' : (saving ? 'saving' : '');
     const saveStatusText = saving ? '正在保存...' : (autoSaved ? '已保存到云端' : '准备保存');
 
@@ -930,7 +1013,7 @@ Page({
       // WXML 预计算字段
       muscleMassPercent,
       boneMassPercent,
-      stateIconEmoji,
+      stateIconEmoji: this.data.stateIconEmoji,
       bmiRangeClass,
       bmiRangeText,
       bodyFatRangeClass,

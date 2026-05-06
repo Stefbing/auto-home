@@ -157,8 +157,14 @@ function parseFullFormat(data, timestamp) {
   const hasImpedance = (ctrl & 0x4000) !== 0;   // bit 14
   const isMeasuring = (ctrl & 0x0800) !== 0;    // bit 11 (推测)
 
+  console.log('[BLE Scale] 📦 原始数据:', Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
+  console.log('[BLE Scale] 🔧 控制字节:', ctrl.toString(16).padStart(4, '0'), {
+    isLbs, isJin, isStabilized, weightRemoved, hasImpedance, isMeasuring
+  });
+
   // 体重解析（Byte 11 & 12，小端序）
   const weightRaw = (data[12] << 8) | data[11];
+  console.log('[BLE Scale] ⚖️ 体重原始值:', weightRaw, 'bytes:', data[11], data[12]);
 
   // 体重缩放：kg 用 /200，lbs/jin 用 /100 [^14^][^15^]
   let scaleFactor = (isLbs || isJin) ? 100.0 : 200.0;
