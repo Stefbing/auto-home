@@ -8,15 +8,17 @@ logger = logging.getLogger(__name__)
 
 
 class TaskScheduler:
-    """异步定时任务调度器"""
+    """异步定时任务调度器 - 支持错误重试、执行统计、动态管理"""
     
     def __init__(self):
         self.tasks: Dict[str, Dict[str, Any]] = {}
         self.running = False
         self._task_handles: Dict[str, asyncio.Task] = {}
+        self._stats: Dict[str, Dict[str, Any]] = {}  # 任务执行统计
     
     async def add_task(self, name: str, func: Callable, interval: int, 
-                      immediate: bool = False, *args, **kwargs):
+                      immediate: bool = False, max_retries: int = 3, 
+                      retry_delay: int = 5, *args, **kwargs):
         """添加定时任务
         
         Args:
@@ -24,6 +26,8 @@ class TaskScheduler:
             func: 执行函数
             interval: 执行间隔（秒）
             immediate: 是否立即执行一次
+            max_retries: 最大重试次数
+            retry_delay: 重试延迟（秒）
             *args, **kwargs: 传递给func的参数
         """
         self.tasks[name] = {
@@ -31,7 +35,18 @@ class TaskScheduler:
             'interval': interval,
             'args': args,
             'kwargs': kwargs,
-            'immediate': immediate
+            'immediate': immediate,
+            'max_retries': max_retries,
+            'retry_delay': retry_delay
+        }
+        
+        # 初始化统计信息
+        self._stats[name] = {
+            'total_runs': 0,
+            'success_count': 0,
+            'error_count': 0,
+            'last_run': None,
+            'last_error': None
         }
         
         if self.running:
@@ -45,6 +60,46 @@ class TaskScheduler:
         
         if name in self.tasks:
             del self.tasks[name]
+        
+        if name in self._stats:
+            del self._stats[name]
+    
+    def get_task_stats(self, name: str = None) -> Dict:
+        """获取任务执行统计"""
+        if name:
+            return self._stats.get(name, {})
+        return dict(self._stats)
+    
+    async def _execute_with_retry(self, name: str, func: Callable, 
+                                  max_retries: int, retry_delay: int, 
+                                  *args, **kwargs):
+        """带重试的执行逻辑"""
+        for attempt in range(max_retries + 1):
+            try:
+                start_time = time.time()
+                await func(*args, **kwargs)
+                elapsed = time.time() - start_time
+                
+                # 更新统计
+                self._stats[name]['success_count'] += 1
+                self._stats[name]['last_run'] = datetime.now().isoformat()
+                
+                if attempt > 0:
+                    logger.info(f"Task {name} succeeded after {attempt + 1} attempts ({elapsed:.2f}s)")
+                else:
+                    logger.debug(f"Task {name} completed in {elapsed:.2f}s")
+                
+                return True
+            except Exception as e:
+                self._stats[name]['error_count'] += 1
+                self._stats[name]['last_error'] = str(e)
+                
+                if attempt < max_retries:
+                    logger.warning(f"Task {name} failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error(f"Task {name} failed after {max_retries + 1} attempts: {e}")
+                    return False
     
     async def _start_single_task(self, name: str):
         """启动单个任务"""
@@ -57,15 +112,31 @@ class TaskScheduler:
             try:
                 # 立即执行（如果需要）
                 if task_config['immediate']:
-                    await task_config['func'](*task_config['args'], **task_config['kwargs'])
+                    self._stats[name]['total_runs'] += 1
+                    await self._execute_with_retry(
+                        name, 
+                        task_config['func'],
+                        task_config['max_retries'],
+                        task_config['retry_delay'],
+                        *task_config['args'], 
+                        **task_config['kwargs']
+                    )
                 
                 while True:
                     await asyncio.sleep(task_config['interval'])
-                    await task_config['func'](*task_config['args'], **task_config['kwargs'])
+                    self._stats[name]['total_runs'] += 1
+                    await self._execute_with_retry(
+                        name,
+                        task_config['func'],
+                        task_config['max_retries'],
+                        task_config['retry_delay'],
+                        *task_config['args'],
+                        **task_config['kwargs']
+                    )
             except asyncio.CancelledError:
                 logger.info(f"Task {name} cancelled")
             except Exception as e:
-                logger.error(f"Task {name} error: {e}")
+                logger.error(f"Task {name} unexpected error: {e}")
         
         self._task_handles[name] = asyncio.create_task(task_loop())
     
@@ -75,13 +146,18 @@ class TaskScheduler:
             return
             
         self.running = True
-        logger.info("Starting task scheduler...")
+        logger.info(f"Starting task scheduler with {len(self.tasks)} tasks...")
         
         for name in self.tasks:
             await self._start_single_task(name)
+        
+        logger.info("✓ Task scheduler started")
     
     async def stop(self):
         """停止所有任务"""
+        if not self.running:
+            return
+            
         self.running = False
         logger.info("Stopping task scheduler...")
         
@@ -93,59 +169,8 @@ class TaskScheduler:
             await asyncio.gather(*self._task_handles.values(), return_exceptions=True)
         
         self._task_handles.clear()
+        logger.info("✓ Task scheduler stopped")
 
 
 # 全局调度器实例
 scheduler = TaskScheduler()
-
-
-class DataRefreshTask:
-    """数据刷新任务类"""
-    
-    def __init__(self, petkit_service, cloudpets_service, cache_manager):
-        self.petkit_service = petkit_service
-        self.cloudpets_service = cloudpets_service
-        self.cache_manager = cache_manager
-    
-    async def refresh_petkit_data(self):
-        """刷新PetKit设备数据 - 已废弃，使用用户隔离版本"""
-        # 不再使用全局缓存，改为按需加载
-        logger.debug("Skipping global PetKit refresh (user-specific caching enabled)")
-        return
-    
-    async def refresh_cloudpets_data(self):
-        """刷新CloudPets数据 - 已废弃，使用用户隔离版本"""
-        # 不再使用全局缓存，改为按需加载
-        logger.debug("Skipping global CloudPets refresh (user-specific caching enabled)")
-        return
-    
-    async def refresh_combined_dashboard_data(self):
-        """刷新首页聚合数据"""
-        try:
-            logger.info("Refreshing dashboard data...")
-            
-            # 并行获取所有数据
-            tasks = []
-            
-            # PetKit数据
-            if self.petkit_service:
-                tasks.append(self.refresh_petkit_data())
-            
-            # CloudPets数据
-            if self.cloudpets_service:
-                tasks.append(self.refresh_cloudpets_data())
-            
-            # 等待所有任务完成
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-                
-            # 标记数据已刷新
-            await self.cache_manager.set('dashboard_last_refresh', time.time(), ttl=3600)
-            
-        except Exception as e:
-            logger.error(f"Failed to refresh dashboard data: {e}")
-
-
-# 创建数据刷新任务实例的工厂函数
-def create_data_refresh_task(petkit_service, cloudpets_service, cache_manager):
-    return DataRefreshTask(petkit_service, cloudpets_service, cache_manager)

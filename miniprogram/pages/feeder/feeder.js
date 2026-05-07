@@ -347,5 +347,29 @@ Page({
         }
       }
     });
+  },
+  
+  // 下拉刷新
+  async onPullDownRefresh() {
+    console.log('[喂食器] 下拉刷新')
+    
+    try {
+      await this.fetchPlans()
+      await this.fetchStatus()
+      
+      wx.showToast({
+        title: '刷新成功',
+        icon: 'success',
+        duration: 1000
+      })
+    } catch (err) {
+      console.error('刷新失败:', err)
+      wx.showToast({
+        title: '刷新失败',
+        icon: 'none'
+      })
+    } finally {
+      wx.stopPullDownRefresh()
+    }
   }
 });

@@ -1,3 +1,5 @@
 {
-  "navigationBarTitleText": "冷门器灵"
+  "navigationBarTitleText": "冷门器灵",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark"
 }

@@ -1,10 +1,10 @@
 """
-配置管理工具 - 从数据库读取加密配置，支持设备管理
+配置管理工具 - 从数据库读取加密配置，支持设备管理（性能优化版）
 """
 import logging
 import time
 import asyncio
-from typing import Optional, List, Dict, Any, Callable, TypeVar
+from typing import Optional, List, Dict, Any, Callable, TypeVar, Tuple
 from sqlmodel import Session, select
 from ..models.db import engine
 from ..models.models import SystemConfig
@@ -13,6 +13,17 @@ from .config_encryptor import ConfigEncryptor
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
+
+# 全局线程池执行器（复用，避免频繁创建）
+_executor = None
+
+
+def _get_executor():
+    """获取或创建线程池执行器"""
+    global _executor
+    if _executor is None:
+        _executor = asyncio.get_event_loop().run_in_executor
+    return _executor
 
 
 def _get_timestamp_ms() -> int:
@@ -43,13 +54,12 @@ async def get_config_from_db(key: str, user_id: Optional[int] = None, platform: 
         with Session(engine) as session:
             statement = select(SystemConfig).where(
                 SystemConfig.key == key,
-                SystemConfig.is_active == True  # 只查询未删除的配置
+                SystemConfig.is_active == True
             )
             
             if user_id is not None:
                 statement = statement.where(SystemConfig.user_id == user_id)
             else:
-                # 未指定user_id，查询全局配置（user_id=0）
                 statement = statement.where(SystemConfig.user_id == 0)
             
             if platform:
@@ -68,6 +78,45 @@ async def get_config_from_db(key: str, user_id: Optional[int] = None, platform: 
     except Exception as e:
         logger.warning(f"Failed to get config {key} from database: {e}")
         return default
+
+
+async def get_configs_batch(keys_users: List[Tuple[str, Optional[int], Optional[str]]]) -> Dict[str, Optional[str]]:
+    """
+    批量获取配置（减少数据库查询次数）
+    :param keys_users: [(key, user_id, platform), ...]
+    :return: {f"{key}_{user_id}_{platform}": value}
+    """
+    def _batch_get() -> Dict[str, Optional[str]]:
+        results = {}
+        with Session(engine) as session:
+            for key, user_id, platform in keys_users:
+                statement = select(SystemConfig).where(
+                    SystemConfig.key == key,
+                    SystemConfig.is_active == True
+                )
+                
+                if user_id is not None:
+                    statement = statement.where(SystemConfig.user_id == user_id)
+                else:
+                    statement = statement.where(SystemConfig.user_id == 0)
+                
+                if platform:
+                    statement = statement.where(SystemConfig.platform == platform)
+                
+                config = session.exec(statement.order_by(SystemConfig.id.desc())).first()
+                
+                cache_key = f"{key}_{user_id or 0}_{platform or 'global'}"
+                if config:
+                    results[cache_key] = ConfigEncryptor.decrypt(config.value) if config.is_encrypted else config.value
+                else:
+                    results[cache_key] = None
+        return results
+
+    try:
+        return await _run_db_operation(_batch_get)
+    except Exception as e:
+        logger.error(f"Failed to batch get configs: {e}")
+        return {}
 
 
 async def set_config_to_db(key: str, user_id: int, value: str, is_encrypted: bool = False, 

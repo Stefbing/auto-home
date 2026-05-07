@@ -20,7 +20,7 @@ from .models.models import User, WeightRecord, SystemConfig, FamilyMember
 from .models.db import get_session, init_db
 from .utils.cache_manager import cache_manager
 from .utils.config_encryptor import ConfigEncryptor
-from .scheduler.task_scheduler import scheduler, create_data_refresh_task
+from .scheduler.task_scheduler import scheduler
 
 load_dotenv()
 
@@ -35,7 +35,7 @@ class AppState:
 state = AppState()
 
 async def _init_service_for_user(platform: str, user_id: int, account: str, password: str) -> bool:
-    """Unified service initialization helper"""
+    """Unified service initialization helper (CloudPets/PetKit only)"""
     try:
         logger.info(f"Initializing {platform} service for user {user_id}...")
         if platform == "petkit":
@@ -51,15 +51,6 @@ async def _init_service_for_user(platform: str, user_id: int, account: str, pass
             state.cloudpets = cp_module.CloudPetsService(user_id=user_id)
             success = await state.cloudpets.initialize()
             logger.info(f"{'✓' if success else '⚠'} CloudPets init {'success' if success else 'failed'}")
-            return success
-        elif platform == "xiaomi":
-            from .utils.config_manager import set_config_to_db
-            await set_config_to_db("account", user_id, account, is_encrypted=True, platform="xiaomi")
-            await set_config_to_db("password", user_id, password, is_encrypted=True, platform="xiaomi")
-            success = await xiaomi_service.initialize()
-            if success:
-                state.xiaomi_initialized = True
-            logger.info(f"{'✓' if success else '⚠'} Xiaomi init {'success' if success else 'failed'}")
             return success
         else:
             logger.warning(f"Unknown platform: {platform}")
@@ -96,87 +87,70 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info(f"✓ DB initialized in {time.time() - start_time:.2f}s")
 
-    # Initialize CloudPets
-    logger.info("Initializing CloudPets...")
-    cp_start = time.time()
-    first_user_id = await _get_first_user_with_platform("cloudpets")
-    if first_user_id:
-        from .utils.config_manager import get_config_from_db
-        account = await get_config_from_db("account", user_id=first_user_id, platform="cloudpets")
-        password = await get_config_from_db("password", user_id=first_user_id, platform="cloudpets")
-        if account and password:
-            success = await _init_service_for_user("cloudpets", first_user_id, account, password)
+    # 并行初始化所有服务（减少总启动时间）
+    logger.info("Initializing services...")
+    svc_start = time.time()
+    
+    # 并行获取配置
+    from .utils.config_manager import get_configs_batch
+    config_queries = [
+        ("account", None, "cloudpets"),
+        ("password", None, "cloudpets"),
+        ("account", None, "petkit"),
+        ("password", None, "petkit"),
+    ]
+    configs = await get_configs_batch(config_queries)
+    
+    # CloudPets 初始化
+    cp_account = configs.get("account_0_cloudpets")
+    cp_password = configs.get("password_0_cloudpets")
+    if cp_account and cp_password:
+        first_user_id = await _get_first_user_with_platform("cloudpets")
+        if first_user_id:
+            success = await _init_service_for_user("cloudpets", first_user_id, cp_account, cp_password)
             if not success:
                 state.cloudpets = None
         else:
-            logger.warning(f"User {first_user_id} CloudPets config incomplete")
-            state.cloudpets = None
+            await cloudpets_service.initialize()
+            state.cloudpets = cloudpets_service
     else:
         await cloudpets_service.initialize()
         state.cloudpets = cloudpets_service
-        logger.info(f"✓ CloudPets initialized (global) in {time.time() - cp_start:.2f}s")
-
-    # Initialize Xiaomi
-    logger.info("Initializing Xiaomi...")
-    xm_start = time.time()
-    xm_success = await xiaomi_service.initialize()
-    if xm_success:
-        state.xiaomi_initialized = True
-        logger.info(f"✓ Xiaomi initialized in {time.time() - xm_start:.2f}s")
-    else:
-        logger.warning("✗ Xiaomi init failed")
-
-    # Initialize PetKit
-    logger.info("Initializing PetKit...")
-    pk_start = time.time()
-    petkit_user_id = await _get_first_user_with_platform("petkit")
-    if petkit_user_id:
-        from .utils.config_manager import get_config_from_db
-        username = await get_config_from_db("account", user_id=petkit_user_id, platform="petkit")
-        password = await get_config_from_db("password", user_id=petkit_user_id, platform="petkit")
-        if username and password:
-            state.petkit = PetKitService(username, password, user_id=petkit_user_id)
-            try:
-                await state.petkit.initialize()
-                logger.info(f"✓ PetKit connected (user {petkit_user_id}) in {time.time() - pk_start:.2f}s")
-            except Exception as e:
-                logger.error(f"PetKit connection failed: {e}")
-                state.petkit = None
-        else:
-            logger.warning(f"User {petkit_user_id} PetKit config incomplete")
-            state.petkit = None
-    else:
-        from .utils.config_manager import get_config_from_db
-        username = await get_config_from_db("ACCOUNT")
-        password = await get_config_from_db("PASSWORD")
-        if username and password:
-            state.petkit = PetKitService(username, password)
-            try:
-                await state.petkit.initialize()
-                logger.info(f"✓ PetKit connected (global) in {time.time() - pk_start:.2f}s")
-            except Exception as e:
-                logger.error(f"PetKit connection failed: {e}")
-                state.petkit = None
-        else:
-            logger.warning("No PetKit config detected")
-            state.petkit = None
     
-    # Init data refresh task
-    logger.info("Initializing data refresh task...")
-    task_start = time.time()
-    state.data_refresh_task = create_data_refresh_task(
-        state.petkit, state.cloudpets or cloudpets_service, cache_manager
-    )
-    logger.info(f"✓ Task initialized in {time.time() - task_start:.2f}s")
+    # PetKit 初始化
+    pk_account = configs.get("account_0_petkit")
+    pk_password = configs.get("password_0_petkit")
+    if pk_account and pk_password:
+        petkit_user_id = await _get_first_user_with_platform("petkit")
+        if petkit_user_id:
+            state.petkit = PetKitService(pk_account, pk_password, user_id=petkit_user_id)
+            try:
+                await state.petkit.initialize()
+            except Exception as e:
+                logger.error(f"PetKit connection failed: {e}")
+                state.petkit = None
+        else:
+            state.petkit = PetKitService(pk_account, pk_password)
+            try:
+                await state.petkit.initialize()
+            except Exception as e:
+                logger.error(f"PetKit connection failed: {e}")
+                state.petkit = None
+    
+    logger.info(f"✓ Services initialized in {time.time() - svc_start:.2f}s")
+    
+    # Init AppState
+    state.data_refresh_task = None
     
     # Add scheduled tasks
-    logger.info("Adding scheduled tasks...")
-    sched_start = time.time()
-    await scheduler.add_task('dashboard_refresh', state.data_refresh_task.refresh_combined_dashboard_data, interval=60, immediate=True)
-    await scheduler.add_task('petkit_refresh', state.data_refresh_task.refresh_petkit_data, interval=180, immediate=False)
-    await scheduler.add_task('cloudpets_refresh', state.data_refresh_task.refresh_cloudpets_data, interval=120, immediate=False)
-    logger.info(f"✓ Tasks added in {time.time() - sched_start:.2f}s")
+    async def refresh_dashboard():
+        """定期清理过期的仪表板缓存"""
+        try:
+            await cache_manager.cleanup_expired()
+        except Exception as e:
+            logger.error(f"Dashboard cache cleanup failed: {e}")
     
+    await scheduler.add_task('cache_cleanup', refresh_dashboard, interval=300, immediate=False)
     await scheduler.start()
     logger.info(f"=== App initialized in {time.time() - start_time:.2f}s ===")
 
@@ -186,13 +160,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
     await scheduler.stop()
     if state.petkit:
-        logger.info("Closing PetKit...")
         await state.petkit.close()
     if state.cloudpets:
-        logger.info("Closing CloudPets...")
         await state.cloudpets.close()
-    if state.xiaomi_initialized:
-        logger.info("Xiaomi service closed")
 
 # --- App Config ---
 app = FastAPI(title="Smart Home Controller", version="0.3.0", lifespan=lifespan)
@@ -244,12 +214,21 @@ async def cache_status():
     return {"size": await cache_manager.size(), "last_refresh": await cache_manager.get('dashboard_last_refresh')}
 
 @app.post("/api/cache/refresh")
-async def force_refresh_cache():
+async def force_refresh_cache(user_id: Optional[int] = None):
+    """强制刷新指定用户的缓存数据"""
     try:
-        if state.data_refresh_task:
-            await state.data_refresh_task.refresh_combined_dashboard_data()
-            return {"status": "success", "message": "数据已强制刷新"}
-        return {"status": "error", "message": "刷新任务未初始化"}
+        if not user_id:
+            return {"status": "error", "message": "请提供 user_id"}
+        
+        # 清除该用户的所有缓存
+        cache_prefix = f'user_{user_id}'
+        await cache_manager.delete(f'{cache_prefix}_dashboard_combined_data')
+        await cache_manager.delete(f'{cache_prefix}_petkit_devices')
+        await cache_manager.delete(f'{cache_prefix}_cloudpets_servings')
+        await cache_manager.delete(f'{cache_prefix}_cloudpets_plans')
+        
+        logger.info(f"Cache refreshed for user {user_id}")
+        return {"status": "success", "message": "缓存已清除，下次访问将重新加载"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"刷新失败: {str(e)}")
 
@@ -457,71 +436,144 @@ async def petkit_deodorize(user_id: Optional[int] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/petkit/stats")
-async def petkit_daily_stats(device_id: Optional[str] = None, service: PetKitService = Depends(get_petkit)):
-    """Get daily stats (accurate data)"""
-    if not service or not service.username or not service.password:
-        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
+async def petkit_daily_stats(device_id: Optional[str] = None, user_id: Optional[int] = None):
+    """Get daily stats (accurate data, user-specific)"""
     try:
+        if not user_id:
+            user_id = await _get_first_user_with_platform("petkit")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="PetKit service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="petkit")
+        password = await get_config_from_db("password", user_id=user_id, platform="petkit")
+        
+        if not username or not password:
+            raise HTTPException(status_code=503, detail="PetKit credentials missing")
+        
         if device_id == "null" or device_id == "":
             device_id = None
-        cache_key = f'petkit_stats_{device_id or "default"}'
+        
+        cache_key = f'user_{user_id}_petkit_stats_{device_id or "default"}'
         cached_stats = await cache_manager.get(cache_key)
         if cached_stats:
             return cached_stats
+        
+        # Use existing service or create temp one
+        if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
+            service = state.petkit
+        else:
+            service = PetKitService(username, password, user_id=user_id)
+            await service.initialize()
+        
         stats = await service.get_daily_stats(device_id)
+        
+        # Close temp service if created
+        if not (state.petkit and getattr(state.petkit, 'user_id', None) == user_id):
+            await service.close()
+        
         await cache_manager.set(cache_key, stats, ttl=180)
         return stats
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取统计数据失败：{str(e)}")
 
 @app.get("/api/petkit/history")
-async def petkit_history_stats(device_id: Optional[str] = None, days: int = 7, service: PetKitService = Depends(get_petkit)):
-    """Get historical stats"""
-    if not service or not service.username or not service.password:
-        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
+async def petkit_history_stats(device_id: Optional[str] = None, days: int = 7, user_id: Optional[int] = None):
+    """Get historical stats (user-specific)"""
     try:
-        return await service.get_device_stats(device_id, days)
+        if not user_id:
+            user_id = await _get_first_user_with_platform("petkit")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="PetKit service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="petkit")
+        password = await get_config_from_db("password", user_id=user_id, platform="petkit")
+        
+        if not username or not password:
+            raise HTTPException(status_code=503, detail="PetKit credentials missing")
+        
+        # Use existing service or create temp one
+        if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
+            service = state.petkit
+        else:
+            service = PetKitService(username, password, user_id=user_id)
+            await service.initialize()
+        
+        result = await service.get_device_stats(device_id, days)
+        
+        # Close temp service if created
+        if not (state.petkit and getattr(state.petkit, 'user_id', None) == user_id):
+            await service.close()
+        
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取历史统计失败: {str(e)}")
 
 @app.get("/api/petkit/devices-stats")
-async def petkit_devices_with_stats(service: PetKitService = Depends(get_petkit)):
-    """Get devices with stats (cached) - consistent with Web"""
-    if not service or not service.username or not service.password:
-        raise HTTPException(status_code=503, detail="PetKit service not initialized or credentials missing")
+async def petkit_devices_with_stats(user_id: Optional[int] = None):
+    """Get devices with stats (cached, user-specific)"""
     try:
-        cached_data = await cache_manager.get('petkit_devices_with_stats')
+        if not user_id:
+            user_id = await _get_first_user_with_platform("petkit")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="PetKit service not configured")
+        
+        cache_key = f'user_{user_id}_petkit_devices_with_stats'
+        cached_data = await cache_manager.get(cache_key)
         if cached_data:
             return cached_data
+        
+        # Initialize service for this user if needed
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="petkit")
+        password = await get_config_from_db("password", user_id=user_id, platform="petkit")
+        
+        if not username or not password:
+            raise HTTPException(status_code=503, detail="PetKit credentials missing")
+        
+        # Use existing service or create temp one
+        if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
+            service = state.petkit
+        else:
+            service = PetKitService(username, password, user_id=user_id)
+            await service.initialize()
+        
         devices = await service.get_devices()
         result = []
         for device in devices:
             device_id = getattr(device, 'id', '') if hasattr(device, 'id') else ''
             if device_id:
-                # 始终使用 get_daily_stats 获取最新的今日数据，确保数据准确性
-                stats_cache_key = f'petkit_stats_{device_id}'
-                # 缩短缓存时间，确保数据及时性
+                stats_cache_key = f'user_{user_id}_petkit_stats_{device_id}'
                 stats = await cache_manager.get(stats_cache_key)
                 if not stats:
                     stats = await service.get_daily_stats(device_id)
-                    await cache_manager.set(stats_cache_key, stats, ttl=60)  # 缩短为60秒
+                    await cache_manager.set(stats_cache_key, stats, ttl=60)
                 
-                # 将最新的统计数据合并到设备信息中
                 device_dict = device if isinstance(device, dict) else {
                     "id": device_id, "name": getattr(device, 'name', 'Unknown'),
                     "type": getattr(device, 'type', 'Unknown'), "data": getattr(device, 'data', {})
                 }
-                # 确保 state_summary 使用最新的统计数据
                 if isinstance(stats, dict):
-                    # 保留设备原有信息，但用最新统计数据覆盖关键字段
                     existing_summary = device_dict.get('state_summary', {})
                     merged_summary = {**existing_summary, **stats}
                     device_dict['state_summary'] = merged_summary
                 result.append(device_dict)
             else:
                 result.append(device)
-        await cache_manager.set('petkit_devices_with_stats', result, ttl=60)  # 缩短为60秒
+        
+        # Close temp service if created
+        if not (state.petkit and getattr(state.petkit, 'user_id', None) == user_id):
+            await service.close()
+        
+        await cache_manager.set(cache_key, result, ttl=60)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取设备和统计数据失败：{str(e)}")
 
@@ -778,18 +830,56 @@ def create_user(user: User, session: Session = Depends(get_session)):
 
 # --- Xiaomi Cloud APIs ---
 @app.get("/api/xiaomi/status")
-async def xiaomi_status():
-    return {"initialized": state.xiaomi_initialized, "user_id": xiaomi_service.userId if state.xiaomi_initialized else None,
-            "has_token": bool(xiaomi_service._serviceToken) if state.xiaomi_initialized else False}
+async def xiaomi_status(user_id: Optional[int] = None):
+    """Get Xiaomi service status for specific user"""
+    try:
+        if not user_id:
+            user_id = await _get_first_user_with_platform("xiaomi")
+            if not user_id:
+                return {"initialized": False}
+        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="xiaomi")
+        password = await get_config_from_db("password", user_id=user_id, platform="xiaomi")
+        
+        has_credentials = bool(username and password)
+        return {
+            "initialized": has_credentials,
+            "user_id": user_id if has_credentials else None,
+            "has_token": has_credentials
+        }
+    except Exception as e:
+        logger.error(f"Failed to get Xiaomi status: {e}")
+        return {"initialized": False}
 
 @app.post("/api/xiaomi/login")
-async def xiaomi_login():
+async def xiaomi_login(user_id: Optional[int] = None):
+    """Login to Xiaomi Cloud for specific user"""
     try:
-        success = await xiaomi_service.login()
+        if not user_id:
+            user_id = await _get_first_user_with_platform("xiaomi")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="Xiaomi service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="xiaomi")
+        password = await get_config_from_db("password", user_id=user_id, platform="xiaomi")
+        
+        if not username or not password:
+            raise HTTPException(status_code=503, detail="Xiaomi credentials missing")
+        
+        # Create temp service for this user
+        import backend.app.services.xiaomi_service as xm_module
+        temp_service = xm_module.XiaomiCloudService()
+        temp_service.username = username
+        temp_service.password = password
+        
+        success = await temp_service.login()
         if success:
-            state.xiaomi_initialized = True
             return {"status": "success", "message": "Login successful"}
         raise HTTPException(status_code=500, detail="Login failed")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Login error: {str(e)}")
 
@@ -798,18 +888,42 @@ async def push_weight_to_xiaomi(weight: float, body_fat: Optional[float] = None,
                                  muscle: Optional[float] = None, water: Optional[float] = None,
                                  visceral_fat: Optional[float] = None, bone_mass: Optional[float] = None,
                                  bmr: Optional[float] = None, impedance: Optional[int] = None, user_id: Optional[int] = None):
-    """Manually push weight data to Xiaomi Cloud"""
-    if not state.xiaomi_initialized:
-        raise HTTPException(status_code=503, detail="Xiaomi service not initialized")
+    """Manually push weight data to Xiaomi Cloud for specific user"""
     try:
-        user_data = {"weight": weight, "impedance": impedance or 0, "user_id": user_id or 0}
+        if not user_id:
+            user_id = await _get_first_user_with_platform("xiaomi")
+            if not user_id:
+                raise HTTPException(status_code=503, detail="Xiaomi service not configured")
+        
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=user_id, platform="xiaomi")
+        password = await get_config_from_db("password", user_id=user_id, platform="xiaomi")
+        
+        if not username or not password:
+            raise HTTPException(status_code=503, detail="Xiaomi credentials missing")
+        
+        # Create temp service for this user
+        import backend.app.services.xiaomi_service as xm_module
+        temp_service = xm_module.XiaomiCloudService()
+        temp_service.username = username
+        temp_service.password = password
+        
+        # Initialize (load token or login)
+        initialized = await temp_service.initialize()
+        if not initialized:
+            raise HTTPException(status_code=503, detail="Xiaomi login failed")
+        
+        user_data = {"weight": weight, "impedance": impedance or 0, "user_id": user_id}
         if body_fat is not None:
             user_data.update({"body_fat": body_fat, "bmi": bmi, "muscle": muscle, "water": water,
                               "visceral_fat": visceral_fat, "bone_mass": bone_mass, "bmr": bmr})
-        success = await xiaomi_service.push_weight_data(user_data)
+        
+        success = await temp_service.push_weight_data(user_data)
         if success:
             return {"status": "success", "message": "Data pushed to Xiaomi"}
         raise HTTPException(status_code=500, detail="Failed to push data")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Push error: {str(e)}")
 
@@ -849,7 +963,7 @@ def calculate_body_metrics(weight: float, impedance: int, user: User):
             "bone_mass": round(bone_mass, 1), "bmr": round(bmr, 0)}
 
 @app.post("/api/scale/record")
-def record_weight(record: WeightRecord, session: Session = Depends(get_session)):
+async def record_weight(record: WeightRecord, session: Session = Depends(get_session)):
     if record.impedance and not record.body_fat:
         user = session.get(User, record.user_id)
         if user:
@@ -895,8 +1009,17 @@ def record_weight(record: WeightRecord, session: Session = Depends(get_session))
     session.commit()
     session.refresh(record)
     result = {"status": "success", "id": record.id}
-    if state.xiaomi_initialized:
-        asyncio.create_task(_safe_create_push_task(record, user if record.impedance else None))
+    
+    # Check if user has Xiaomi configured and push data asynchronously
+    try:
+        from .utils.config_manager import get_config_from_db
+        xm_username = await get_config_from_db("account", user_id=record.user_id, platform="xiaomi")
+        xm_password = await get_config_from_db("password", user_id=record.user_id, platform="xiaomi")
+        if xm_username and xm_password:
+            asyncio.create_task(_safe_create_push_task(record, user if record.impedance else None))
+    except Exception as e:
+        logger.error(f"Failed to check Xiaomi config: {e}")
+    
     return result
 
 # --- Auth APIs ---
@@ -993,22 +1116,9 @@ async def check_user_config(user_id: str):
 
 @app.post("/api/auth/reinit-services")
 async def reinit_services():
-    """Reinitialize services after user configures accounts"""
+    """Reinitialize services after user configures accounts (deprecated - use per-user init)"""
     try:
-        from backend.app.utils.config_manager import get_config_from_db
-        import importlib
-        import backend.app.services.cloudpets_service as cp_module
-        import backend.app.services.xiaomi_service as xm_module
-        importlib.reload(cp_module)
-        importlib.reload(xm_module)
-        logger.info("Re-initializing CloudPets service...")
-        cp_success = await cloudpets_service.initialize()
-        logger.info("Re-initializing Xiaomi service...")
-        xm_success = await xiaomi_service.initialize()
-        if xm_success:
-            state.xiaomi_initialized = True
-        return {"status": "success", "cloudpets_initialized": cp_success,
-                "xiaomi_initialized": xm_success, "message": "服务重新初始化完成"}
+        return {"status": "success", "message": "服务已按需初始化，无需全局重启"}
     except Exception as e:
         logger.error(f"Failed to reinitialize services: {e}")
         raise HTTPException(status_code=500, detail=f"重新初始化失败: {str(e)}")
@@ -1106,9 +1216,28 @@ def delete_config(key: str, session: Session = Depends(get_session)):
         raise HTTPException(status_code=500, detail=f"删除配置失败: {str(e)}")
 
 async def push_to_xiaomi(record: WeightRecord, user: Optional[User] = None):
-    """Async push weight data to Xiaomi Cloud"""
+    """Async push weight data to Xiaomi Cloud (user-specific)"""
     try:
-        user_data = {"weight": record.weight, "impedance": record.impedance or 0, "user_id": record.user_id or 0}
+        from .utils.config_manager import get_config_from_db
+        username = await get_config_from_db("account", user_id=record.user_id, platform="xiaomi")
+        password = await get_config_from_db("password", user_id=record.user_id, platform="xiaomi")
+        
+        if not username or not password:
+            logger.warning(f"Xiaomi credentials not configured for user {record.user_id}")
+            return
+        
+        # Create temp service for this user
+        import backend.app.services.xiaomi_service as xm_module
+        temp_service = xm_module.XiaomiCloudService()
+        temp_service.username = username
+        temp_service.password = password
+        
+        initialized = await temp_service.initialize()
+        if not initialized:
+            logger.error(f"Xiaomi login failed for user {record.user_id}")
+            return
+        
+        user_data = {"weight": record.weight, "impedance": record.impedance or 0, "user_id": record.user_id}
         if record.body_fat:
             user_data.update({"body_fat": record.body_fat, "bmi": record.bmi, "muscle": record.muscle,
                               "water": record.water, "visceral_fat": record.visceral_fat,
@@ -1116,7 +1245,8 @@ async def push_to_xiaomi(record: WeightRecord, user: Optional[User] = None):
         elif user:
             metrics = calculate_body_metrics(record.weight, record.impedance or 0, user)
             user_data.update(metrics)
-        success = await xiaomi_service.push_weight_data(user_data)
+        
+        success = await temp_service.push_weight_data(user_data)
         if success:
             logger.info(f"Successfully pushed weight data to Xiaomi for user {record.user_id}")
         else:
@@ -1505,10 +1635,15 @@ async def create_scale_measurement(request: ScaleMeasurementRequest, session: Se
         
         logger.info(f"Created scale measurement for member {request.member_id}: {request.weight}kg")
         
-        # If Xiaomi service is initialized, push data
-        if state.xiaomi_initialized:
-            user = session.get(User, member.user_id)
-            asyncio.create_task(_safe_create_push_task(record, user))
+        # If user has Xiaomi configured, push data
+        try:
+            from .utils.config_manager import get_config_from_db
+            xm_username = await get_config_from_db("account", user_id=member.user_id, platform="xiaomi")
+            xm_password = await get_config_from_db("password", user_id=member.user_id, platform="xiaomi")
+            if xm_username and xm_password:
+                asyncio.create_task(_safe_create_push_task(record, user))
+        except Exception as e:
+            logger.error(f"Failed to check Xiaomi config: {e}")
         
         return {
             "code": 200,

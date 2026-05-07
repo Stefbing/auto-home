@@ -197,5 +197,28 @@ Page({
         });
       }
     });
+  },
+  
+  // 下拉刷新
+  async onPullDownRefresh() {
+    console.log('[猫厕所] 下拉刷新')
+    
+    try {
+      await this.fetchStats({ silent: true })
+      
+      wx.showToast({
+        title: '刷新成功',
+        icon: 'success',
+        duration: 1000
+      })
+    } catch (err) {
+      console.error('刷新失败:', err)
+      wx.showToast({
+        title: '刷新失败',
+        icon: 'none'
+      })
+    } finally {
+      wx.stopPullDownRefresh()
+    }
   }
 });

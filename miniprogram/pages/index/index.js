@@ -15,7 +15,8 @@ Page({
     selectedDeviceTypeText: '',
     deviceAccount: '',
     devicePassword: '',
-    greeting: ''
+    greeting: '',
+    devicesLoaded: false  // 标记设备是否已加载
   },
   
   onLoad: function () {
@@ -26,19 +27,9 @@ Page({
   onShow: function() {
     this.updateGreeting()
     if (this.data.userInfo) {
-      this.loadUserDevices()
-      
-      // 每次显示首页时，检查是否需要初始化蓝牙
-      const hasScaleDevice = this.data.healthDevices.some(d => d.device_type === 'scale');
-      if (hasScaleDevice && !app.globalData.bleAdapterInitialized) {
-        console.log('[首页 onShow] 检测到体脂秤设备且蓝牙未初始化，开始初始化')
-        app.checkAndInitBluetooth()
-      } else if (hasScaleDevice && app.globalData.bleAdapterInitialized) {
-        // 如果蓝牙已初始化但扫描已停止，重新启动扫描
-        if (!app.globalData.scanTimer) {
-          console.log('[首页 onShow] 重新启动蓝牙定时扫描')
-          app.startPeriodicScan()
-        }
+      // 只在首次加载时调用，避免重复请求
+      if (!this.data.devicesLoaded) {
+        this.loadUserDevices()
       }
       
       // 注册设备状态更新监听
@@ -166,15 +157,6 @@ Page({
       
       // 自动加载设备（后端已自动初始化服务）
       await this.loadUserDevices()
-      
-      // 登录成功后，检查是否有体脂秤设备并初始化蓝牙
-      const hasScaleDevice = this.data.healthDevices.some(d => d.device_type === 'scale');
-      if (hasScaleDevice) {
-        console.log('[首页] 检测到用户有体脂秤设备，立即初始化蓝牙')
-        app.checkAndInitBluetooth()
-      } else {
-        console.log('[首页] 用户无体脂秤设备，不初始化蓝牙')
-      }
       
       wx.hideLoading()
       wx.showToast({ 
@@ -330,7 +312,8 @@ Page({
       this.setData({
         userDevices,
         petDevices,
-        healthDevices
+        healthDevices,
+        devicesLoaded: true  // 标记已加载
       })
     } catch (err) {
       console.error('加载设备列表失败:', err)
@@ -635,5 +618,34 @@ Page({
     
     // 注意：不在这里停止蓝牙扫描
     // 保持扫描运行，供其他页面使用
+  },
+  
+  // 下拉刷新
+  async onPullDownRefresh() {
+    console.log('[首页] 下拉刷新')
+    
+    if (!this.data.userInfo) {
+      wx.stopPullDownRefresh()
+      return
+    }
+    
+    try {
+      // 重新加载设备数据
+      await this.loadUserDevices()
+      
+      wx.showToast({
+        title: '刷新成功',
+        icon: 'success',
+        duration: 1000
+      })
+    } catch (err) {
+      console.error('刷新失败:', err)
+      wx.showToast({
+        title: '刷新失败',
+        icon: 'none'
+      })
+    } finally {
+      wx.stopPullDownRefresh()
+    }
   }
 })

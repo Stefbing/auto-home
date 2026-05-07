@@ -15,29 +15,48 @@ const FLAGS = {
  * 主解析入口
  */
 function parse(buffer, macAddress = '') {
-  if (!buffer || buffer.byteLength < 8) return null;
+  console.log('[BLE] 🔍 开始解析:', {
+    bufferLength: buffer ? buffer.byteLength : 0,
+    macAddress
+  });
+  
+  if (!buffer || buffer.byteLength < 8) {
+    console.log('[BLE] ⚠️ 数据长度不足:', buffer ? buffer.byteLength : 0);
+    return null;
+  }
+  
   try {
     const data = new Uint8Array(buffer);
     const len = data.length;
     const timestamp = Date.now();
     let result = null;
     
+    console.log('[BLE] 📦 原始字节:', Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    
     if (len === 8) {
+      console.log('[BLE] 📄 使用 8字节格式 (Mi Scale 1)');
       result = parseShort(data, timestamp);
     } else if (len >= 13 && len < 16) {
+      console.log('[BLE] 📄 使用 13字节格式 (Mi Body Scale 2)');
       result = parseFull(data, timestamp);
     } else if (len >= 16) {
+      console.log('[BLE] 📄 使用 16字节扩展格式');
       result = parseExtended(data, timestamp);
+    } else {
+      console.log('[BLE] ⚠️ 未知数据长度:', len);
     }
     
     if (result) {
       result.macAddress = macAddress;
       result.receivedAt = timestamp;
       result.quality = calcQuality(result);
+      console.log('[BLE] ✅ 解析成功:', result);
+    } else {
+      console.log('[BLE] ❌ 解析结果为 null');
     }
     return result;
   } catch (err) {
-    console.error('[BLE] 解析异常:', err);
+    console.error('[BLE] ❌ 解析异常:', err);
     return null;
   }
 }

@@ -1,48 +1,36 @@
 <view class="page">
-    <!-- 顶部状态栏 -->
-    <view class="status-bar">
-        <view class="ble-badge {{bleBadgeClass}}">
-            <view class="ble-dot"></view>
-            <text class="ble-text">{{stateDisplay}}</text>
-        </view>
-        <view class="rssi-badge" wx:if="{{connectedDevice && rssi}}">
-            <text class="rssi-icon">📶</text>
-            <text class="rssi-text">{{rssi}}dBm</text>
-        </view>
-    </view>
-
-    <!-- Hero 设备卡片 -->
+    <!-- Hero卡片 - 设备状态概览 -->
     <view class="hero-card {{pulseAnimation ? 'pulse' : ''}}">
         <view class="device-header">
             <view class="device-info">
-                <view class="device-icon">{{stateIconEmoji}}</view>
+                <view class="device-icon">⚖️</view>
                 <view class="device-text">
-                    <text class="device-name">{{connectedDevice ? connectedDevice.name : '智能体脂秤'}}</text>
+                    <text class="device-name">{{connectedDevice ? connectedDevice.name : '小米体脂秤2'}}</text>
                     <view class="device-status">
-                        <view class="status-dot {{statusDotClass}}"></view>
-                        <text class="status-text">{{stateDisplay}}</text>
+                        <view class="status-dot {{appState === 'idle' ? 'disconnected' : 'connected'}}"></view>
+                        <text class="status-text">{{statusPillText}}</text>
                     </view>
                 </view>
             </view>
-            <view class="action-buttons" wx:if="{{appState === 'idle' || appState === 'error'}}">
-                <button class="refresh-btn" bindtap="startMeasurementFlow">
+            <view class="action-buttons">
+                <!-- 重置按钮：仅在测量完成后显示 -->
+                <button wx:if="{{appState === 'completed'}}" 
+                        class="reset-btn" 
+                        bindtap="manualReset">
+                    重置
+                </button>
+                <!-- 扫描按钮：仅在空闲时显示 -->
+                <button wx:elif="{{appState === 'idle'}}" 
+                        class="refresh-btn" 
+                        bindtap="startMeasurementFlow">
                     <text class="refresh-icon">↻</text>
                 </button>
             </view>
         </view>
-
-        <!-- 阻抗等待进度条 -->
-        <view class="impedance-waiting" wx:if="{{impedanceWaiting}}">
-            <view class="impedance-label">正在测量体脂，请保持站立...</view>
-            <view class="impedance-track">
-                <view class="impedance-fill" style="width: {{impedanceWaitPercent}}%"></view>
-            </view>
-            <view class="impedance-hint">保持光脚站立，测量进度 {{impedanceWaitPercent}}%</view>
-        </view>
     </view>
 
     <!-- 实时体重仪表盘 -->
-    <view class="gauge-section" wx:if="{{appState !== 'idle' || weight > 0}}">
+    <view class="gauge-section" wx:if="{{appState !== 'idle' || weight > 0 || connectedDevice}}">
         <view class="gauge-card">
             <view class="gauge-viewport">
                 <view class="gauge-container">
@@ -68,13 +56,13 @@
                     </view>
 
                     <!-- 稳定性指示器 -->
-                    <view class="stability-indicator" wx:if="{{appState === 'measuring' || appState === 'stabilizing'}}">
+                    <view class="stability-indicator" wx:if="{{appState === 'measuring' && !isStabilized}}">
                         <view class="stability-dots">
-                            <view class="stability-dot {{stabilityProgress >= 33 ? 'active' : ''}} {{stabilityProgress >= 33 && isStabilized ? 'done' : ''}}"></view>
-                            <view class="stability-dot {{stabilityProgress >= 66 ? 'active' : ''}} {{stabilityProgress >= 66 && isStabilized ? 'done' : ''}}"></view>
-                            <view class="stability-dot {{stabilityProgress >= 100 ? 'active' : ''}} {{stabilityProgress >= 100 && isStabilized ? 'done' : ''}}"></view>
+                            <view class="stability-dot {{stabilityProgress >= 33 ? 'active' : ''}}"></view>
+                            <view class="stability-dot {{stabilityProgress >= 66 ? 'active' : ''}}"></view>
+                            <view class="stability-dot {{stabilityProgress >= 100 ? 'active' : ''}}"></view>
                         </view>
-                        <text class="stability-text">{{isStabilized ? '已稳定' : '趋于稳定...'}}</text>
+                        <text class="stability-text">趋于稳定...</text>
                     </view>
 
                     <!-- 状态药丸 -->
@@ -84,7 +72,7 @@
                     </view>
 
                     <!-- 阻抗显示 -->
-                    <view class="impedance-display" wx:if="{{impedance > 0 && (appState === 'stabilizing' || appState === 'locked' || appState === 'completed')}}">
+                    <view class="impedance-display" wx:if="{{impedance > 0 && appState === 'completed'}}">
                         <text class="impedance-label">生物阻抗</text>
                         <text class="impedance-value">{{impedance}} Ω</text>
                     </view>
@@ -117,14 +105,9 @@
             </view>
         </view>
 
-        <view class="loading-members" wx:if="{{isLoadingMembers}}">
-            <view class="loading-spinner"></view>
-            <text class="loading-text">加载中...</text>
-        </view>
-
-        <scroll-view class="member-list" scroll-x wx:else>
+        <scroll-view class="member-list" scroll-x>
             <view wx:for="{{members}}" wx:key="id"
-                  class="member-card {{selectedMemberId === item.id ? 'active' : ''}} {{item.isMatched ? 'matched' : ''}}"
+                  class="member-card {{selectedMemberId === item.id ? 'active' : ''}} {{matchedMember && matchedMember.id === item.id ? 'matched' : ''}}"
                   bindtap="selectMember"
                   bindlongpress="onLongPressMember"
                   data-id="{{item.id}}"
