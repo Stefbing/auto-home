@@ -132,26 +132,6 @@
         </scroll-view>
     </view>
 
-    <!-- 身体评分环 -->
-    <view class="score-section {{appState === 'completed' ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && bodyScore > 0}}">
-        <view class="score-card">
-            <view class="score-ring" style="--score: {{bodyScore}}; --score-color: {{bodyScoreColor}}">
-                <view class="score-inner">
-                    <text class="score-value">{{bodyScore}}</text>
-                    <text class="score-label">身体评分</text>
-                </view>
-                <svg class="score-svg" viewBox="0 0 120 120">
-                    <circle class="score-track" cx="60" cy="60" r="52"/>
-                    <circle class="score-bar" cx="60" cy="60" r="52" style="stroke-dashoffset: {{scoreBarOffset}}"/>
-                </svg>
-            </view>
-            <view class="score-detail">
-                <text class="score-grade">{{bodyScoreGrade}}</text>
-                <text class="score-compare">标准体重 {{standardWeight}}kg</text>
-            </view>
-        </view>
-    </view>
-
     <!-- 健康数据统计 -->
     <view class="stats-grid {{appState === 'completed' ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && bodyFat}}">
         <view class="stat-card">

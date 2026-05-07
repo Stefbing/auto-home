@@ -158,6 +158,13 @@ Page({
       // 自动加载设备（后端已自动初始化服务）
       await this.loadUserDevices()
       
+      // 初始化蓝牙
+      const app = getApp()
+      if (!app.globalData.bleAdapterInitialized) {
+        console.log('[首页] 🚀 登录成功，开始初始化蓝牙')
+        app.checkAndInitBluetooth(userInfo.user_id)
+      }
+      
       wx.hideLoading()
       wx.showToast({ 
         title: userInfo.has_configured ? '登录成功，设备已连接' : '登录成功', 
