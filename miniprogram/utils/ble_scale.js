@@ -121,7 +121,23 @@ function parseFull(data, ts) {
     weightRaw, impedance, impedanceRaw, impedanceValid,
     isStabilized, isMeasuring, weightRemoved, hasImpedance,
     unit: 'kg', format: 'full',
-    dateTime: { year: (data[3] << 8) | data[2], month: data[4], day: data[5], hour: data[6], minute: data[7], second: data[8] },
+    dateTime: { 
+      year: (data[3] << 8) | data[2], 
+      month: data[4], 
+      day: data[5], 
+      hour: data[6], 
+      minute: data[7], 
+      second: data[8] 
+    },
+    // 计算设备时间戳（体脂秤广播的是UTC时间，需用UTC方法解析）
+    deviceTimestamp: Date.UTC(
+      (data[3] << 8) | data[2], 
+      data[4] - 1, 
+      data[5], 
+      data[6], 
+      data[7], 
+      data[8]
+    ),
     ctrlRaw: ctrl.toString(16).padStart(4, '0')
   };
 }

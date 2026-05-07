@@ -175,6 +175,16 @@ Page({
       return;
     }
 
+    // 数据新鲜度检测（10秒内）
+    if (data.deviceTimestamp) {
+      const now = Date.now();
+      const timeDiff = Math.abs(now - data.deviceTimestamp);
+      if (timeDiff >= 10000) {
+        console.log('[Scale] ⏸️ 数据过期，跳过处理 (差值:', Math.round(timeDiff), 'ms)');
+        return;
+      }
+    }
+
     // 更新历史
     const history = [...this.data.weightHistory, {
       weight: data.weight,
@@ -182,19 +192,24 @@ Page({
     }];
     if (history.length > 10) history.shift(); // 保留最近10条
 
-    // 检测稳定性
-    const isStable = this.checkStability(history);
-    const stabilityProgress = isStable ? 100 : Math.min(100, Math.round((history.length / CONFIG.STABILITY_COUNT) * 100));
+    // 检测稳定性：优先使用广播数据的 isStabilized 标识位
+    const isStable = data.isStabilized || this.checkStability(history);
+    
+    // 如果有阻抗数据，说明测量完成且稳定
+    const hasImpedance = data.impedance > 0 && data.impedanceValid;
+    const finalStable = isStable || hasImpedance;
+    
+    const stabilityProgress = finalStable ? 100 : Math.min(100, Math.round((history.length / CONFIG.STABILITY_COUNT) * 100));
 
     // 更新显示
     const needleAngle = (data.weight / 150) * 180 - 90;
-    const statusPillText = this.getStatusText(data, isStable);
+    const statusPillText = this.getStatusText(data, finalStable);
 
     this.setData({
       weight: data.weight,
       weightDisplay: data.weight.toFixed(2),
       impedance: data.impedance || 0,
-      isStabilized: isStable,
+      isStabilized: finalStable,
       stabilityProgress,
       weightHistory: history,
       needleAngle,
@@ -202,7 +217,7 @@ Page({
     });
 
     // 状态转换
-    this.processStateTransition(data, isStable);
+    this.processStateTransition(data, finalStable);
   },
 
   // ======================
@@ -328,8 +343,8 @@ Page({
       scoreBarOffset: 326.73,
       statusPillText: '准备就绪',
       matchedMember: null,
-      matchConfidence: 0,
-      showMemberSection: false
+      matchConfidence: 0
+      // 注意：不重置 showMemberSection，保持成员列表显示
     });
 
     // 清空全局数据
@@ -426,23 +441,37 @@ Page({
   // 自动匹配成员
   // ======================
   autoMatchMember(weight) {
-    if (!this.data.members || this.data.members.length === 0) return;
+    if (!this.data.members || this.data.members.length === 0) {
+      // 无成员，弹出创建
+      this.showCreateMemberModal(weight);
+      return;
+    }
 
-    let bestMatch = null;
-    let minDiff = Infinity;
-
+    // 查找所有在容差范围内的成员
+    const candidates = [];
     this.data.members.forEach(member => {
-      if (!member.lastWeight) return;
+      if (!member.last_weight) return;
 
-      const diff = Math.abs(member.lastWeight - weight);
-      if (diff < CONFIG.MATCH_TOLERANCE && diff < minDiff) {
-        minDiff = diff;
-        bestMatch = member;
+      const diff = Math.abs(member.last_weight - weight);
+      if (diff < CONFIG.MATCH_TOLERANCE) {
+        candidates.push({ member, diff });
       }
     });
 
-    if (bestMatch) {
-      const confidence = Math.max(50, Math.round(100 - (minDiff / CONFIG.MATCH_TOLERANCE) * 50));
+    if (candidates.length === 0) {
+      // 无匹配，弹出创建
+      this.showCreateMemberModal(weight);
+      return;
+    }
+
+    // 按体重差异排序
+    candidates.sort((a, b) => a.diff - b.diff);
+
+    // 如果只有一个候选或差异明显，直接选择
+    if (candidates.length === 1 || (candidates[1].diff - candidates[0].diff > 2)) {
+      const bestMatch = candidates[0].member;
+      const confidence = Math.max(50, Math.round(100 - (candidates[0].diff / CONFIG.MATCH_TOLERANCE) * 50));
+      
       this.setData({
         matchedMember: bestMatch,
         matchConfidence: confidence,
@@ -453,7 +482,43 @@ Page({
           gender: bestMatch.gender
         }
       });
+      console.log('[Scale] ✅ 自动匹配成员:', bestMatch.name, '差异:', candidates[0].diff.toFixed(2), 'kg');
+    } else {
+      // 多个候选且差异小，选择最近的成员
+      const bestMatch = candidates[0].member;
+      console.log('[Scale] ⚠️ 多个候选成员，自动选择最近:', bestMatch.name);
+      
+      this.setData({
+        matchedMember: bestMatch,
+        matchConfidence: 70,
+        selectedMemberId: bestMatch.id,
+        currentMember: {
+          height: bestMatch.height,
+          age: bestMatch.age,
+          gender: bestMatch.gender
+        }
+      });
     }
+  },
+
+  // ======================
+  // 显示创建成员弹窗
+  // ======================
+  showCreateMemberModal(weight) {
+    wx.showModal({
+      title: '创建新成员',
+      content: `检测到新体重 ${weight.toFixed(1)}kg，是否创建新成员？`,
+      confirmText: '创建',
+      cancelText: '取消',
+      success: (res) => {
+        if (res.confirm) {
+          // 跳转到配置页创建成员
+          wx.navigateTo({
+            url: `/pages/config/config?action=create&weight=${weight}`
+          });
+        }
+      }
+    });
   },
 
   // ======================
@@ -524,17 +589,6 @@ Page({
     const boneMass = weight * (0.035 + (height - 160) * 0.00008);
     const standardWeight = (height - 100) * 0.9;
 
-    // 身体评分
-    let bodyScore = 100;
-    if (bmi < 18.5) bodyScore -= 12;
-    else if (bmi >= 28) bodyScore -= 15;
-    else if (bmi >= 24) bodyScore -= 8;
-
-    if (bodyFat > (isMale ? 25 : 35)) bodyScore -= 10;
-    else if (bodyFat > (isMale ? 20 : 30)) bodyScore -= 5;
-
-    bodyScore = Math.max(0, Math.min(100, bodyScore));
-
     // BMI 范围
     let bmiRangeClass = '';
     let bmiRangeText = '';
@@ -556,22 +610,14 @@ Page({
     const bodyFatNormalRange = isMale ? '10-20%' : '18-28%';
     const bodyFatRangeClass = bodyFat > (isMale ? 25 : 35) ? 'high' : 'normal';
 
-    // 评分颜色
-    let bodyScoreColor = '#10B981';
-    let bodyScoreGrade = '优秀';
-    if (bodyScore < 60) {
-      bodyScoreColor = '#EF4444';
-      bodyScoreGrade = '较差';
-    } else if (bodyScore < 80) {
-      bodyScoreColor = '#F59E0B';
-      bodyScoreGrade = '良好';
-    }
-
     // 内脏脂肪文本
     const visceralFatText = visceralFat <= 9 ? '正常' : '偏高';
 
     // 肌肉量百分比
     const muscleMassPercent = Math.round((muscleMass / weight) * 100);
+
+    // 生成健康建议
+    const advice = this.generateHealthAdvice(bmi, bodyFat, isMale, age);
 
     // 更新 UI
     this.setData({
@@ -584,18 +630,64 @@ Page({
       visceralFat: visceralFat.toFixed(1),
       boneMass: boneMass.toFixed(1),
       standardWeight: standardWeight.toFixed(1),
-      bodyScore,
       muscleMassPercent,
       bmiRangeClass,
       bmiRangeText,
       bodyFatRangeClass,
       bodyFatNormalRange,
       genderLabel: isMale ? '男性' : '女性',
-      bodyScoreColor,
-      bodyScoreGrade,
       visceralFatText,
-      scoreBarOffset: 326.73 - (bodyScore / 100) * 326.73
+      advice: advice.text,
+      adviceLevel: advice.level,
+      adviceIcon: advice.icon
     });
+  },
+
+  // ======================
+  // 生成健康建议
+  // ======================
+  generateHealthAdvice(bmi, bodyFat, isMale, age) {
+    let text = '';
+    let level = 'normal'; // normal, warning, danger
+    let icon = '💡';
+
+    // BMI 相关建议
+    if (bmi < 18.5) {
+      text = '您的体重偏轻，建议增加营养摄入，适当进行力量训练增肌。';
+      level = 'warning';
+      icon = '⚠️';
+    } else if (bmi >= 24 && bmi < 28) {
+      text = '您的体重略超重，建议控制饮食热量，每周至少3次有氧运动。';
+      level = 'warning';
+      icon = '⚠️';
+    } else if (bmi >= 28) {
+      text = '您的体重超标较多，建议制定减重计划，咨询营养师或健身教练。';
+      level = 'danger';
+      icon = '🔴';
+    }
+
+    // 体脂率相关建议（优先级更高）
+    const highBodyFat = isMale ? bodyFat > 25 : bodyFat > 35;
+    const lowBodyFat = isMale ? bodyFat < 10 : bodyFat < 18;
+    
+    if (highBodyFat) {
+      text = '体脂率偏高，建议减少高糖高脂食物，增加有氧运动和力量训练结合。';
+      level = 'warning';
+      icon = '⚠️';
+    } else if (lowBodyFat && age > 18) {
+      text = '体脂率偏低，请确保充足营养摄入，避免过度节食。';
+      level = 'warning';
+      icon = '⚠️';
+    }
+
+    // 正常范围
+    if (!text) {
+      text = '身体状况良好！保持均衡饮食和规律运动，继续加油！';
+      level = 'normal';
+      icon = '✅';
+    }
+
+    return { text, level, icon };
   },
 
   // ======================
