@@ -21,17 +21,14 @@ Page({
   
   onLoad: function () {
     this.updateGreeting()
+    // 只在onLoad时检查登录状态并加载设备，避免重复调用
     this.checkLoginStatus()
   },
   
   onShow: function() {
     this.updateGreeting()
+    // onShow不再加载设备数据，只处理设备状态监听
     if (this.data.userInfo) {
-      // 只在首次加载时调用，避免重复请求
-      if (!this.data.devicesLoaded) {
-        this.loadUserDevices()
-      }
-      
       // 注册设备状态更新监听
       this.registerDeviceStatusListener();
     }
@@ -121,7 +118,10 @@ Page({
     const userInfo = wx.getStorageSync('userInfo')
     if (userInfo) {
       this.setData({ userInfo })
-      this.loadUserDevices()
+      // 只在有用户信息且设备未加载时才加载设备数据
+      if (!this.data.devicesLoaded) {
+        this.loadUserDevices()
+      }
     }
   },
   
@@ -156,7 +156,10 @@ Page({
       this.setData({ userInfo })
       
       // 自动加载设备（后端已自动初始化服务）
-      await this.loadUserDevices()
+      // 登录成功后，如果设备未加载则加载
+      if (!this.data.devicesLoaded) {
+        await this.loadUserDevices()
+      }
       
       // 初始化蓝牙
       const app = getApp()
@@ -184,6 +187,14 @@ Page({
   // 加载用户设备列表
   async loadUserDevices() {
     if (!this.data.userInfo || !this.data.userInfo.user_id) return
+    
+    // 防止重复请求
+    if (this.isLoadingDevices) {
+      console.log('[首页] 设备数据正在加载中，跳过重复请求')
+      return
+    }
+    
+    this.isLoadingDevices = true
     
     try {
       // 获取仪表板数据（包含设备和实时统计）
@@ -328,6 +339,9 @@ Page({
         title: '加载失败，请重试', 
         icon: 'none' 
       })
+    } finally {
+      // 无论成功或失败，都重置加载状态
+      this.isLoadingDevices = false
     }
   },
   
@@ -417,6 +431,7 @@ Page({
       wx.showToast({ title: '添加成功', icon: 'success' })
       
       this.closeDeviceConfigModal()
+      // 添加设备后刷新设备列表
       await this.loadUserDevices()
     } catch (err) {
       wx.hideLoading()
@@ -637,7 +652,7 @@ Page({
     }
     
     try {
-      // 重新加载设备数据
+      // 重新加载设备数据（用户主动刷新）
       await this.loadUserDevices()
       
       wx.showToast({

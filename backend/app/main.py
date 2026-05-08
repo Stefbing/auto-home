@@ -1,5 +1,6 @@
 """Smart Home Controller API - Main Application"""
 import os, uvicorn, asyncio, time, logging
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional, List
 
@@ -1601,39 +1602,111 @@ class ScaleMeasurementRequest(BaseModel):
     protein: Optional[float] = None
     bmr: Optional[float] = None
     visceral_fat: Optional[float] = None
+    bone_mass: Optional[float] = None  # 添加骨量字段
 
 @app.post("/api/scale/measurements")
 async def create_scale_measurement(request: ScaleMeasurementRequest, session: Session = Depends(get_session)):
-    """Create a new scale measurement record"""
+    """Create a new scale measurement record with time-slot deduplication"""
     try:
         # Verify member exists and is active
         member = session.get(FamilyMember, request.member_id)
         if not member or not member.is_active:
             raise HTTPException(status_code=404, detail="家庭成员不存在或已禁用")
         
-        # Create weight record
-        record = WeightRecord(
-            user_id=member.user_id,
-            member_id=request.member_id,
-            weight=request.weight,
-            impedance=request.impedance,
-            bmi=request.bmi,
-            body_fat=request.body_fat,
-            water=request.water,
-            muscle=request.muscle_mass,
-            protein=request.protein,
-            bmr=request.bmr,
-            bone_mass=None,
-            visceral_fat=request.visceral_fat,
-            timestamp=int(time.time() * 1000),
-            created_at=int(time.time() * 1000)
-        )
+        # 计算当前时段（早中晚夜宵）
+        now = datetime.now()
+        hour = now.hour
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
         
-        session.add(record)
-        session.commit()
-        session.refresh(record)
+        # 时段定义
+        if 5 <= hour < 10:
+            meal_period = 'breakfast'  # 早餐前
+        elif 10 <= hour < 14:
+            meal_period = 'lunch'      # 午餐前
+        elif 14 <= hour < 18:
+            meal_period = 'dinner'     # 晚餐前
+        else:
+            meal_period = 'supper'     # 夜宵/睡前
         
-        logger.info(f"Created scale measurement for member {request.member_id}: {request.weight}kg")
+        # 查询该成员今日该时段是否已有记录
+        period_start_ts = int(today_start.timestamp() * 1000)
+        period_end_ts = int(today_end.timestamp() * 1000)
+        
+        existing_stmt = select(WeightRecord).where(
+            WeightRecord.member_id == request.member_id,
+            WeightRecord.timestamp >= period_start_ts,
+            WeightRecord.timestamp <= period_end_ts
+        ).order_by(WeightRecord.timestamp.desc())
+        
+        existing_records = session.exec(existing_stmt).all()
+        
+        # 查找同一时段的记录
+        same_period_record = None
+        for record in existing_records:
+            record_time = datetime.fromtimestamp(record.timestamp / 1000)
+            record_hour = record_time.hour
+            
+            if 5 <= record_hour < 10 and meal_period == 'breakfast':
+                same_period_record = record
+                break
+            elif 10 <= record_hour < 14 and meal_period == 'lunch':
+                same_period_record = record
+                break
+            elif 14 <= record_hour < 18 and meal_period == 'dinner':
+                same_period_record = record
+                break
+            elif (record_hour >= 18 or record_hour < 5) and meal_period == 'supper':
+                same_period_record = record
+                break
+        
+        if same_period_record:
+            # 覆盖更新同一时段的记录
+            same_period_record.weight = request.weight
+            same_period_record.impedance = request.impedance
+            same_period_record.bmi = request.bmi
+            same_period_record.body_fat = request.body_fat
+            same_period_record.water = request.water
+            same_period_record.muscle = request.muscle_mass
+            same_period_record.protein = request.protein
+            same_period_record.bmr = request.bmr
+            same_period_record.bone_mass = request.bone_mass  # 添加骨量更新
+            same_period_record.visceral_fat = request.visceral_fat
+            same_period_record.timestamp = int(time.time() * 1000)
+            
+            session.add(same_period_record)
+            session.commit()
+            session.refresh(same_period_record)
+            
+            logger.info(f"Updated {meal_period} measurement for member {request.member_id}: {request.weight}kg")
+            
+            record = same_period_record
+            message = "更新成功"
+        else:
+            # 创建新记录
+            record = WeightRecord(
+                user_id=member.user_id,
+                member_id=request.member_id,
+                weight=request.weight,
+                impedance=request.impedance,
+                bmi=request.bmi,
+                body_fat=request.body_fat,
+                water=request.water,
+                muscle=request.muscle_mass,
+                protein=request.protein,
+                bmr=request.bmr,
+                bone_mass=request.bone_mass,  # 使用前端传递的骨量值
+                visceral_fat=request.visceral_fat,
+                timestamp=int(time.time() * 1000),
+                created_at=int(time.time() * 1000)
+            )
+            
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+            
+            logger.info(f"Created {meal_period} measurement for member {request.member_id}: {request.weight}kg")
+            message = "保存成功"
         
         # If user has Xiaomi configured, push data
         try:
@@ -1641,17 +1714,18 @@ async def create_scale_measurement(request: ScaleMeasurementRequest, session: Se
             xm_username = await get_config_from_db("account", user_id=member.user_id, platform="xiaomi")
             xm_password = await get_config_from_db("password", user_id=member.user_id, platform="xiaomi")
             if xm_username and xm_password:
-                asyncio.create_task(_safe_create_push_task(record, user))
+                asyncio.create_task(_safe_create_push_task(record, member))
         except Exception as e:
             logger.error(f"Failed to check Xiaomi config: {e}")
         
         return {
             "code": 200,
-            "message": "保存成功",
+            "message": message,
             "data": {
                 "id": record.id,
                 "weight": record.weight,
-                "timestamp": record.timestamp
+                "timestamp": record.timestamp,
+                "meal_period": meal_period
             }
         }
     except HTTPException:

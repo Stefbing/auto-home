@@ -4,7 +4,8 @@ const BLEUtils = require('./utils/ble_scale.js');
 // 配置常量
 const CONFIG = {
   MIN_VALID_WEIGHT: 30,  // 最小有效体重 30kg
-  MAX_WEIGHT: 200        // 最大体重 200kg
+  MAX_WEIGHT: 200,       // 最大体重 200kg
+  FRESHNESS_THRESHOLD: 10000  // 数据新鲜度阈值 10秒
 };
 
 App({
@@ -21,10 +22,10 @@ App({
     lastJumpWeight: 0,   // 上次跳转时的体重
     scaleConnectionStatus: 'offline',  // 设备在线状态（基于RSSI）
 
-    // 跳转控制
-    scalePageNavigationInFlight: false,
-    lastScalePageNavigateAt: 0,
-    
+    // 数据去重相关
+    lastProcessedData: null,  // 上次处理的数据
+    lastProcessedTimestamp: 0, // 上次处理的时间戳
+
     // 小米配置检查缓存
     xiaomiConfigChecked: false,
     hasXiaomiConfig: false
@@ -41,7 +42,10 @@ App({
       // 检查登录状态，初始化蓝牙
       const userInfo = wx.getStorageSync('userInfo');
       if (userInfo && userInfo.user_id) {
-        setTimeout(() => this.checkAndInitBluetooth(userInfo.user_id), 500);
+        var self = this;
+        setTimeout(function() {
+          self.checkAndInitBluetooth(userInfo.user_id);
+        }, 500);
       }
     } catch (err) {
       console.error('[App] onLaunch 错误:', err);
@@ -55,20 +59,20 @@ App({
 
   async checkAndInitBluetooth(userId) {
     if (!userId) return;
-    
+
     // 如果已初始化，直接返回
     if (this.globalData.bleAdapterInitialized) {
       console.log('[BLE] ✅ 蓝牙已初始化，跳过');
       return;
     }
-    
+
     // 防止并发调用
     if (this.globalData.bluetoothInitializing) {
       console.log('[BLE] ⚠️ 蓝牙正在初始化中，跳过');
       return;
     }
     this.globalData.bluetoothInitializing = true;
-    
+
     // 使用缓存的配置检查结果
     if (this.globalData.xiaomiConfigChecked) {
       if (!this.globalData.hasXiaomiConfig) {
@@ -82,7 +86,7 @@ App({
       // 首次检查配置
       try {
         console.log('[BLE] 🔍 检查小米配置...');
-        
+
         const res = await new Promise((resolve, reject) => {
           cloudRequest.callContainer({
             path: `/api/dashboard/data?user_id=${userId}`,
@@ -93,15 +97,15 @@ App({
         });
 
         console.log('[BLE] 📦 接口返回:', res);
-        
+
         // 注意：res 没有 data 字段，直接访问 xiaomi_config
         const hasXiaomiConfig = res.xiaomi_config === true;
         console.log('[BLE] xiaomi_config:', hasXiaomiConfig);
-        
+
         // 缓存结果
         this.globalData.xiaomiConfigChecked = true;
         this.globalData.hasXiaomiConfig = hasXiaomiConfig;
-        
+
         if (!hasXiaomiConfig) {
           console.log('[BLE] ❌ 未配置小米账号，跳过蓝牙初始化');
           return;
@@ -129,50 +133,47 @@ App({
 
   initBluetoothManager() {
     console.log('[BLE] 🚀 开始初始化蓝牙适配器...');
-    
+
     // 清除旧的扫描数据，防止误触发跳转
     this.globalData.latestScaleData = null;
-    
+
+    var self = this;
     wx.openBluetoothAdapter({
-      success: () => {
+      success: function() {
         console.log('[BLE] ✅ 蓝牙适配器初始化成功');
-        this.globalData.bleAdapterInitialized = true;
-        
+        self.globalData.bleAdapterInitialized = true;
+
         // 监听设备发现
-        wx.onBluetoothDeviceFound(this.handleDeviceFound.bind(this));
-        
+        wx.onBluetoothDeviceFound(self.handleDeviceFound.bind(self));
+
         // 监听适配器状态变化
-        wx.onBluetoothAdapterStateChange((res) => {
-          this.globalData.bleAdapterInitialized = res.available;
+        wx.onBluetoothAdapterStateChange(function(res) {
+          self.globalData.bleAdapterInitialized = res.available;
           if (!res.available) {
             console.warn('[BLE] ⚠️ 蓝牙适配器不可用');
           }
         });
-        
+
         // 开始持续扫描（不再周期性停止）
-        this.startContinuousScan();
+        self.startContinuousScan();
       },
-      fail: (err) => {
+      fail: function(err) {
         console.error('[BLE] ❌ 蓝牙初始化失败:', err);
-        this.globalData.bleAdapterInitialized = false;
+        self.globalData.bleAdapterInitialized = false;
       }
     });
   },
 
   startContinuousScan() {
     if (!this.globalData.bleAdapterInitialized) return;
-    
-    // 清除旧数据，防止误触发
-    this.globalData.latestScaleData = null;
-    console.log('[BLE] 🧹 清除旧数据，准备扫描');
-    
+
     wx.startBluetoothDevicesDiscovery({
       allowDuplicatesKey: true,
-      interval: 500,  // 500ms 扫描间隔
-      success: () => {
+      interval: 300,
+      success: function() {
         console.log('[BLE] 📡 开始持续扫描');
       },
-      fail: (err) => {
+      fail: function(err) {
         console.error('[BLE] ❌ 扫描启动失败:', err);
       }
     });
@@ -180,7 +181,6 @@ App({
 
   handleDeviceFound(res) {
     const devices = res.devices || [];
-    
     for (let device of devices) {
       if (!device.name) continue;
 
@@ -188,7 +188,7 @@ App({
       const deviceName = device.name.toLowerCase();
       if (!deviceName.includes('mibfs') && !deviceName.includes('mi scale')) continue;
 
-      // 解析数据：优先 Service Data
+      // 解析数据
       let finalData = null;
       if (device.serviceData) {
         for (let uuid in device.serviceData) {
@@ -196,79 +196,72 @@ App({
           if (finalData) break;
         }
       }
-      
+
       if (!finalData && device.advertisData) {
         finalData = BLEUtils.parse(device.advertisData);
       }
 
-      // 过滤无效数据
-      if (!finalData || finalData.weight < CONFIG.MIN_VALID_WEIGHT || finalData.weight > CONFIG.MAX_WEIGHT) continue;
+      if (!finalData) continue;
 
-      // 更新全局数据（带接收时间）
-      const receivedAt = Date.now();
-      this.globalData.latestScaleData = {
-        ...finalData,
-        deviceId: device.deviceId,
-        RSSI: device.RSSI,
-        timestamp: receivedAt
-      };
+      // 数据新鲜度检测（基于设备时间 vs 解析时实时时间）
+      const deviceTimestamp = finalData.deviceTimestamp;
+      if (!deviceTimestamp) {
+        console.log('[BLE] ⚠️ 无设备时间戳，跳过');
+        continue;
+      }
+            
+      // 设备广播的时间已经是北京时间，直接使用
+      const parseTime = finalData.receivedAt; // 广播解析时的实时时间
+      const timeDiff = Math.abs(parseTime - deviceTimestamp);
+            
+      console.log('[BLE] 🕒 设备时间:', new Date(deviceTimestamp).toLocaleString('zh-CN'));
+      console.log('[BLE] 🕒 解析时间:', new Date(parseTime).toLocaleString('zh-CN'));
+      console.log('[BLE] ⏱️ 时间差值:', Math.round(timeDiff), 'ms');
+            
+      // 如果时间差超过10秒，视为过期
+      if (timeDiff >= CONFIG.FRESHNESS_THRESHOLD) {
+        console.log('[BLE] ⚠️ 数据过期，丢弃');
+        continue;
+      }
 
-      // 通知所有订阅者（发布-订阅模式）
+        // 数据去重：检查是否与上次处理的数据相同
+        const isDuplicate = this.isDuplicateData(finalData);
+        if (isDuplicate) {
+          console.log('[BLE] ⚠️ 重复数据，跳过处理');
+          continue;
+        }
+
+        // 更新全局数据并发布
+        this.globalData.latestScaleData = {
+          ...finalData,
+          deviceId: device.deviceId,
+          RSSI: device.RSSI,
+          timestamp: parseTime
+        };
+
+        // 记录本次处理的数据
+        this.globalData.lastProcessedData = finalData;
+        this.globalData.lastProcessedTimestamp = Date.now();
+
       this.notifyScaleListeners(this.globalData.latestScaleData);
 
-      // 详细日志：判断是否应该跳转
-      console.log('[BLE] 📊 数据详情:', {
-        weight: finalData.weight,
-        isStabilized: finalData.isStabilized,
-        isMeasuring: finalData.isMeasuring,
-        hasImpedance: finalData.hasImpedance,
-        impedance: finalData.impedance,
-        RSSI: device.RSSI,
-        format: finalData.format
-      });
-
-      // 更新设备在线状态（仅基于RSSI）
+      // 更新设备在线状态
       const isOnline = device.RSSI >= -85 && device.RSSI <= -35;
       this.globalData.scaleConnectionStatus = isOnline ? 'online' : 'offline';
-      console.log('[BLE] 📡 设备状态:', this.globalData.scaleConnectionStatus, '(RSSI:', device.RSSI + ')');
 
-      // 智能跳转条件：数据新鲜度 + 体重去重
-      
-      // 已在称重页则跳过跳转检测
+      // 已在称重页则跳过跳转
       const pages = getCurrentPages();
       const currentPage = pages[pages.length - 1];
       if (currentPage && currentPage.route === 'pages/scale/scale') {
-        console.log('[BLE] ⏸️ 已在称重页，跳过跳转检测');
         return;
       }
-      
-      // 检查数据新鲜度（10秒内）
-      let isFresh = false;
-      if (finalData.deviceTimestamp) {
-        const now = Date.now();
-        const deviceTime = finalData.deviceTimestamp;
-        const timeDiff = Math.abs(now - deviceTime);
-        isFresh = timeDiff < 10000; // 10秒误差允许
-        
-        console.log('[BLE] 🕒 时间比对:', {
-          '当前时间': new Date(now).toLocaleString('zh-CN'),
-          '设备时间': new Date(deviceTime).toLocaleString('zh-CN'),
-          '差值(ms)': Math.round(timeDiff),
-          '是否新鲜': isFresh ? '✅' : '❌'
-        });
-      }
-      
-      // 体重去重：与上次跳转的体重相同则跳过
+
+      // 体重去重
       const lastWeight = this.globalData.lastJumpWeight || 0;
-      const isSameWeight = Math.abs(finalData.weight - lastWeight) < 0.1; // 0.1kg容差
-      
-      if (isFresh && !isSameWeight) {
-        console.log('[BLE] ✅ 检测到新的实时数据，准备跳转');
+      const isSameWeight = Math.abs(finalData.weight - lastWeight) < 0.1;
+
+      if (!isSameWeight) {
         this.checkAndNavigateToScalePage(finalData.weight);
-      } else if (isSameWeight) {
-        console.log('[BLE] ⏸️ 体重相同，跳过跳转 (', finalData.weight, 'kg)');
-      } else {
-        console.log('[BLE] ⏸️ 数据过期，不跳转');
       }
     }
   },
@@ -276,17 +269,19 @@ App({
   // =====================
   // 发布-订阅模式
   // =====================
-  
+
   /**
    * 订阅体脂秤数据
    * @param {Function} callback - 回调函数 (data) => void
    * @returns {Function} 取消订阅函数
    */
   subscribeScaleData(callback) {
-    if (typeof callback !== 'function') return () => {};
-    
+    if (typeof callback !== 'function') {
+      return function() {};
+    }
+
     this.globalData.scaleListeners.push(callback);
-    
+
     // 如果有最新数据，立即通知
     if (this.globalData.latestScaleData) {
       try {
@@ -295,9 +290,12 @@ App({
         console.error('[BLE] 订阅回调失败:', err);
       }
     }
-    
+
     // 返回取消订阅函数
-    return () => this.unsubscribeScaleData(callback);
+    var self = this;
+    return function() {
+      self.unsubscribeScaleData(callback);
+    };
   },
 
   /**
@@ -314,7 +312,7 @@ App({
    * 通知所有订阅者
    */
   notifyScaleListeners(data) {
-    this.globalData.scaleListeners.forEach(cb => {
+    this.globalData.scaleListeners.forEach(function(cb) {
       try {
         cb(data);
       } catch (err) {
@@ -329,7 +327,7 @@ App({
   async loadScaleMembers(userId) {
     try {
       console.log('[BLE] 🔍 开始加载成员数据...');
-      
+
       const res = await new Promise((resolve, reject) => {
         cloudRequest.callContainer({
           path: `/api/scale/members?user_id=${userId}`,
@@ -340,7 +338,7 @@ App({
       });
 
       console.log('[BLE] 📦 成员接口返回:', res);
-      
+
       // 注意：res 直接是 {code, data} 结构，或者就是数组
       let members = [];
       if (res.code === 200 && res.data) {
@@ -348,7 +346,7 @@ App({
       } else if (Array.isArray(res)) {
         members = res;
       }
-      
+
       if (members.length > 0) {
         // 存储到全局，供页面使用
         this.globalData.scaleMembers = members;
@@ -361,20 +359,40 @@ App({
     }
   },
 
+  /**
+   * 检查是否为重复数据
+   * @param {Object} newData - 新接收的数据
+   * @returns {boolean} 是否为重复数据
+   */
+  isDuplicateData(newData) {
+    const lastData = this.globalData.lastProcessedData;
+    if (!lastData) return false;
+
+    // 时间间隔超过5秒，不视为重复（可能是新的测量）
+    const timeDiff = Date.now() - this.globalData.lastProcessedTimestamp;
+    if (timeDiff > 5000) return false;
+
+    // 如果体重相同且阻抗也相同，则认为是重复数据
+    const isSameWeight = Math.abs(lastData.weight - newData.weight) < 0.01;
+    const isSameImpedance = (lastData.impedance || 0) === (newData.impedance || 0);
+    const isSameStabilized = lastData.isStabilized === newData.isStabilized;
+
+    // 关键：如果新数据有阻抗而旧数据没有，必须视为新数据
+    if (isSameWeight && !lastData.impedanceValid && newData.impedanceValid) {
+      console.log('[BLE] 🆕 新数据包含阻抗，视为非重复');
+      return false;
+    }
+
+    // 如果所有关键指标都相同，则认为是重复数据
+    return isSameWeight && isSameImpedance && isSameStabilized;
+  },
+
   checkAndNavigateToScalePage(currentWeight) {
-    const now = Date.now();
     const global = this.globalData;
 
     // 跳转锁：防止页面栈溢出
     if (global.scalePageNavigationInFlight) {
       console.log('[BLE] ⏸️ 跳转进行中，跳过');
-      return;
-    }
-    
-    // 冷却检查：2.5秒内不重复跳转
-    const timeSinceLastNavigate = now - global.lastScalePageNavigateAt;
-    if (timeSinceLastNavigate < 2500) {
-      console.log('[BLE] ⏸️ 冷却中，剩余', Math.round((2500 - timeSinceLastNavigate) / 1000), '秒');
       return;
     }
 
@@ -387,26 +405,27 @@ App({
 
     // 记录本次跳转的体重
     global.lastJumpWeight = currentWeight;
-    // 立即更新跳转时间，防止并发触发
-    global.lastScalePageNavigateAt = now;
     global.scalePageNavigationInFlight = true;
-    
+
     console.log('[BLE] 🚀 开始跳转...');
     wx.vibrateShort({ type: 'medium' });
     wx.showLoading({ title: '连接秤...', mask: true });
 
-    const releaseLock = () => {
-      setTimeout(() => {
-        global.scalePageNavigationInFlight = false;
+    var self = this;
+    var releaseLock = function() {
+      setTimeout(function() {
+        self.globalData.scalePageNavigationInFlight = false;
         wx.hideLoading();
       }, 1000);
     };
 
     wx.navigateTo({
       url: '/pages/scale/scale',
-      fail: () => wx.redirectTo({ url: '/pages/scale/scale' }),
+      fail: function() {
+        wx.redirectTo({ url: '/pages/scale/scale' });
+      },
       complete: releaseLock
     });
-  },
+  }
 
 });

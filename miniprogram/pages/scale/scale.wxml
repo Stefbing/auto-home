@@ -7,24 +7,22 @@
                 <view class="device-text">
                     <text class="device-name">{{connectedDevice ? connectedDevice.name : '小米体脂秤2'}}</text>
                     <view class="device-status">
-                        <view class="status-dot {{appState === 'idle' ? 'disconnected' : 'connected'}}"></view>
-                        <text class="status-text">{{statusPillText}}</text>
+                        <view class="status-dot {{deviceOnlineStatus === 'online' ? 'connected' : 'disconnected'}}"></view>
+                        <text class="status-text">{{deviceOnlineStatus === 'online' ? '在线' : '离线'}}</text>
                     </view>
                 </view>
             </view>
-            <view class="action-buttons">
-                <!-- 重置按钮：仅在测量完成后显示 -->
-                <button wx:if="{{appState === 'completed'}}" 
-                        class="reset-btn" 
-                        bindtap="manualReset">
-                    重置
-                </button>
-                <!-- 扫描按钮：仅在空闲时显示 -->
-                <button wx:elif="{{appState === 'idle'}}" 
-                        class="refresh-btn" 
-                        bindtap="startMeasurementFlow">
-                    <text class="refresh-icon">↻</text>
-                </button>
+            
+            <!-- 重置控制区域 -->
+            <view class="reset-controls" wx:if="{{appState === 'completed' && resetTimer}}">
+                <view class="countdown-badge">
+                    <text class="countdown-number">{{resetCountdown}}</text>
+                    <text class="countdown-unit">s</text>
+                </view>
+                <view class="control-buttons">
+                    <button class="btn-cancel" bindtap="cancelReset" size="mini">取消</button>
+                    <button class="btn-reset" bindtap="immediateReset" size="mini">重置</button>
+                </view>
             </view>
         </view>
     </view>
@@ -55,14 +53,12 @@
                         <text class="weight-unit">kg</text>
                     </view>
 
-                    <!-- 稳定性指示器 -->
-                    <view class="stability-indicator" wx:if="{{appState === 'measuring' && !isStabilized}}">
-                        <view class="stability-dots">
-                            <view class="stability-dot {{stabilityProgress >= 33 ? 'active' : ''}}"></view>
-                            <view class="stability-dot {{stabilityProgress >= 66 ? 'active' : ''}}"></view>
-                            <view class="stability-dot {{stabilityProgress >= 100 ? 'active' : ''}}"></view>
+                    <!-- 稳定性进度条（移至仪表盘） -->
+                    <view class="stability-progress-bar" wx:if="{{appState === 'measuring' && !isStabilized}}">
+                        <view class="progress-track">
+                            <view class="progress-fill" style="width: {{stabilityProgress}}%"></view>
                         </view>
-                        <text class="stability-text">趋于稳定...</text>
+                        <text class="progress-text">{{stabilityProgress}}%</text>
                     </view>
 
                     <!-- 状态药丸 -->
@@ -133,7 +129,7 @@
     </view>
 
     <!-- 健康数据统计 -->
-    <view class="stats-grid {{appState === 'completed' ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && bodyFat}}">
+    <view class="stats-grid {{appState === 'completed' && bodyFat ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && bodyFat}}">
         <view class="stat-card">
             <view class="stat-icon" style="background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);">📊</view>
             <view class="stat-content">
@@ -230,7 +226,7 @@
     </view>
 
     <!-- 健康建议卡片 -->
-    <view class="advice-section {{appState === 'completed' ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && advice}}">
+    <view class="advice-section {{appState === 'completed' && advice ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && advice}}">
         <view class="advice-card {{adviceLevel}}">
             <view class="advice-header">
                 <text class="advice-icon">{{adviceIcon}}</text>
@@ -242,31 +238,6 @@
             <view class="advice-footer">
                 <text class="advice-time">{{currentMember.name || '当前成员'}} · {{currentMember.age}}岁 · {{currentMember.height}}cm</text>
             </view>
-        </view>
-    </view>
-
-    <!-- 保存状态 -->
-    <view class="save-section {{appState === 'completed' ? 'fade-in' : ''}}" wx:if="{{appState === 'completed'}}">
-        <view class="save-card {{saveCardClass}}">
-            <view class="save-spinner" wx:if="{{saving}}"></view>
-            <text class="save-icon" wx:elif="{{autoSaved}}">✓</text>
-            <text class="save-text">{{saveStatusText}}</text>
-        </view>
-    </view>
-
-    <!-- 重置提示 -->
-    <view class="reset-section {{showResetHint ? 'fade-in' : ''}}" wx:if="{{showResetHint}}">
-        <view class="reset-card">
-            <view class="reset-info">
-                <text class="reset-icon">⏱️</text>
-                <view class="reset-text-group">
-                    <text class="reset-title">准备下一次称重</text>
-                    <text class="reset-desc">{{resetCountdown > 0 ? resetCountdown + ' 秒后自动重置' : '可以开始新测量'}}</text>
-                </view>
-            </view>
-            <button class="reset-btn" bindtap="manualReset" wx:if="{{resetCountdown > 0}}">
-                <text class="reset-btn-text">立即重置</text>
-            </button>
         </view>
     </view>
 
