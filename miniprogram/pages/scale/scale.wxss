@@ -346,7 +346,7 @@ page {
 
 .gauge-card {
   background: #FFFFFF;
-  padding: 80rpx 0 60rpx;
+  padding: 30rpx 0;
   border-radius: 48rpx;
   box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.06),
     0 0 0 1rpx rgba(0, 0, 0, 0.02) inset;
@@ -370,7 +370,7 @@ page {
 .gauge-viewport {
   position: relative;
   width: 600rpx;
-  height: 380rpx;
+  height: 350rpx;
   overflow: hidden;
 }
 
@@ -452,7 +452,6 @@ page {
 .weight-box {
   display: flex;
   align-items: baseline;
-  margin-bottom: 4rpx;
   transition: all 0.3s;
 }
 
@@ -471,7 +470,7 @@ page {
 }
 
 .weight-value {
-  font-size: 120rpx;
+  font-size: 90rpx;
   font-weight: 800;
   color: #1E293B;
   line-height: 1;
@@ -522,31 +521,32 @@ page {
 /* 状态药丸 */
 .status-pill {
   font-size: 24rpx;
-  font-weight: 600;
-  padding: 10rpx 32rpx;
+  font-weight: 500;
+  padding: 8rpx 24rpx;
   border-radius: 100rpx;
   display: flex;
   align-items: center;
-  gap: 10rpx;
-  margin-top: 16rpx;
+  gap: 8rpx;
+  margin-top: 12rpx;
   transition: all 0.3s;
+  background: #F1F5F9;
+  color: #64748B;
 }
 
 .pill-scan {
-  color: #3B82F6;
-  background: #EFF6FF;
+  /* 统一样式，不强调 */
 }
 
 .pill-stable {
-  color: #10B981;
-  background: #ECFDF5;
+  /* 统一样式，不强调 */
 }
 
 .pill-dot {
-  width: 10rpx;
-  height: 10rpx;
+  width: 8rpx;
+  height: 8rpx;
   border-radius: 50%;
   background: currentColor;
+  opacity: 0.6;
 }
 
 .breathing-dot {
@@ -554,8 +554,8 @@ page {
 }
 
 @keyframes dot-breathe {
-0%, 100% { opacity: 1; transform: scale(1); }
-50% { opacity: 0.4; transform: scale(0.7); }
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.8); }
 }
 
 /* 阻抗显示 */
@@ -563,22 +563,25 @@ page {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-top: 16rpx;
-  padding: 12rpx 24rpx;
-  background: rgba(139, 92, 246, 0.08);
-  border-radius: 16rpx;
+  margin-top: 12rpx;
+  padding: 8rpx 24rpx;
+  background: #F1F5F9;
+  border-radius: 100rpx;
+  transition: all 0.3s;
+}
+
+.impedance-display.stabilized {
+  /* 统一样式，不强调 */
 }
 
 .impedance-label {
-  font-size: 20rpx;
-  color: #8B5CF6;
+  font-size: 24rpx;
+  color: #64748B;
   font-weight: 500;
 }
 
-.impedance-value {
-  font-size: 28rpx;
-  color: #7C3AED;
-  font-weight: 700;
+.impedance-display.stabilized .impedance-label {
+  /* 统一样式，不强调 */
 }
 
 /* ======================
@@ -665,7 +668,6 @@ page {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20rpx;
 }
 
 .section-title {
@@ -721,7 +723,7 @@ page {
 
 .member-list {
   white-space: nowrap;
-  padding: 8rpx 4rpx;
+  padding: 0 4rpx;
 }
 
 .member-card {
@@ -729,6 +731,7 @@ page {
   width: 172rpx;
   padding: 28rpx 16rpx 24rpx;
   margin-right: 16rpx;
+  margin-top: 16rpx;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10rpx);
   border-radius: 24rpx;
@@ -828,6 +831,9 @@ page {
   background: linear-gradient(135deg, #10B981 0%, #059669 100%);
   border-radius: 100rpx;
   box-shadow: 0 2rpx 8rpx rgba(16, 185, 129, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .match-badge text {

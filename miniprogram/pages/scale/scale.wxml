@@ -12,7 +12,7 @@
                     </view>
                 </view>
             </view>
-            
+
             <!-- 重置控制区域 -->
             <view class="reset-controls" wx:if="{{appState === 'completed' && resetTimer}}">
                 <view class="countdown-badge">
@@ -28,7 +28,7 @@
     </view>
 
     <!-- 实时体重仪表盘 -->
-    <view class="gauge-section" wx:if="{{appState !== 'idle' || weight > 0 || connectedDevice}}">
+    <view class="gauge-section" wx:if="{{appState !== 'idle' || weight > 0 || connectedDevice || members.length > 0}}">
         <view class="gauge-card">
             <view class="gauge-viewport">
                 <view class="gauge-container">
@@ -68,25 +68,12 @@
                     </view>
 
                     <!-- 阻抗显示 -->
-                    <view class="impedance-display" wx:if="{{impedance > 0 && appState === 'completed'}}">
-                        <text class="impedance-label">生物阻抗</text>
-                        <text class="impedance-value">{{impedance}} Ω</text>
+                    <view class="impedance-display {{isStabilized ? 'stabilized' : ''}}" wx:if="{{impedance > 0 && appState === 'completed'}}">
+                        <text class="impedance-label">阻抗{{impedance}}Ω</text>
                     </view>
                 </view>
             </view>
         </view>
-    </view>
-
-    <!-- 自动匹配提示 -->
-    <view class="match-toast {{matchedMember ? 'show' : ''}}" wx:if="{{matchedMember}}">
-        <view class="match-avatar" style="background: {{matchedMember.avatarColor}}">
-            <text>{{matchedMember.name[0]}}</text>
-        </view>
-        <view class="match-info">
-            <text class="match-name">已自动匹配：{{matchedMember.name}}</text>
-            <text class="match-confidence">置信度 {{matchConfidence}}%</text>
-        </view>
-        <view class="match-change" bindtap="showMemberSelector">切换</view>
     </view>
 
     <!-- 家庭成员选择 -->
@@ -131,18 +118,18 @@
     <!-- 健康数据统计 -->
     <view class="stats-grid {{appState === 'completed' && bodyFat ? 'fade-in' : ''}}" wx:if="{{appState === 'completed' && bodyFat}}">
         <view class="stat-card">
-            <view class="stat-icon" style="background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);">📊</view>
+            <view class="stat-icon" style="background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);">⚖️</view>
             <view class="stat-content">
                 <text class="stat-label">BMI指数</text>
                 <view class="stat-value">
                     <text class="stat-number">{{bmi}}</text>
                 </view>
-                <text class="stat-range {{bmiRangeClass}}">{{bmiRangeText}}</text>
+                <text class="stat-range {{bmiRangeClass}}">{{bmiRangeText}} (18.5-24)</text>
             </view>
         </view>
 
         <view class="stat-card">
-            <view class="stat-icon" style="background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);">💪</view>
+            <view class="stat-icon" style="background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);">🥩</view>
             <view class="stat-content">
                 <text class="stat-label">体脂率</text>
                 <view class="stat-value">
@@ -161,31 +148,31 @@
                     <text class="stat-number">{{water}}</text>
                     <text class="stat-unit">%</text>
                 </view>
-                <text class="stat-range">{{currentMember.gender === 'male' ? '55-65%' : '45-60%'}}</text>
+                <text class="stat-range">{{currentMember.gender === 'male' ? '男: 55-65%' : '女: 45-60%'}}</text>
             </view>
         </view>
 
         <view class="stat-card">
-            <view class="stat-icon" style="background: linear-gradient(135deg, #FCE7F3 0%, #FBCFE8 100%);">🦴</view>
+            <view class="stat-icon" style="background: linear-gradient(135deg, #FCE7F3 0%, #FBCFE8 100%);">💪</view>
             <view class="stat-content">
                 <text class="stat-label">肌肉量</text>
                 <view class="stat-value">
                     <text class="stat-number">{{muscleMass}}</text>
                     <text class="stat-unit">kg</text>
                 </view>
-                <text class="stat-range">占体重 {{muscleMassPercent}}%</text>
+                <text class="stat-range">{{currentMember.gender === 'male' ? '男: 70-89%' : '女: 60-79%'}}</text>
             </view>
         </view>
 
         <view class="stat-card">
-            <view class="stat-icon" style="background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);">🥩</view>
+            <view class="stat-icon" style="background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);">🍗</view>
             <view class="stat-content">
                 <text class="stat-label">蛋白质</text>
                 <view class="stat-value">
                     <text class="stat-number">{{protein}}</text>
                     <text class="stat-unit">%</text>
                 </view>
-                <text class="stat-range">{{currentMember.gender === 'male' ? '16-20%' : '14-18%'}}</text>
+                <text class="stat-range">{{currentMember.gender === 'male' ? '男: 16-20%' : '女: 14-18%'}}</text>
             </view>
         </view>
 
@@ -208,7 +195,7 @@
                 <view class="stat-value">
                     <text class="stat-number">{{visceralFat}}</text>
                 </view>
-                <text class="stat-range {{visceralFat > 9 ? 'warning' : ''}}">{{visceralFatText}}: 1-9</text>
+                <text class="stat-range {{visceralFat > 9 ? 'warning' : ''}}">{{visceralFatText}} (1-9)</text>
             </view>
         </view>
 
@@ -220,7 +207,7 @@
                     <text class="stat-number">{{boneMass}}</text>
                     <text class="stat-unit">kg</text>
                 </view>
-                <text class="stat-range">占体重 {{boneMassPercent}}%</text>
+                <text class="stat-range">{{currentMember.gender === 'male' ? '男: 2.5-4.0kg' : '女: 2.0-3.5kg'}}</text>
             </view>
         </view>
     </view>

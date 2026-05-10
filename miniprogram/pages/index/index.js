@@ -168,13 +168,6 @@ Page({
         app.checkAndInitBluetooth(userInfo.user_id)
       }
       
-      // 初始化蓝牙
-      const app = getApp()
-      if (!app.globalData.bleAdapterInitialized) {
-        console.log('[首页] 🚀 登录成功，开始初始化蓝牙')
-        app.checkAndInitBluetooth(userInfo.user_id)
-      }
-      
       wx.hideLoading()
       wx.showToast({ 
         title: userInfo.has_configured ? '登录成功，设备已连接' : '登录成功', 
@@ -325,9 +318,12 @@ Page({
         
         // 从 dashboardData 中获取体脂秤统计数据
         const scaleStats = dashboardData.scale_stats || {}
+        console.log('[首页] 📊 体脂秤统计数据:', scaleStats)
+        
         if (scaleStats) {
           scaleDevice.today_measurements = scaleStats.today_count || 0
           scaleDevice.latest_body_fat = scaleStats.latest_body_fat || null
+          console.log('[首页] ✅ 体脂秤数据 - 今日测量:', scaleDevice.today_measurements, '体脂率:', scaleDevice.latest_body_fat)
         }
         
         healthDevices.push(scaleDevice)
@@ -661,6 +657,13 @@ Page({
     try {
       // 重新加载设备数据（用户主动刷新）
       await this.loadUserDevices()
+      
+      // 如果网络恢复，尝试初始化蓝牙
+      const app = getApp()
+      if (app && !app.globalData.bleAdapterInitialized && !app.globalData.bluetoothInitializing) {
+        console.log('[首页] 🔄 下拉刷新成功，尝试初始化蓝牙')
+        app.checkAndInitBluetooth(this.data.userInfo.user_id)
+      }
       
       wx.showToast({
         title: '刷新成功',

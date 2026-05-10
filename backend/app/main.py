@@ -144,14 +144,141 @@ async def lifespan(app: FastAPI):
     state.data_refresh_task = None
     
     # Add scheduled tasks
-    async def refresh_dashboard():
-        """定期清理过期的仪表板缓存"""
+    async def refresh_dashboard_cache():
+        """后台定期刷新所有用户的仪表板缓存（无感刷新）"""
         try:
-            await cache_manager.cleanup_expired()
+            from .utils.config_manager import get_configs_batch
+            from sqlmodel import Session, select
+            from .models.models import SystemConfig
+            from .models.db import engine  # 【修复】导入 engine
+            
+            logger.info("Starting background dashboard cache refresh...")
+            start_time = time.time()
+            
+            # 获取所有有配置的用户ID
+            loop = asyncio.get_running_loop()
+            
+            def _get_user_ids():
+                with Session(engine) as session:
+                    stmt = select(SystemConfig.user_id).where(
+                        SystemConfig.platform.in_(["petkit", "cloudpets", "xiaomi"]),  # 【修复】添加 xiaomi
+                        SystemConfig.key == "account",
+                        SystemConfig.is_active == True
+                    ).distinct()
+                    return list(session.exec(stmt).all())
+            
+            user_ids = await loop.run_in_executor(None, _get_user_ids)
+            
+            if not user_ids:
+                logger.debug("No users with platform config found")
+                return
+            
+            logger.info(f"Refreshing cache for {len(user_ids)} users: {user_ids}")
+            
+            # 并行刷新所有用户的缓存
+            async def refresh_single_user(uid):
+                try:
+                    # 清除旧缓存
+                    cache_prefix = f'user_{uid}'
+                    await cache_manager.delete(f'{cache_prefix}_dashboard_combined_data')
+                    
+                    # 触发重新生成（调用dashboard接口逻辑）
+                    # 注意：这里不直接调用接口函数，而是执行相同的逻辑
+                    config_queries = [
+                        ("account", uid, "petkit"),
+                        ("password", uid, "petkit"),
+                        ("account", uid, "cloudpets"),
+                        ("password", uid, "cloudpets"),
+                        ("account", uid, "xiaomi"),  # 【修复】添加 xiaomi
+                        ("password", uid, "xiaomi"),  # 【修复】添加 xiaomi
+                    ]
+                    configs = await get_configs_batch(config_queries)
+                    
+                    petkit_username = configs.get(f"account_{uid}_petkit")
+                    petkit_password = configs.get(f"password_{uid}_petkit")
+                    cloudpets_account = configs.get(f"account_{uid}_cloudpets")
+                    cloudpets_password = configs.get(f"password_{uid}_cloudpets")
+                    xiaomi_account = configs.get(f"account_{uid}_xiaomi")
+                    xiaomi_password = configs.get(f"password_{uid}_xiaomi")
+                    
+                    # 只刷新有配置的平台
+                    has_petkit = bool(petkit_username and petkit_password)
+                    has_cloudpets = bool(cloudpets_account and cloudpets_password)
+                    has_xiaomi = bool(xiaomi_account and xiaomi_password)  # 【修复】添加 xiaomi 检查
+                    
+                    if not has_petkit and not has_cloudpets and not has_xiaomi:  # 【修复】添加 xiaomi 判断
+                        return
+                    
+                    # 获取PetKit设备
+                    petkit_devices = []
+                    if has_petkit:
+                        if state.petkit and getattr(state.petkit, 'user_id', None) == uid:
+                            petkit_devices = await state.petkit.get_devices()
+                        else:
+                            temp_service = PetKitService(petkit_username, petkit_password, user_id=uid)
+                            await temp_service.initialize()
+                            petkit_devices = await temp_service.get_devices()
+                            await temp_service.close()
+                        await cache_manager.set(f'{cache_prefix}_petkit_devices', petkit_devices, ttl=300)
+                    
+                    # 获取CloudPets数据
+                    if has_cloudpets:
+                        if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == uid:
+                            servings = await state.cloudpets.get_servings_today()
+                            plans = await state.cloudpets.get_feeding_plans()
+                        else:
+                            import backend.app.services.cloudpets_service as cp_module
+                            temp_service = cp_module.CloudPetsService(user_id=uid)
+                            await temp_service.initialize()
+                            servings = await temp_service.get_servings_today()
+                            plans = await temp_service.get_feeding_plans()
+                            await temp_service.close()
+                        
+                        await cache_manager.set(f'{cache_prefix}_cloudpets_servings', servings, ttl=120)
+                        await cache_manager.set(f'{cache_prefix}_cloudpets_plans', plans, ttl=300)
+                    
+                    # 获取PetKit设备统计
+                    if petkit_devices:
+                        for device in petkit_devices:
+                            if hasattr(device, 'id'):
+                                cache_key = f'{cache_prefix}_petkit_stats_{device.id}'
+                                if state.petkit and getattr(state.petkit, 'user_id', None) == uid:
+                                    stats = await state.petkit.get_daily_stats(device.id)
+                                else:
+                                    if has_petkit:
+                                        temp_service = PetKitService(petkit_username, petkit_password, user_id=uid)
+                                        await temp_service.initialize()
+                                        stats = await temp_service.get_daily_stats(device.id)
+                                        await temp_service.close()
+                                    else:
+                                        stats = {}
+                                await cache_manager.set(cache_key, stats, ttl=180)
+                    
+                    # 构建组合缓存
+                    dashboard_data = {
+                        'petkit_devices': petkit_devices,
+                        'litterbox_stats': {},
+                        'cloudpets_servings': locals().get('servings', {}),
+                        'cloudpets_plans': locals().get('plans', []),
+                        'xiaomi_config': bool(xiaomi_account and xiaomi_password)  # 【修复】动态检查
+                    }
+                    await cache_manager.set(f'{cache_prefix}_dashboard_combined_data', dashboard_data, ttl=120)
+                    
+                    logger.info(f"✓ Cache refreshed for user {uid}")
+                except Exception as e:
+                    logger.error(f"Failed to refresh cache for user {uid}: {e}")
+            
+            # 并行刷新所有用户
+            await asyncio.gather(*[refresh_single_user(uid) for uid in user_ids], return_exceptions=True)
+            
+            elapsed = time.time() - start_time
+            logger.info(f"Dashboard cache refresh completed in {elapsed:.2f}s")
+            
         except Exception as e:
-            logger.error(f"Dashboard cache cleanup failed: {e}")
+            logger.error(f"Dashboard cache refresh failed: {e}")
     
-    await scheduler.add_task('cache_cleanup', refresh_dashboard, interval=300, immediate=False)
+    # 每90秒刷新一次缓存（比缓存过期时间60s长，确保在过期前刷新）
+    await scheduler.add_task('dashboard_cache_refresh', refresh_dashboard_cache, interval=90, immediate=False)
     await scheduler.start()
     logger.info(f"=== App initialized in {time.time() - start_time:.2f}s ===")
 
@@ -212,7 +339,19 @@ async def config_page():
 # --- Cache & Dashboard APIs ---
 @app.get("/api/cache/status")
 async def cache_status():
-    return {"size": await cache_manager.size(), "last_refresh": await cache_manager.get('dashboard_last_refresh')}
+    """获取缓存状态和任务统计"""
+    try:
+        # 获取任务调度器统计
+        task_stats = scheduler.get_task_stats()
+        
+        return {
+            "cache_size": await cache_manager.size(),
+            "last_refresh": await cache_manager.get('dashboard_last_refresh'),
+            "scheduled_tasks": task_stats
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cache status: {e}")
+        return {"error": str(e)}
 
 @app.post("/api/cache/refresh")
 async def force_refresh_cache(user_id: Optional[int] = None):
@@ -244,11 +383,11 @@ async def clear_all_cache():
         raise HTTPException(status_code=500, detail=f"清理缓存失败: {str(e)}")
 
 @app.get("/api/dashboard/data")
-async def get_dashboard_data(user_id: Optional[int] = None):
-    """Get aggregated dashboard data (cached, user-specific)"""
+async def get_dashboard_data(user_id: Optional[int] = None, session: Session = Depends(get_session)):
+    """Get aggregated dashboard data (cached, user-specific) - 优化版：并行执行+批量配置"""
     try:
         # 提前导入，避免作用域问题
-        from .utils.config_manager import get_config_from_db
+        from .utils.config_manager import get_config_from_db, get_configs_batch
         
         # If no user_id provided, try to get from first configured user
         if not user_id:
@@ -261,82 +400,173 @@ async def get_dashboard_data(user_id: Optional[int] = None):
         if cached_data:
             return cached_data
         
+        # 批量获取所有配置（减少数据库查询次数）
+        config_queries = [
+            ("account", user_id, "petkit"),
+            ("password", user_id, "petkit"),
+            ("account", user_id, "cloudpets"),
+            ("password", user_id, "cloudpets"),
+            ("account", user_id, "xiaomi"),
+            ("password", user_id, "xiaomi"),
+        ]
+        configs = await get_configs_batch(config_queries)
+        
+        petkit_username = configs.get(f"account_{user_id}_petkit")
+        petkit_password = configs.get(f"password_{user_id}_petkit")
+        cloudpets_account = configs.get(f"account_{user_id}_cloudpets")
+        cloudpets_password = configs.get(f"password_{user_id}_cloudpets")
+        xiaomi_account = configs.get(f"account_{user_id}_xiaomi")
+        xiaomi_password = configs.get(f"password_{user_id}_xiaomi")
+        
         dashboard_data = {}
         
-        # PetKit devices (user-specific)
-        petkit_devices = await cache_manager.get(f'{cache_prefix}_petkit_devices')
-        if not petkit_devices and state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
-            petkit_devices = await state.petkit.get_devices()
-            await cache_manager.set(f'{cache_prefix}_petkit_devices', petkit_devices, ttl=300)
-        elif not petkit_devices:
+        # 并行获取PetKit设备和CloudPets数据
+        async def fetch_petkit_devices():
+            """获取PetKit设备列表"""
+            petkit_devices = await cache_manager.get(f'{cache_prefix}_petkit_devices')
+            if petkit_devices:
+                return petkit_devices
+            
+            if not petkit_username or not petkit_password:
+                return []
+            
             # Try to initialize service for this user
-            username = await get_config_from_db("account", user_id=user_id, platform="petkit")
-            password = await get_config_from_db("password", user_id=user_id, platform="petkit")
-            if username and password:
-                temp_service = PetKitService(username, password, user_id=user_id)
+            if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
+                devices = await state.petkit.get_devices()
+            else:
+                temp_service = PetKitService(petkit_username, petkit_password, user_id=user_id)
                 await temp_service.initialize()
-                petkit_devices = await temp_service.get_devices()
-                await cache_manager.set(f'{cache_prefix}_petkit_devices', petkit_devices, ttl=300)
+                devices = await temp_service.get_devices()
                 await temp_service.close()
-        dashboard_data['petkit_devices'] = petkit_devices or []
+            
+            await cache_manager.set(f'{cache_prefix}_petkit_devices', devices, ttl=300)
+            return devices
         
-        # Litterbox stats
+        async def fetch_cloudpets_data():
+            """获取CloudPets数据（servings + plans）"""
+            result = {"servings": {}, "plans": []}
+            
+            if not cloudpets_account or not cloudpets_password:
+                return result
+            
+            # Initialize or use existing service
+            if state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
+                servings = await state.cloudpets.get_servings_today()
+                plans = await state.cloudpets.get_feeding_plans()
+            else:
+                import backend.app.services.cloudpets_service as cp_module
+                temp_service = cp_module.CloudPetsService(user_id=user_id)
+                await temp_service.initialize()
+                servings = await temp_service.get_servings_today()
+                plans = await temp_service.get_feeding_plans()
+                await temp_service.close()
+            
+            await cache_manager.set(f'{cache_prefix}_cloudpets_servings', servings, ttl=120)
+            await cache_manager.set(f'{cache_prefix}_cloudpets_plans', plans, ttl=300)
+            result["servings"] = servings or {}
+            result["plans"] = plans or []
+            return result
+        
+        # 并行执行独立的外部API调用
+        petkit_devices, cloudpets_data = await asyncio.gather(
+            fetch_petkit_devices(),
+            fetch_cloudpets_data(),
+            return_exceptions=True
+        )
+        
+        # 处理异常
+        if isinstance(petkit_devices, Exception):
+            logger.error(f"Failed to fetch PetKit devices: {petkit_devices}")
+            petkit_devices = []
+        if isinstance(cloudpets_data, Exception):
+            logger.error(f"Failed to fetch CloudPets data: {cloudpets_data}")
+            cloudpets_data = {"servings": {}, "plans": []}
+        
+        dashboard_data['petkit_devices'] = petkit_devices or []
+        dashboard_data['cloudpets_servings'] = cloudpets_data.get('servings', {})
+        dashboard_data['cloudpets_plans'] = cloudpets_data.get('plans', [])
+        
+        # Litterbox stats（串行，因为依赖petkit_devices）
         litterbox_stats = {}
         if petkit_devices:
-            for device in petkit_devices:
+            # 并行获取每个设备的统计数据
+            async def fetch_device_stats(device):
                 if hasattr(device, 'id'):
                     cache_key = f'{cache_prefix}_petkit_stats_{device.id}'
                     stats = await cache_manager.get(cache_key)
-                    if not stats and state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
-                        stats = await state.petkit.get_daily_stats(device.id)
+                    if not stats:
+                        if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
+                            stats = await state.petkit.get_daily_stats(device.id)
+                        else:
+                            # 需要重新初始化服务
+                            if petkit_username and petkit_password:
+                                temp_service = PetKitService(petkit_username, petkit_password, user_id=user_id)
+                                await temp_service.initialize()
+                                stats = await temp_service.get_daily_stats(device.id)
+                                await temp_service.close()
                         await cache_manager.set(cache_key, stats, ttl=180)
-                    litterbox_stats[device.id] = stats or {}
+                    return device.id, stats or {}
+                return None, {}
+            
+            # 并行获取所有设备的统计
+            stats_tasks = [fetch_device_stats(device) for device in petkit_devices]
+            stats_results = await asyncio.gather(*stats_tasks, return_exceptions=True)
+            
+            for result in stats_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Failed to fetch device stats: {result}")
+                    continue
+                device_id, stats = result
+                if device_id:
+                    litterbox_stats[device_id] = stats
+        
         dashboard_data['litterbox_stats'] = litterbox_stats
         
-        # CloudPets servings (user-specific)
-        cloudpets_servings = await cache_manager.get(f'{cache_prefix}_cloudpets_servings')
-        if not cloudpets_servings:
-            account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
-            password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
-            
-            # 只有当配置存在时才尝试获取数据
-            if account and password:
-                # Initialize or use existing service
-                if not state.cloudpets or getattr(state.cloudpets, 'user_id', None) != user_id:
-                    import backend.app.services.cloudpets_service as cp_module
-                    temp_service = cp_module.CloudPetsService(user_id=user_id)
-                    await temp_service.initialize()
-                    cloudpets_servings = await temp_service.get_servings_today()
-                    await cache_manager.set(f'{cache_prefix}_cloudpets_servings', cloudpets_servings, ttl=120)
-                    await temp_service.close()
-                else:
-                    cloudpets_servings = await state.cloudpets.get_servings_today()
-                    await cache_manager.set(f'{cache_prefix}_cloudpets_servings', cloudpets_servings, ttl=120)
-            else:
-                # 没有配置，返回空数据
-                cloudpets_servings = {}
-        dashboard_data['cloudpets_servings'] = cloudpets_servings or {}
-        
-        # CloudPets plans
-        cloudpets_plans = await cache_manager.get(f'{cache_prefix}_cloudpets_plans')
-        if not cloudpets_plans:
-            # 检查是否有配置
-            account = await get_config_from_db("account", user_id=user_id, platform="cloudpets")
-            password = await get_config_from_db("password", user_id=user_id, platform="cloudpets")
-            
-            if account and password and state.cloudpets and getattr(state.cloudpets, 'user_id', None) == user_id:
-                cloudpets_plans = await state.cloudpets.get_feeding_plans()
-                await cache_manager.set(f'{cache_prefix}_cloudpets_plans', cloudpets_plans, ttl=300)
-            else:
-                cloudpets_plans = []
-        dashboard_data['cloudpets_plans'] = cloudpets_plans or []
-        
         # Xiaomi scale config check
-        xiaomi_account = await get_config_from_db("account", user_id=user_id, platform="xiaomi")
-        xiaomi_password = await get_config_from_db("password", user_id=user_id, platform="xiaomi")
         dashboard_data['xiaomi_config'] = bool(xiaomi_account and xiaomi_password)
         
-        await cache_manager.set(f'{cache_prefix}_dashboard_combined_data', dashboard_data, ttl=60)
+        # 【新增】获取体脂秤统计数据
+        if xiaomi_account and xiaomi_password:
+            try:
+                from datetime import datetime, timedelta
+                from .models.models import WeightRecord
+                from sqlmodel import select
+                
+                # 计算今天的开始和结束时间戳（毫秒）
+                today_start = int(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+                today_end = int(datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999).timestamp() * 1000)
+                
+                # 查询今日测量次数
+                stmt_today_count = select(WeightRecord).where(
+                    WeightRecord.user_id == user_id,
+                    WeightRecord.timestamp >= today_start,
+                    WeightRecord.timestamp <= today_end
+                ).order_by(WeightRecord.timestamp.desc())
+                today_records = session.exec(stmt_today_count).all()
+                today_count = len(today_records)
+                
+                # 查询最新一次测量的体脂率
+                latest_body_fat = None
+                if today_records:
+                    # 按时间倒序，取第一条
+                    latest_record = today_records[0]
+                    if latest_record.body_fat:
+                        latest_body_fat = round(latest_record.body_fat, 1)
+                
+                scale_stats = {
+                    'today_count': today_count,
+                    'latest_body_fat': latest_body_fat
+                }
+                
+                logger.info(f'[Dashboard] 体脂秤统计 - 今日测量: {today_count}, 最新体脂: {latest_body_fat}')
+                dashboard_data['scale_stats'] = scale_stats
+            except Exception as e:
+                logger.error(f'[Dashboard] 获取体脂秤统计失败: {e}')
+                dashboard_data['scale_stats'] = {'today_count': 0, 'latest_body_fat': None}
+        else:
+            dashboard_data['scale_stats'] = {'today_count': 0, 'latest_body_fat': None}
+        
+        await cache_manager.set(f'{cache_prefix}_dashboard_combined_data', dashboard_data, ttl=120)
         return dashboard_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取仪表板数据失败：{str(e)}")

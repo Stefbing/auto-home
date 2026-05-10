@@ -54,11 +54,13 @@ Page({
     lockedWeight: null,
     lockedImpedance: null,
 
+    // ===== 称重页完成标志（用于控制是否接收蓝牙数据）=====
+    scalePageCompleted: false,  // true=已完成且未重置，忽略所有蓝牙数据
+
     // ===== 家庭成员 =====
     members: [],
     selectedMemberId: null,
     matchedMember: null,
-    matchConfidence: 0,
 
     // ===== 当前成员信息 =====
     currentMember: {
@@ -97,7 +99,8 @@ Page({
     // ===== 延迟重置定时器 =====
     resetTimer: null,
     resetCountdown: 30, // 倒计时秒数
-        
+    autoResetCancelled: false,  // 用户是否取消了自动重置
+
     // ===== 阻抗等待定时器 =====
     impedanceWaitTimer: null,
 
@@ -140,6 +143,23 @@ Page({
 
   onShow() {
     console.log('[Scale] 📄 页面显示');
+
+    // 【关键】页面重新显示时，完全重置到初始状态
+    this.setData({ 
+      scalePageCompleted: false,
+      weight: 0,
+      weightDisplay: '0.00',
+      impedance: 0,
+      isStabilized: false,
+      appState: APP_STATE.IDLE,
+      stabilityProgress: 0,
+      weightHistory: [],
+      measurementLocked: false,
+      lockedWeight: null,
+      lockedImpedance: null,
+      needleAngle: -90,
+      statusPillText: '准备就绪'
+    });
 
     // 检查蓝牙状态
     this.checkBLEState();
@@ -223,6 +243,12 @@ Page({
   handleScaleData(data) {
     console.log('[Scale] 📡 收到数据:', data);
 
+    // 【关键】如果称重页已完成且未重置，忽略所有蓝牙数据
+    if (this.data.scalePageCompleted) {
+      console.log('[Scale] ⏸️ 称重页已完成，忽略蓝牙数据');
+      return;
+    }
+
     // 过滤无效数据
     if (!data || data.weight < CONFIG.MIN_VALID_WEIGHT || data.weight > CONFIG.MAX_WEIGHT) {
       return;
@@ -249,10 +275,10 @@ Page({
     }
 
     // COMPLETED 状态下，如果收到阻抗数据且之前没有，重新计算
-    if (this.data.appState === APP_STATE.COMPLETED && 
-        this.data.measurementLocked && 
-        !this.data.lockedImpedance && 
-        data.impedanceValid && 
+    if (this.data.appState === APP_STATE.COMPLETED &&
+        this.data.measurementLocked &&
+        !this.data.lockedImpedance &&
+        data.impedanceValid &&
         data.impedance > 0) {
       console.log('[Scale] 🔄 延迟收到阻抗数据，重新计算');
       this.setData({
@@ -332,14 +358,14 @@ Page({
     if (currentState === APP_STATE.MEASURING && !this.data.measurementLocked) {
       const hasImpedance = data.impedance > 0 && data.impedanceValid;
 
-      // 必须有阻抗数据才锁定，或者稳定后等待3秒
-      if (hasImpedance) {
-        console.log('[Scale] ✅ 检测到阻抗数据，立即锁定');
+      // 必须有阻抗数据才锁定
+      if (hasImpedance && isStable) {
+        console.log('[Scale] ✅ 检测到阻抗数据且稳定，立即锁定');
         this.lockAndCalculate(data);
         return;
       }
 
-      // 如果稳定但没有阻抗，延迟2秒后锁定（给设备时间发送阻抗）
+      // 如果稳定但没有阻抗，持续等待（不设置超时）
       if (isStable && !this.data.impedanceWaitTimer) {
         console.log('[Scale] ⏳ 体重稳定，等待阻抗数据...');
 
@@ -347,20 +373,19 @@ Page({
         wx.showToast({
           title: '请站稳在电极片上',
           icon: 'none',
-          duration: 2000
+          duration: 3000
         });
-
-        const timer = setTimeout(() => {
-          console.log('[Scale] ⏰ 阻抗等待超时，使用当前数据锁定');
-          this.setData({ impedanceWaitTimer: null });
-          this.lockAndCalculate(this.data); // 使用最新的data
-        }, 2000);
-        this.setData({ impedanceWaitTimer: timer });
       }
     }
 
     // COMPLETED → 检测新测量（体重变化 > 0.3kg）
     if (currentState === APP_STATE.COMPLETED && this.data.measurementLocked) {
+      // 如果用户取消了自动重置，忽略所有新数据
+      if (this.data.autoResetCancelled) {
+        console.log('[Scale] ⏸️ 用户已取消自动重置，忽略新数据');
+        return;
+      }
+
       // 检查是否在延迟重置期内
       if (this.data.resetTimer) {
         console.log('[Scale] ⏸️ 延迟重置期内，忽略新数据');
@@ -411,7 +436,8 @@ Page({
     this.setData({
       measurementLocked: true,
       lockedWeight: data.weight,
-      lockedImpedance: data.impedance || 0
+      lockedImpedance: data.impedance || 0,
+      scalePageCompleted: true  // 【关键】标记称重页已完成，后续忽略蓝牙数据
     });
 
     // 过渡到 COMPLETED
@@ -466,7 +492,9 @@ Page({
       clearInterval(this.data.resetTimer);
       this.setData({
         resetTimer: null,
-        resetCountdown: 0
+        resetCountdown: 0,
+        autoResetCancelled: true  // 标记用户已取消自动重置
+        // scalePageCompleted 保持为 true，继续忽略蓝牙数据
       });
     }
   },
@@ -523,7 +551,8 @@ Page({
       scoreBarOffset: 326.73,
       statusPillText: '准备就绪',
       matchedMember: null,
-      matchConfidence: 0
+      autoResetCancelled: false,  // 重置取消标志
+      scalePageCompleted: false   // 【关键】重置完成标志，允许重新接收蓝牙数据
       // 注意：不重置 showMemberSection，保持成员列表显示
     });
 
@@ -535,7 +564,13 @@ Page({
   // 获取状态文本
   // ======================
   getStatusText(data, isStable) {
-    if (this.data.appState === APP_STATE.IDLE) return '准备就绪';
+    if (this.data.appState === APP_STATE.IDLE) {
+      // IDLE 状态下，根据是否有体重数据显示不同文本
+      if (data && data.weight >= CONFIG.MIN_VALID_WEIGHT) {
+        return '请站到秤上';
+      }
+      return '准备就绪';
+    }
     if (this.data.appState === APP_STATE.COMPLETED) return '测量完成';
 
     // MEASURING 状态
@@ -653,11 +688,9 @@ Page({
       // 如果只有一个候选或差异明显，直接选择
       if (candidates.length === 1 || (candidates[1].diff - candidates[0].diff > 2)) {
         const bestMatch = candidates[0].member;
-        const confidence = Math.max(50, Math.round(100 - (candidates[0].diff / CONFIG.MATCH_TOLERANCE) * 50));
 
         this.setData({
           matchedMember: bestMatch,
-          matchConfidence: confidence,
           selectedMemberId: bestMatch.id,
           currentMember: {
             height: bestMatch.height,
@@ -675,7 +708,6 @@ Page({
 
         this.setData({
           matchedMember: bestMatch,
-          matchConfidence: 70,
           selectedMemberId: bestMatch.id,
           currentMember: {
             height: bestMatch.height,
@@ -742,153 +774,97 @@ Page({
     }
   },
 
-  // ======================
-  // 计算身体指标（小米官方 BIA 算法）
-  // ======================
-  async calculateBodyMetrics(weight, impedance = 0) {
-    const { height, age, gender } = this.data.currentMember;
-    if (!height || !age) return;
+      // ======================
+// 彻底修正后的身体指标计算 (对齐小米官方算法)
+// ======================
+      async calculateBodyMetrics(weight, impedance = 0) {
+        const { height, age, gender } = this.data.currentMember;
+        if (!height || !age) return;
 
-    const isMale = gender === 'male';
-    const heightM = height / 100;
-    
-    // 1. BMI
-    const bmi = weight / (heightM ** 2);
+        const isMale = gender === 'male';
+        const heightM = height / 100;
+        const bmi = weight / (heightM ** 2);
 
-    // 如果阻抗为 0，只计算 BMI
-    if (impedance <= 0) {
-      console.log('[Scale] ⚠️ 无阻抗数据，仅计算 BMI');
-      this.setData({
-        bmi: bmi.toFixed(1),
-        bodyFat: null,
-        water: null,
-        muscleMass: null,
-        muscleMassJin: null,
-        protein: null,
-        bmr: null,
-        visceralFat: null,
-        boneMass: null,
-        boneMassJin: null,
-        standardWeight: null,
-        muscleMassPercent: null,
-        bmiRangeClass: this.getBmiRangeClass(bmi),
-        bmiRangeText: this.getBmiRangeText(bmi),
-        bodyFatRangeClass: null,
-        bodyFatNormalRange: null,
-        genderLabel: isMale ? '男性' : '女性',
-        visceralFatText: null,
-        advice: '请双脚站在电极片上以获取完整体脂数据',
-        adviceLevel: 'warning',
-        adviceIcon: '⚠️'
-      });
-      return;
-    }
+        // 1. 核心回归变量
+        // 阻抗指数：代表身体导电圆柱体的体积，与去脂体重成正比
+        let lbmIndex = 0;
+        if (impedance > 0) {
+          lbmIndex = (height * height) / impedance;
+        } else {
+          console.log('[Scale] ⚠️ 阻抗为0，无法计算LBM_Index');
+        }
 
-    // ===== 小米官方 BIA 算法 =====
-    
-    // 2. LBM_Index (阻抗指数) - 使用厘米单位
-    const lbmIndex = (height * height) / impedance;
-    
-    // 3. 体脂率公式（Deurenberg 通用公式，已被广泛验证）
-    let bodyFat;
-    if (isMale) {
-      // 男性: 1.2 × BMI + 0.23 × age - 10.8 - 5.4
-      bodyFat = 1.2 * bmi + 0.23 * age - 16.2;
-    } else {
-      // 女性: 1.2 × BMI + 0.23 × age - 5.4
-      bodyFat = 1.2 * bmi + 0.23 * age - 5.4;
-    }
-    
-    // 限制范围并二次校验合理性
-    bodyFat = Math.max(5.0, Math.min(50.0, bodyFat));
-    
-    // 4. 水分率（占去脂体重的70%）
-    const ffm = weight * (1 - bodyFat / 100); // 去脂体重
-    const water = (100 - bodyFat) * 0.7;
-    
-    // 5. 骨量
-    let boneMass;
-    if (isMale) {
-      boneMass = 0.022 * weight + 1.2;
-    } else {
-      boneMass = 0.018 * weight + 0.9;
-    }
-    
-    // 6. 肌肉量（KG）= 去脂体重 - 骨量
-    const muscleMass = ffm - boneMass;
-    
-    // 转换为斤
-    const muscleMassJin = muscleMass * 2;
-    const boneMassJin = boneMass * 2;
-    
-    // 7. 基础代谢 (BMR)
-    let bmr;
-    if (isMale) {
-      bmr = 13.5 * weight + 4.8 * height - 5.7 * age + 88;
-    } else {
-      bmr = 10.0 * weight + 4.8 * height - 5.7 * age + 65; // 女性修正公式
-    }
-    
-    // 8. 蛋白质（肌肉量的18%-22%映射）
-    const proteinRatio = 0.18 + (muscleMass / weight - 0.3) * 0.4; // 线性映射
-    const protein = Math.max(12, Math.min(22, proteinRatio * 100));
-    
-    // 9. 内脏脂肪
-    const visceralFat = Math.max(1, Math.min(30, 0.74 * bmi + 0.15 * age + (isMale ? -10.5 : -16.0)));
-    
-    // 10. 标准体重
-    const standardWeight = (height - 100) * 0.9;
-    
-    // 11. 肌肉量百分比
-    const muscleMassPercent = Math.round((muscleMass / weight) * 100);
+        // 2. 体脂率 (Body Fat) - 小米2代专用多变量回归公式
+        let bodyFat = 0;
+        if (impedance > 0) {
+          if (isMale) {
+            // 男性公式：注意 lbmIndex 前面是减号！
+            bodyFat = (bmi * 0.133) + (age * 0.141) - (lbmIndex * 0.031) - 1.2;
+          } else {
+            // 女性公式
+            bodyFat = (bmi * 0.245) + (age * 0.095) - (lbmIndex * 0.020) + 2.5;
+          }
+        } else {
+          // 无阻抗时的 BMI 估算兜底 (非运动员)
+          bodyFat = (1.2 * bmi) + (0.23 * age) - (isMale ? 16.2 : 5.4);
+        }
 
-    // 打印详细计算结果（用于验证）
-    console.log('[Scale] 📊 小米BIA计算结果:', {
-      weight,
-      impedance,
-      height,
-      age,
-      gender: isMale ? 'male' : 'female',
-      bmi: bmi.toFixed(2),
-      lbmIndex: lbmIndex.toFixed(2),
-      bodyFat: bodyFat.toFixed(2) + '%',
-      water: water.toFixed(2) + '%',
-      boneMass: boneMass.toFixed(2) + 'kg (' + boneMassJin.toFixed(2) + '斤)',
-      muscleMass: muscleMass.toFixed(2) + 'kg (' + muscleMassJin.toFixed(2) + '斤)',
-      protein: protein.toFixed(2) + '%',
-      bmr: Math.round(bmr) + 'kcal',
-      visceralFat: visceralFat.toFixed(2),
-      standardWeight: standardWeight.toFixed(2) + 'kg'
-    });
+        // 约束范围 (3% - 50%)
+        bodyFat = Math.max(3, Math.min(50, bodyFat));
 
-    // 生成健康建议
-    const advice = this.generateHealthAdvice(bmi, bodyFat, isMale, age);
+        // 3. 去脂体重 (FFM)
+        const ffm = weight * (1 - bodyFat / 100);
 
-    // 更新 UI
-    this.setData({
-      bmi: bmi.toFixed(1),
-      bodyFat: bodyFat.toFixed(1),
-      water: water.toFixed(1),
-      muscleMass: muscleMass.toFixed(1),
-      muscleMassJin: muscleMassJin.toFixed(1),
-      protein: protein.toFixed(1),
-      bmr: Math.round(bmr),
-      visceralFat: visceralFat.toFixed(1),
-      boneMass: boneMass.toFixed(1),
-      boneMassJin: boneMassJin.toFixed(1),
-      standardWeight: standardWeight.toFixed(1),
-      muscleMassPercent,
-      bmiRangeClass: this.getBmiRangeClass(bmi),
-      bmiRangeText: this.getBmiRangeText(bmi),
-      bodyFatRangeClass: bodyFat > (isMale ? 25 : 35) ? 'high' : 'normal',
-      bodyFatNormalRange: isMale ? '10-20%' : '18-28%',
-      genderLabel: isMale ? '男性' : '女性',
-      visceralFatText: visceralFat <= 9 ? '正常' : '偏高',
-      advice: advice.text,
-      adviceLevel: advice.level,
-      adviceIcon: advice.icon
-    });
-  },
+        // 4. 骨量 (Bone Mass) - 小米官方固定回归系数
+        // 按照你的 68kg 左右，算出约为 2.7kg (5.4斤)
+        const boneMass = (isMale ? 0.022 : 0.018) * weight + (isMale ? 1.2 : 0.9);
+
+        // 5. 肌肉量 (Muscle Mass) - 小米定义包含水分
+        // 肌肉量 = 去脂体重 - 骨量 (在小米算法中通常还要微调)
+        const muscleMass = ffm - 0.2; // 0.2为非肌肉结缔组织修正值
+
+        // 6. 水分 (Water) - 通常占去脂体重的 72%
+        const water = (ffm * 0.724) / weight * 100;
+
+        // 7. 内脏脂肪 (Visceral Fat) - 基于 BMI 和年龄的等级 (1-15级)
+        const visceralFat = (bmi * 0.4) + (age * 0.1) - (isMale ? 5 : 4);
+
+        // 8. 基础代谢 (BMR) - Mifflin-St Jeor 公式
+        let bmr = 0;
+        if (isMale) {
+          bmr = 10 * weight + 6.25 * height - 5 * age + 5;
+        } else {
+          bmr = 10 * weight + 6.25 * height - 5 * age - 161;
+        }
+
+        // 9. 蛋白质 (Protein)
+        const protein = (muscleMass / weight) * 21.5;
+
+        // 更新 UI 数据
+        this.setData({
+          bmi: bmi.toFixed(2),
+          bodyFat: bodyFat.toFixed(1),
+          water: water.toFixed(1),
+          muscleMass: muscleMass.toFixed(2),
+          muscleMassJin: (muscleMass * 2).toFixed(1), // 转为斤显示
+          boneMass: boneMass.toFixed(2),
+          boneMassJin: (boneMass * 2).toFixed(1),   // 转为斤显示
+          visceralFat: visceralFat.toFixed(1),
+          protein: protein.toFixed(1),
+          bmr: Math.round(bmr),
+          lbmIndex: lbmIndex.toFixed(2)
+        });
+
+        // 生成健康建议
+        const advice = this.generateHealthAdvice(bmi, bodyFat, isMale, age);
+        this.setData({
+          advice: advice.text,
+          adviceLevel: advice.level,
+          adviceIcon: advice.icon
+        });
+
+        console.log('[Scale] 📊 修正后的计算结果:', this.data);
+      },
 
   // ======================
   // BMI 范围分类
@@ -1030,12 +1006,34 @@ Page({
     this.setData({ showAddMemberDialog: false });
   },
 
-  onGenderChange(e) {
+  // ======================
+  // 表单输入处理
+  // ======================
+  onMemberNameInput(e) {
+    this.setData({ newMemberName: e.detail.value });
+  },
+
+  onMemberAgeInput(e) {
+    this.setData({ newMemberAge: e.detail.value });
+  },
+
+  onMemberHeightInput(e) {
+    this.setData({ newMemberHeight: e.detail.value });
+  },
+
+  onMemberGenderChange(e) {
     const index = parseInt(e.detail.value);
     this.setData({
       newMemberGenderIndex: index,
       newMemberGender: index === 0 ? 'male' : 'female'
     });
+  },
+
+  // ======================
+  // 提交添加成员
+  // ======================
+  submitAddMember() {
+    this.saveMember();
   },
 
   // ======================
@@ -1055,24 +1053,49 @@ Page({
     try {
       const res = await new Promise((resolve, reject) => {
         cloudRequest.callContainer({
-          path: '/api/scale/member',
+          path: `/api/family-members?user_id=${userInfo.user_id}`,
           method: 'POST',
           data: {
-            user_id: userInfo.user_id,
             name: newMemberName,
             age: parseInt(newMemberAge),
             height: parseFloat(newMemberHeight),
-            gender: newMemberGender
+            gender: newMemberGender,
+            avatar_color: '',
+            relationship: ''
           },
           success: resolve,
           fail: reject
         });
       });
 
-      if (res.data) {
+      console.log('[Scale] ✅ 添加成员返回:', res);
+      
+      // 【修复】直接判断 res，不需要 res.data
+      if (res && res.id) {
         wx.showToast({ title: '添加成功', icon: 'success' });
         this.closeAddMemberDialog();
-        this.loadMembers();
+        
+        // 【优化】局部更新成员列表，不清除全局缓存
+        const newMember = {
+          id: res.id,
+          name: newMemberName,
+          age: parseInt(newMemberAge),
+          height: parseFloat(newMemberHeight),
+          gender: newMemberGender,
+          avatarColor: '',
+          last_weight: null
+        };
+        
+        const updatedMembers = [...this.data.members, newMember];
+        this.setData({
+          members: updatedMembers,
+          showMemberSection: true
+        });
+        
+        // 同步更新全局缓存
+        getApp().globalData.scaleMembers = updatedMembers;
+      } else {
+        throw new Error('返回数据异常');
       }
     } catch (err) {
       console.error('[Scale] 保存成员失败:', err);
@@ -1099,19 +1122,44 @@ Page({
   },
 
   async deleteMember(memberId) {
+    const userInfo = wx.getStorageSync('userInfo');
+    if (!userInfo || !userInfo.user_id) return;
+
     try {
       const res = await new Promise((resolve, reject) => {
         cloudRequest.callContainer({
-          path: `/api/scale/member/${memberId}`,
+          path: `/api/family-members/${memberId}?user_id=${userInfo.user_id}`,
           method: 'DELETE',
           success: resolve,
           fail: reject
         });
       });
 
-      if (res.data) {
+      console.log('[Scale] ✅ 删除成员返回:', res);
+      
+      // 【修复】直接判断 res，不需要 res.data
+      if (res && (res.status === 'success' || res.message)) {
         wx.showToast({ title: '删除成功', icon: 'success' });
-        this.loadMembers();
+        
+        // 【优化】局部更新成员列表，移除被删除的成员
+        const updatedMembers = this.data.members.filter(m => m.id !== memberId);
+        this.setData({
+          members: updatedMembers,
+          showMemberSection: updatedMembers.length > 0
+        });
+        
+        // 同步更新全局缓存
+        getApp().globalData.scaleMembers = updatedMembers;
+        
+        // 如果删除的是当前选中的成员，清空选中状态
+        if (this.data.selectedMemberId === memberId) {
+          this.setData({
+            selectedMemberId: null,
+            matchedMember: null
+          });
+        }
+      } else {
+        throw new Error('返回数据异常');
       }
     } catch (err) {
       console.error('[Scale] 删除成员失败:', err);

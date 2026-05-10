@@ -450,50 +450,6 @@
   display: block;
 }
 
-/* 体脂秤卡片右侧区域 */
-.card-right {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  flex-shrink: 0;
-}
-
-.scale-card .card-stats {
-  display: flex;
-  gap: 24rpx;
-  align-items: center;
-  margin-left: 0;
-}
-
-.scale-card .stat-value {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #1F2937;
-  line-height: 1.2;
-  display: block;
-  letter-spacing: -0.5rpx;
-}
-
-.scale-card .stat-label {
-  font-size: 20rpx;
-  color: #9CA3AF;
-  font-weight: 500;
-  margin-top: 2rpx;
-  display: block;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.scale-card .stat-empty {
-  text-align: right;
-}
-
-.scale-card .empty-text {
-  font-size: 24rpx;
-  color: #D1D5DB;
-  font-weight: 500;
-}
-
 .card-name {
   font-size: 32rpx;
   font-weight: 700;

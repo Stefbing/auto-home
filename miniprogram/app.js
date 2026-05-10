@@ -112,6 +112,9 @@ App({
         }
       } catch (err) {
         console.error('[BLE] ❌ 配置检查失败:', err);
+        // 重置缓存标志，允许下次重试
+        this.globalData.xiaomiConfigChecked = false;
+        this.globalData.hasXiaomiConfig = false;
         return;
       }
     }
@@ -253,15 +256,16 @@ App({
       const pages = getCurrentPages();
       const currentPage = pages[pages.length - 1];
       if (currentPage && currentPage.route === 'pages/scale/scale') {
+        console.log('[BLE] ⏸️ 已在称重页，跳过');
         return;
       }
 
-      // 体重去重
-      const lastWeight = this.globalData.lastJumpWeight || 0;
-      const isSameWeight = Math.abs(finalData.weight - lastWeight) < 0.1;
-
-      if (!isSameWeight) {
+      // 【修改】只要数据新鲜且未处于跳转中，就跳转
+      // 不再判断体重是否变化，让称重页自己处理数据更新
+      if (!this.globalData.scalePageNavigationInFlight) {
         this.checkAndNavigateToScalePage(finalData.weight);
+      } else {
+        console.log('[BLE] ⏸️ 跳转进行中，跳过');
       }
     }
   },
@@ -377,9 +381,15 @@ App({
     const isSameImpedance = (lastData.impedance || 0) === (newData.impedance || 0);
     const isSameStabilized = lastData.isStabilized === newData.isStabilized;
 
-    // 关键：如果新数据有阻抗而旧数据没有，必须视为新数据
+    // 关键：如果新数据有阻抗而旧数据没有，必须视为新数据（即使体重相同）
     if (isSameWeight && !lastData.impedanceValid && newData.impedanceValid) {
       console.log('[BLE] 🆕 新数据包含阻抗，视为非重复');
+      return false;
+    }
+
+    // 关键：如果旧数据已有阻抗，新数据阻抗不同，也视为新数据
+    if (isSameWeight && lastData.impedanceValid && newData.impedanceValid && !isSameImpedance) {
+      console.log('[BLE] 🆕 阻抗数据变化，视为非重复');
       return false;
     }
 

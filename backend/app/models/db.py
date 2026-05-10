@@ -39,7 +39,15 @@ elif 'charset' not in database_url.lower():
 
 logger.info("正在创建数据库引擎...")
 engine_start = time.time()
-engine = create_engine(database_url, echo=False)
+engine = create_engine(
+    database_url,
+    echo=False,
+    pool_size=5,  # 连接池大小
+    max_overflow=10,  # 最大溢出连接数
+    pool_timeout=30,  # 获取连接超时时间（秒）
+    pool_recycle=3600,  # 连接回收时间（秒），避免MySQL断开空闲连接
+    pool_pre_ping=True  # 使用前检测连接是否有效
+)
 logger.info(f"✓ 数据库引擎创建完成，耗时：{time.time() - engine_start:.2f}秒")
 
 def init_db():

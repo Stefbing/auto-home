@@ -679,8 +679,7 @@ class PetKitService:
                 device_stats = target_entity.device_stats
                 # 获取今日统计数据
                 today_times = getattr(device_stats, 'times', 0)
-                logger.info(f"Device {target_entity.name} - today_visits from device_stats.times: {today_times}")
-                logger.info(f"Device {target_entity.name} - device_stats attributes: {dir(device_stats)}")
+                logger.info(f"Device {target_entity.name} - today_visits: {today_times}")
                 result.update({
                     "today_visits": today_times,
                     "avg_duration": getattr(device_stats, 'avg_time', 0),
