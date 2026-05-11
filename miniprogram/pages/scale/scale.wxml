@@ -122,7 +122,7 @@
             <view class="stat-content">
                 <text class="stat-label">BMI指数</text>
                 <view class="stat-value">
-                    <text class="stat-number">{{bmi}}</text>
+                    <text class="stat-number {{bmiRangeClass}}">{{bmi}}</text>
                 </view>
                 <text class="stat-range {{bmiRangeClass}}">{{bmiRangeText}} (18.5-24)</text>
             </view>
@@ -133,10 +133,10 @@
             <view class="stat-content">
                 <text class="stat-label">体脂率</text>
                 <view class="stat-value">
-                    <text class="stat-number">{{bodyFat}}</text>
+                    <text class="stat-number {{bodyFatRangeClass}}">{{bodyFat}}</text>
                     <text class="stat-unit">%</text>
                 </view>
-                <text class="stat-range {{bodyFatRangeClass}}">{{genderLabel}}: {{bodyFatNormalRange}}</text>
+                <text class="stat-range {{bodyFatRangeClass}}">{{bodyFatNormalRange}}</text>
             </view>
         </view>
 
@@ -145,10 +145,10 @@
             <view class="stat-content">
                 <text class="stat-label">水分率</text>
                 <view class="stat-value">
-                    <text class="stat-number">{{water}}</text>
+                    <text class="stat-number {{waterRangeClass}}">{{water}}</text>
                     <text class="stat-unit">%</text>
                 </view>
-                <text class="stat-range">{{currentMember.gender === 'male' ? '男: 55-65%' : '女: 45-60%'}}</text>
+                <text class="stat-range {{waterRangeClass}}">{{currentMember.gender === 'male' ? '55-65%' : '45-60%'}}</text>
             </view>
         </view>
 
@@ -157,10 +157,10 @@
             <view class="stat-content">
                 <text class="stat-label">肌肉量</text>
                 <view class="stat-value">
-                    <text class="stat-number">{{muscleMass}}</text>
+                    <text class="stat-number {{muscleRangeClass}}">{{muscleMass}}</text>
                     <text class="stat-unit">kg</text>
                 </view>
-                <text class="stat-range">{{currentMember.gender === 'male' ? '男: 70-89%' : '女: 60-79%'}}</text>
+                <text class="stat-range {{muscleRangeClass}}">{{currentMember.gender === 'male' ? '70-89%' : '60-79%'}}</text>
             </view>
         </view>
 
@@ -169,10 +169,10 @@
             <view class="stat-content">
                 <text class="stat-label">蛋白质</text>
                 <view class="stat-value">
-                    <text class="stat-number">{{protein}}</text>
+                    <text class="stat-number {{proteinRangeClass}}">{{protein}}</text>
                     <text class="stat-unit">%</text>
                 </view>
-                <text class="stat-range">{{currentMember.gender === 'male' ? '男: 16-20%' : '女: 14-18%'}}</text>
+                <text class="stat-range {{proteinRangeClass}}">{{currentMember.gender === 'male' ? '16-20%' : '14-18%'}}</text>
             </view>
         </view>
 
@@ -181,10 +181,10 @@
             <view class="stat-content">
                 <text class="stat-label">基础代谢</text>
                 <view class="stat-value">
-                    <text class="stat-number">{{bmr}}</text>
+                    <text class="stat-number {{bmrRangeClass}}">{{bmr}}</text>
                     <text class="stat-unit">kcal</text>
                 </view>
-                <text class="stat-range">每日消耗</text>
+                <text class="stat-range {{bmrRangeClass}}">每日消耗</text>
             </view>
         </view>
 
@@ -193,9 +193,9 @@
             <view class="stat-content">
                 <text class="stat-label">内脏脂肪</text>
                 <view class="stat-value">
-                    <text class="stat-number">{{visceralFat}}</text>
+                    <text class="stat-number {{visceralFatRangeClass}}">{{visceralFat}}</text>
                 </view>
-                <text class="stat-range {{visceralFat > 9 ? 'warning' : ''}}">{{visceralFatText}} (1-9)</text>
+                <text class="stat-range {{visceralFatRangeClass}}">{{visceralFatText}} (1-9)</text>
             </view>
         </view>
 
@@ -204,10 +204,10 @@
             <view class="stat-content">
                 <text class="stat-label">骨量</text>
                 <view class="stat-value">
-                    <text class="stat-number">{{boneMass}}</text>
+                    <text class="stat-number {{boneRangeClass}}">{{boneMass}}</text>
                     <text class="stat-unit">kg</text>
                 </view>
-                <text class="stat-range">{{currentMember.gender === 'male' ? '男: 2.5-4.0kg' : '女: 2.0-3.5kg'}}</text>
+                <text class="stat-range {{boneRangeClass}}">{{currentMember.gender === 'male' ? '2.5-4.0kg' : '2.0-3.5kg'}}</text>
             </view>
         </view>
     </view>

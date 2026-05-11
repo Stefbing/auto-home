@@ -1026,9 +1026,53 @@ page {
   margin-top: 4rpx;
 }
 
-.stat-range.warning {
-  color: #EF4444;
+/* 正常范围 */
+.stat-range.normal,
+.stat-number.normal {
+  color: #10B981;
   font-weight: 600;
+}
+
+/* 偏低/偏瘦 */
+.stat-range.low,
+.stat-number.low {
+  color: #F59E0B;
+  font-weight: 600;
+}
+
+/* 偏高/超重 */
+.stat-range.high,
+.stat-number.high {
+  color: #F97316;
+  font-weight: 600;
+}
+
+/* 严重偏高/肥胖 */
+.stat-range.very-high,
+.stat-number.very-high {
+  color: #EF4444;
+  font-weight: 700;
+}
+
+/* 偏瘦（BMI）*/
+.stat-range.underweight,
+.stat-number.underweight {
+  color: #F59E0B;
+  font-weight: 600;
+}
+
+/* 偏胖（BMI）*/
+.stat-range.overweight,
+.stat-number.overweight {
+  color: #F97316;
+  font-weight: 600;
+}
+
+/* 肥胖（BMI）*/
+.stat-range.obese,
+.stat-number.obese {
+  color: #EF4444;
+  font-weight: 700;
 }
 
 /* ======================
