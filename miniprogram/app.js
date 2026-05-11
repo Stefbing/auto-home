@@ -28,7 +28,13 @@ App({
 
     // 小米配置检查缓存
     xiaomiConfigChecked: false,
-    hasXiaomiConfig: false
+    hasXiaomiConfig: false,
+
+    // Dashboard数据缓存（避免重复请求）
+    cachedDashboardData: null,
+    dashboardCacheTime: 0,
+    dashboardFetching: false,  // 防止并发请求
+    dashboardFetchPromise: null  // 共享同一个Promise
   },
 
   onLaunch() {
@@ -55,6 +61,61 @@ App({
   onShow() {
     // 小程序从后台切回前台时，不做处理
     // 数据清除已在 startContinuousScan 中执行
+  },
+
+  /**
+   * 获取Dashboard数据（带防重复请求机制）
+   * @param {number} userId - 用户ID
+   * @returns {Promise} Dashboard数据
+   */
+  async fetchDashboardData(userId) {
+    // 如果有缓存且未过期，直接返回
+    const now = Date.now();
+    if (this.globalData.cachedDashboardData && (now - this.globalData.dashboardCacheTime) < 30000) {
+      console.log('[App] ✅ 使用缓存的dashboard数据');
+      return this.globalData.cachedDashboardData;
+    }
+
+    // 如果正在请求中，等待同一个Promise
+    if (this.globalData.dashboardFetching && this.globalData.dashboardFetchPromise) {
+      console.log('[App] ⏳ 等待已有的dashboard请求完成');
+      return this.globalData.dashboardFetchPromise;
+    }
+
+    // 设置请求锁
+    this.globalData.dashboardFetching = true;
+    
+    // 创建新的请求Promise
+    this.globalData.dashboardFetchPromise = new Promise((resolve, reject) => {
+      cloudRequest.callContainer({
+        path: `/api/dashboard/data?user_id=${userId}`,
+        method: 'GET',
+        success: (res) => {
+          console.log('[App] 📦 Dashboard接口返回');
+          
+          // 缓存数据
+          this.globalData.cachedDashboardData = res;
+          this.globalData.dashboardCacheTime = Date.now();
+          
+          // 释放锁
+          this.globalData.dashboardFetching = false;
+          this.globalData.dashboardFetchPromise = null;
+          
+          resolve(res);
+        },
+        fail: (err) => {
+          console.error('[App] ❌ Dashboard接口失败:', err);
+          
+          // 释放锁
+          this.globalData.dashboardFetching = false;
+          this.globalData.dashboardFetchPromise = null;
+          
+          reject(err);
+        }
+      });
+    });
+
+    return this.globalData.dashboardFetchPromise;
   },
 
   async checkAndInitBluetooth(userId) {
@@ -87,14 +148,8 @@ App({
       try {
         console.log('[BLE] 🔍 检查小米配置...');
 
-        const res = await new Promise((resolve, reject) => {
-          cloudRequest.callContainer({
-            path: `/api/dashboard/data?user_id=${userId}`,
-            method: 'GET',
-            success: resolve,
-            fail: reject
-          });
-        });
+        // 使用统一的fetchDashboardData方法
+        const res = await this.fetchDashboardData(userId);
 
         console.log('[BLE] 📦 接口返回:', res);
 
@@ -212,15 +267,15 @@ App({
         console.log('[BLE] ⚠️ 无设备时间戳，跳过');
         continue;
       }
-            
+
       // 设备广播的时间已经是北京时间，直接使用
       const parseTime = finalData.receivedAt; // 广播解析时的实时时间
       const timeDiff = Math.abs(parseTime - deviceTimestamp);
-            
+
       console.log('[BLE] 🕒 设备时间:', new Date(deviceTimestamp).toLocaleString('zh-CN'));
       console.log('[BLE] 🕒 解析时间:', new Date(parseTime).toLocaleString('zh-CN'));
       console.log('[BLE] ⏱️ 时间差值:', Math.round(timeDiff), 'ms');
-            
+
       // 如果时间差超过10秒，视为过期
       if (timeDiff >= CONFIG.FRESHNESS_THRESHOLD) {
         console.log('[BLE] ⚠️ 数据过期，丢弃');

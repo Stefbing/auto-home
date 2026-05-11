@@ -450,6 +450,16 @@
   display: block;
 }
 
+.stat-empty {
+  text-align: right;
+}
+
+.empty-text {
+  font-size: 22rpx;
+  color: #CBD5E1;
+  font-weight: 400;
+}
+
 .card-name {
   font-size: 32rpx;
   font-weight: 700;

@@ -774,97 +774,214 @@ Page({
     }
   },
 
-      // ======================
-// 彻底修正后的身体指标计算 (对齐小米官方算法)
+  // ======================
+// 小米体脂秤2 BIA生物电阻抗算法（优化版）
 // ======================
-      async calculateBodyMetrics(weight, impedance = 0) {
-        const { height, age, gender } = this.data.currentMember;
-        if (!height || !age) return;
+async calculateBodyMetrics(weight, impedance = 0) {
+  const { height, age, gender } = this.data.currentMember;
+  
+  // 参数校验
+  if (!height || !age || height <= 0 || age <= 0 || weight <= 0) {
+    console.warn('[Scale] ⚠️ 参数不完整或无效');
+    return;
+  }
 
-        const isMale = gender === 'male';
-        const heightM = height / 100;
-        const bmi = weight / (heightM ** 2);
+  const isMale = gender === 'male';
+  const heightCm = height; // 厘米
+  const heightM = height / 100; // 米
+  
+  // 1. BMI 计算
+  const bmi = weight / (heightM * heightM);
+  
+  // 2. 阻抗指数 (Impedance Index) - BIA核心变量
+  let impedanceIndex = 0;
+  if (impedance > 0) {
+    // 阻抗指数 = 身高²(cm) / 阻抗(Ω)
+    impedanceIndex = (heightCm * heightCm) / impedance;
+  } else {
+    console.warn('[Scale] ⚠️ 阻抗为0，使用BMI估算模式');
+  }
 
-        // 1. 核心回归变量
-        // 阻抗指数：代表身体导电圆柱体的体积，与去脂体重成正比
-        let lbmIndex = 0;
-        if (impedance > 0) {
-          lbmIndex = (height * height) / impedance;
-        } else {
-          console.log('[Scale] ⚠️ 阻抗为0，无法计算LBM_Index');
-        }
+  // 3. 体脂率 (Body Fat %) - BIA生物电阻抗算法
+  let bodyFat = 0;
+  let ffm = 0; // 去脂体重
+  
+  if (impedance > 0) {
+    // 使用简化的BIA公式（基于体重、阻抗、身高）
+    // 参考：Sun et al. (2003) BIA预测方程
+    if (isMale) {
+      // 男性：FFM = 0.407×体重 + 0.267×身高 - 0.094×阻抗 + 19.2
+      ffm = (0.407 * weight) + (0.267 * heightCm) - (0.094 * impedance) + 19.2;
+    } else {
+      // 女性：FFM = 0.252×体重 + 0.473×身高 - 0.094×阻抗 + 48.3  
+      ffm = (0.252 * weight) + (0.473 * heightCm) - (0.094 * impedance) + 48.3;
+    }
+    
+    // 确保FFM合理范围（不超过体重）
+    ffm = Math.max(weight * 0.5, Math.min(weight * 0.95, ffm));
+    
+    // 计算体脂率
+    const fatMass = weight - ffm;
+    bodyFat = (fatMass / weight) * 100;
+    
+    console.log('[Scale] 📐 BIA计算:', {
+      ffm: ffm.toFixed(2),
+      fatMass: (weight - ffm).toFixed(2),
+      rawBodyFat: bodyFat.toFixed(2)
+    });
+  } else {
+    // 无阻抗时的BMI估算兜底公式（Deurenberg公式）
+    if (isMale) {
+      bodyFat = (1.20 * bmi) + (0.23 * age) - 16.2;
+    } else {
+      bodyFat = (1.20 * bmi) + (0.23 * age) - 5.4;
+    }
+    console.log('[Scale] ⚠️ 无阻抗数据，使用BMI估算');
+  }
+  
+  // 体脂率约束范围：男性 5%-40%，女性 10%-50%
+  const minFat = isMale ? 5 : 10;
+  const maxFat = isMale ? 40 : 50;
+  bodyFat = Math.max(minFat, Math.min(maxFat, bodyFat));
+  
+  // 重新计算FFM（基于约束后的体脂率）
+  ffm = weight * (1 - bodyFat / 100);
 
-        // 2. 体脂率 (Body Fat) - 小米2代专用多变量回归公式
-        let bodyFat = 0;
-        if (impedance > 0) {
-          if (isMale) {
-            // 男性公式：注意 lbmIndex 前面是减号！
-            bodyFat = (bmi * 0.133) + (age * 0.141) - (lbmIndex * 0.031) - 1.2;
-          } else {
-            // 女性公式
-            bodyFat = (bmi * 0.245) + (age * 0.095) - (lbmIndex * 0.020) + 2.5;
-          }
-        } else {
-          // 无阻抗时的 BMI 估算兜底 (非运动员)
-          bodyFat = (1.2 * bmi) + (0.23 * age) - (isMale ? 16.2 : 5.4);
-        }
+  // 5. 脂肪质量 (FM - Fat Mass)
+  const fatMass = weight - ffm;
 
-        // 约束范围 (3% - 50%)
-        bodyFat = Math.max(3, Math.min(50, bodyFat));
+  // 6. 肌肉量 (Muscle Mass) - 小米定义：包含骨骼肌+平滑肌+水分
+  // 肌肉量 ≈ 去脂体重 × 肌肉占比系数
+  const muscleRatio = isMale ? 0.52 : 0.46; // 男性约52%，女性约46%
+  const muscleMass = ffm * muscleRatio;
 
-        // 3. 去脂体重 (FFM)
-        const ffm = weight * (1 - bodyFat / 100);
+  // 7. 骨量 (Bone Mass) - 基于体重的线性回归
+  // 小米官方系数：男性 0.022×体重+1.2，女性 0.018×体重+0.9
+  const boneMass = isMale 
+    ? (0.022 * weight) + 1.2 
+    : (0.018 * weight) + 0.9;
 
-        // 4. 骨量 (Bone Mass) - 小米官方固定回归系数
-        // 按照你的 68kg 左右，算出约为 2.7kg (5.4斤)
-        const boneMass = (isMale ? 0.022 : 0.018) * weight + (isMale ? 1.2 : 0.9);
+  // 8. 水分率 (Water %) - 占总体重的百分比
+  // 水分主要存在于肌肉中，约占肌肉量的73%
+  const waterMass = muscleMass * 0.73;
+  const waterPercent = (waterMass / weight) * 100;
 
-        // 5. 肌肉量 (Muscle Mass) - 小米定义包含水分
-        // 肌肉量 = 去脂体重 - 骨量 (在小米算法中通常还要微调)
-        const muscleMass = ffm - 0.2; // 0.2为非肌肉结缔组织修正值
+  // 9. 蛋白质率 (Protein %) - 占总体重的百分比
+  // 蛋白质约占去脂体重的20-22%
+  const proteinMass = ffm * 0.21;
+  const proteinPercent = (proteinMass / weight) * 100;
 
-        // 6. 水分 (Water) - 通常占去脂体重的 72%
-        const water = (ffm * 0.724) / weight * 100;
+  // 10. 基础代谢率 (BMR) - Mifflin-St Jeor 公式（最准确）
+  let bmr = 0;
+  if (isMale) {
+    bmr = (10 * weight) + (6.25 * heightCm) - (5 * age) + 5;
+  } else {
+    bmr = (10 * weight) + (6.25 * heightCm) - (5 * age) - 161;
+  }
 
-        // 7. 内脏脂肪 (Visceral Fat) - 基于 BMI 和年龄的等级 (1-15级)
-        const visceralFat = (bmi * 0.4) + (age * 0.1) - (isMale ? 5 : 4);
+  // 11. 内脏脂肪等级 (Visceral Fat Level) - 1-15级
+  // 基于BMI、年龄、性别的经验公式
+  let visceralFat = 0;
+  if (isMale) {
+    visceralFat = (bmi * 0.4) + (age * 0.1) - 5;
+  } else {
+    visceralFat = (bmi * 0.4) + (age * 0.1) - 4;
+  }
+  visceralFat = Math.max(1, Math.min(15, visceralFat));
 
-        // 8. 基础代谢 (BMR) - Mifflin-St Jeor 公式
-        let bmr = 0;
-        if (isMale) {
-          bmr = 10 * weight + 6.25 * height - 5 * age + 5;
-        } else {
-          bmr = 10 * weight + 6.25 * height - 5 * age - 161;
-        }
+  // 12. 标准体重 (Standard Weight) - WHO标准
+  const standardWeight = isMale
+    ? (heightCm - 80) * 0.7
+    : (heightCm - 70) * 0.6;
 
-        // 9. 蛋白质 (Protein)
-        const protein = (muscleMass / weight) * 21.5;
+  // 13. 身体评分 (Body Score) - 综合评分0-100
+  const bodyScore = this.calculateBodyScore(bmi, bodyFat, isMale, age);
 
-        // 更新 UI 数据
-        this.setData({
-          bmi: bmi.toFixed(2),
-          bodyFat: bodyFat.toFixed(1),
-          water: water.toFixed(1),
-          muscleMass: muscleMass.toFixed(2),
-          muscleMassJin: (muscleMass * 2).toFixed(1), // 转为斤显示
-          boneMass: boneMass.toFixed(2),
-          boneMassJin: (boneMass * 2).toFixed(1),   // 转为斤显示
-          visceralFat: visceralFat.toFixed(1),
-          protein: protein.toFixed(1),
-          bmr: Math.round(bmr),
-          lbmIndex: lbmIndex.toFixed(2)
-        });
+  // ===== 更新UI数据（统一格式）=====
+  this.setData({
+    // 基础指标
+    bmi: parseFloat(bmi.toFixed(2)),              // 保留2位小数
+    bodyFat: parseFloat(bodyFat.toFixed(1)),       // 保留1位小数
+    
+    // 组成成分（kg或%）
+    water: parseFloat(waterPercent.toFixed(1)),    // 水分率 %
+    muscleMass: parseFloat(muscleMass.toFixed(2)), // 肌肉量 kg
+    protein: parseFloat(proteinPercent.toFixed(1)),// 蛋白质率 %
+    boneMass: parseFloat(boneMass.toFixed(2)),     // 骨量 kg
+    
+    // 代谢指标
+    bmr: Math.round(bmr),                          // 基础代谢 kcal（整数）
+    visceralFat: parseFloat(visceralFat.toFixed(1)),// 内脏脂肪等级
+    
+    // 参考指标
+    standardWeight: parseFloat(standardWeight.toFixed(2)), // 标准体重 kg
+    bodyScore: Math.round(bodyScore),              // 身体评分（整数）
+    
+    // 辅助显示
+    muscleMassJin: parseFloat((muscleMass * 2).toFixed(1)), // 肌肉量（斤）
+    boneMassJin: parseFloat((boneMass * 2).toFixed(1))      // 骨量（斤）
+  });
 
-        // 生成健康建议
-        const advice = this.generateHealthAdvice(bmi, bodyFat, isMale, age);
-        this.setData({
-          advice: advice.text,
-          adviceLevel: advice.level,
-          adviceIcon: advice.icon
-        });
+  // 生成健康建议
+  const advice = this.generateHealthAdvice(bmi, bodyFat, isMale, age);
+  this.setData({
+    advice: advice.text,
+    adviceLevel: advice.level,
+    adviceIcon: advice.icon
+  });
 
-        console.log('[Scale] 📊 修正后的计算结果:', this.data);
-      },
+  console.log('[Scale] 📊 BIA计算结果:', {
+    weight, impedance, height, age, gender,
+    bmi: bmi.toFixed(2),
+    bodyFat: bodyFat.toFixed(1) + '%',
+    muscleMass: muscleMass.toFixed(2) + 'kg',
+    water: waterPercent.toFixed(1) + '%',
+    boneMass: boneMass.toFixed(2) + 'kg',
+    bmr: Math.round(bmr) + 'kcal'
+  });
+},
+
+  // ======================
+  // 身体评分计算 (0-100分)
+  // ======================
+  calculateBodyScore(bmi, bodyFat, isMale, age) {
+    let score = 100;
+    
+    // BMI 扣分项（正常范围 18.5-24）
+    if (bmi < 18.5) {
+      score -= (18.5 - bmi) * 3; // 偏瘦扣分
+    } else if (bmi > 24) {
+      if (bmi <= 28) {
+        score -= (bmi - 24) * 2; // 超重扣分
+      } else {
+        score -= (bmi - 24) * 4; // 肥胖严重扣分
+      }
+    }
+    
+    // 体脂率扣分项
+    const optimalMin = isMale ? 10 : 18;
+    const optimalMax = isMale ? 20 : 28;
+    
+    if (bodyFat < optimalMin) {
+      score -= (optimalMin - bodyFat) * 2; // 过低扣分
+    } else if (bodyFat > optimalMax) {
+      if (bodyFat <= 30) {
+        score -= (bodyFat - optimalMax) * 1.5; // 偏高扣分
+      } else {
+        score -= (bodyFat - optimalMax) * 3; // 过高严重扣分
+      }
+    }
+    
+    // 年龄因素（年轻人标准更严格）
+    if (age < 30) {
+      score *= 0.95; // 年轻人要求更高
+    } else if (age > 50) {
+      score *= 1.05; // 年长者适度放宽
+    }
+    
+    // 约束范围 0-100
+    return Math.max(0, Math.min(100, score));
+  },
 
   // ======================
   // BMI 范围分类

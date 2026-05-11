@@ -155,17 +155,16 @@ Page({
       wx.setStorageSync('userInfo', userInfo)
       this.setData({ userInfo })
       
-      // 自动加载设备（后端已自动初始化服务）
-      // 登录成功后，如果设备未加载则加载
-      if (!this.data.devicesLoaded) {
-        await this.loadUserDevices()
-      }
-      
-      // 初始化蓝牙
+      // 先初始化蓝牙（会获取并缓存dashboard数据）
       const app = getApp()
       if (!app.globalData.bleAdapterInitialized) {
         console.log('[首页] 🚀 登录成功，开始初始化蓝牙')
-        app.checkAndInitBluetooth(userInfo.user_id)
+        await app.checkAndInitBluetooth(userInfo.user_id)
+      }
+      
+      // 然后加载设备列表（使用缓存的dashboard数据）
+      if (!this.data.devicesLoaded) {
+        await this.loadUserDevices()
       }
       
       wx.hideLoading()
@@ -197,13 +196,11 @@ Page({
     this.isLoadingDevices = true
     
     try {
-      // 获取仪表板数据（包含设备和实时统计）
-      const dashboardData = await cloudRequest.callContainer({
-        path: `/api/dashboard/data?user_id=${this.data.userInfo.user_id}`,
-        method: 'GET'
-      })
+      // 使用app.js中统一的fetchDashboardData方法（防重复请求）
+      const app = getApp()
+      const dashboardData = await app.fetchDashboardData(this.data.userInfo.user_id)
       
-      // 从 dashboardData 构建设备列表
+      console.log('[首页] 📦 获取到dashboard数据')
       const petDevices = []
       const healthDevices = []
       const userDevices = []

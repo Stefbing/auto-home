@@ -486,42 +486,6 @@ async def get_dashboard_data(user_id: Optional[int] = None, session: Session = D
         dashboard_data['cloudpets_servings'] = cloudpets_data.get('servings', {})
         dashboard_data['cloudpets_plans'] = cloudpets_data.get('plans', [])
         
-        # Litterbox stats（串行，因为依赖petkit_devices）
-        litterbox_stats = {}
-        if petkit_devices:
-            # 并行获取每个设备的统计数据
-            async def fetch_device_stats(device):
-                if hasattr(device, 'id'):
-                    cache_key = f'{cache_prefix}_petkit_stats_{device.id}'
-                    stats = await cache_manager.get(cache_key)
-                    if not stats:
-                        if state.petkit and getattr(state.petkit, 'user_id', None) == user_id:
-                            stats = await state.petkit.get_daily_stats(device.id)
-                        else:
-                            # 需要重新初始化服务
-                            if petkit_username and petkit_password:
-                                temp_service = PetKitService(petkit_username, petkit_password, user_id=user_id)
-                                await temp_service.initialize()
-                                stats = await temp_service.get_daily_stats(device.id)
-                                await temp_service.close()
-                        await cache_manager.set(cache_key, stats, ttl=180)
-                    return device.id, stats or {}
-                return None, {}
-            
-            # 并行获取所有设备的统计
-            stats_tasks = [fetch_device_stats(device) for device in petkit_devices]
-            stats_results = await asyncio.gather(*stats_tasks, return_exceptions=True)
-            
-            for result in stats_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Failed to fetch device stats: {result}")
-                    continue
-                device_id, stats = result
-                if device_id:
-                    litterbox_stats[device_id] = stats
-        
-        dashboard_data['litterbox_stats'] = litterbox_stats
-        
         # Xiaomi scale config check
         dashboard_data['xiaomi_config'] = bool(xiaomi_account and xiaomi_password)
         
@@ -2004,12 +1968,6 @@ async def get_scale_members(user_id: Optional[int] = None, session: Session = De
                 "avatar_color": member.avatar_color,
                 "relationship": member.relationship,
                 "last_weight": latest_record.weight if latest_record else None,
-                "weight_history": [{
-                    "date": record.timestamp,
-                    "weight": record.weight
-                } for record in session.exec(select(WeightRecord).where(
-                    WeightRecord.member_id == member.id
-                ).order_by(WeightRecord.timestamp.desc()).limit(10)).all()],
                 "sort_order": member.sort_order
             })
         
