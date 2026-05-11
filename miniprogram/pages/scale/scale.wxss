@@ -204,10 +204,11 @@ page {
    ====================== */
 .reset-controls {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 16rpx;
   padding: 12rpx 20rpx;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.95);
   border-radius: 20rpx;
   backdrop-filter: blur(10rpx);
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
@@ -278,6 +279,14 @@ page {
   border: none !important;
 }
 
+.reset-hint {
+  font-size: 24rpx;
+  color: #6B7280;
+  font-weight: 500;
+  text-align: center;
+  margin-top: 4rpx;
+}
+
 .action-buttons {
   flex-shrink: 0;
 }
@@ -346,9 +355,9 @@ page {
 
 .gauge-card {
   background: #FFFFFF;
-  padding: 30rpx 0;
-  border-radius: 48rpx;
-  box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.06),
+  padding: 24rpx 0;
+  border-radius: 36rpx;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.04),
     0 0 0 1rpx rgba(0, 0, 0, 0.02) inset;
   display: flex;
   justify-content: center;
@@ -729,13 +738,13 @@ page {
 .member-card {
   display: inline-block;
   width: 172rpx;
-  padding: 28rpx 16rpx 24rpx;
+  padding: 24rpx 16rpx 20rpx;
   margin-right: 16rpx;
   margin-top: 16rpx;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10rpx);
-  border-radius: 24rpx;
-  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04),
+  border-radius: 20rpx;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.03),
     0 0 0 1rpx rgba(0, 0, 0, 0.02) inset;
   text-align: center;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);

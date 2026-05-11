@@ -364,12 +364,19 @@ Page({
       if (isStable && !this.data.impedanceWaitTimer) {
         console.log('[Scale] ⏳ 体重稳定，等待阻抗数据...');
 
-        // 提示用户站好位置
-        wx.showToast({
-          title: '请站稳在电极片上',
-          icon: 'none',
-          duration: 3000
-        });
+        // 设置定时器，5秒后提示一次
+        const waitTimer = setTimeout(() => {
+          // 只有在仍然没有阻抗数据时才提示
+          if (!this.data.lockedImpedance || this.data.lockedImpedance === 0) {
+            wx.showToast({
+              title: '请站稳在电极片上',
+              icon: 'none',
+              duration: 3000
+            });
+          }
+        }, 5000);
+
+        this.setData({ impedanceWaitTimer: waitTimer });
       }
     }
 
@@ -464,6 +471,13 @@ Page({
     let countdown = 30;
     this.setData({ resetCountdown: countdown });
 
+    // 显示提示消息
+    wx.showToast({
+      title: '数据已保存，30秒后自动重置',
+      icon: 'none',
+      duration: 3000
+    });
+
     const timer = setInterval(() => {
       countdown--;
       if (countdown <= 0) {
@@ -490,6 +504,12 @@ Page({
         resetCountdown: 0,
         autoResetCancelled: true  // 标记用户已取消自动重置
         // scalePageCompleted 保持为 true，继续忽略蓝牙数据
+      });
+      
+      wx.showToast({
+        title: '已取消自动重置',
+        icon: 'none',
+        duration: 2000
       });
     }
   },
@@ -853,9 +873,19 @@ Page({
       visceralFat: visceralFat,
       bmr: Math.round(bmr),
 
-      // 范围与建议逻辑保持不变
+      // 范围样式类
       bmiRangeClass: this.getBmiRangeClass(bmi),
-      bodyFatRangeClass: this.getBodyFatRangeClass(bodyFat, isMale)
+      bodyFatRangeClass: this.getBodyFatRangeClass(bodyFat, isMale),
+      waterRangeClass: this.getWaterRangeClass(waterPercent, isMale),
+      muscleRangeClass: this.getMuscleRangeClass(muscleMass, weight, isMale),
+      proteinRangeClass: this.getProteinRangeClass(proteinPercent, isMale),
+      bmrRangeClass: this.getBmrRangeClass(bmr, isMale, age, weight),
+      visceralFatRangeClass: this.getVisceralFatRangeClass(visceralFat),
+      boneRangeClass: this.getBoneRangeClass(boneMass, isMale),
+      
+      // 范围文本
+      bmiRangeText: this.getBmiRangeText(bmi),
+      bodyFatNormalRange: isMale ? '10-20%' : '18-28%'
     });
 
     // 控制台输出用于 Debug API 联调
@@ -1194,16 +1224,45 @@ Page({
   onLongPressMember(e) {
     const memberId = e.currentTarget.dataset.id;
     const memberName = e.currentTarget.dataset.name;
-
-    wx.showModal({
-      title: '确认删除',
-      content: `确定要删除成员"${memberName}"吗？`,
-      success: async (res) => {
-        if (res.confirm) {
-          await this.deleteMember(memberId);
+    const member = this.data.members.find(m => m.id === memberId);
+  
+    // 检查是否为默认成员（relationship === 'self'）
+    const isDefault = member && member.relationship === 'self';
+  
+    if (isDefault) {
+      // 默认成员：只有编辑选项
+      wx.showActionSheet({
+        itemList: ['编辑信息'],
+        success: (res) => {
+          if (res.tapIndex === 0) {
+            this.editMember(memberId);
+          }
         }
-      }
-    });
+      });
+    } else {
+      // 其他成员：有编辑和删除选项
+      wx.showActionSheet({
+        itemList: ['编辑信息', '删除成员'],
+        itemColor: '#EF4444',
+        success: (res) => {
+          if (res.tapIndex === 0) {
+            this.editMember(memberId);
+          } else if (res.tapIndex === 1) {
+            wx.showModal({
+              title: '确认删除',
+              content: `确定要删除成员“${memberName}”吗？`,
+              confirmText: '删除',
+              confirmColor: '#EF4444',
+              success: async (modalRes) => {
+                if (modalRes.confirm) {
+                  await this.deleteMember(memberId);
+                }
+              }
+            });
+          }
+        }
+      });
+    }
   },
 
   async deleteMember(memberId) {
