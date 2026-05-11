@@ -5,7 +5,7 @@
 // 配置：切换运行环境
 const CONFIG = {
   // 'cloud' - 云托管模式, 'local' - 本地调试模式
-  mode: 'local',
+  mode: 'cloud',
 
   // 云托管配置
   cloudEnv: 'prod-d5g0so0137afcfdd5',
