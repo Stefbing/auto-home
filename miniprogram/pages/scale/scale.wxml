@@ -98,18 +98,20 @@
                 <view class="member-avatar" style="background: {{item.avatarColor}}">
                     <text class="avatar-text">{{item.name[0]}}</text>
                 </view>
-                <text class="member-name">{{item.name}}</text>
-                <view class="member-info" wx:if="{{item.age || item.height}}">
-                    <text class="info-item" wx:if="{{item.age}}">{{item.age}}岁</text>
-                    <text class="info-divider" wx:if="{{item.age && item.height}}">|</text>
-                    <text class="info-item" wx:if="{{item.height}}">{{item.height}}cm</text>
-                </view>
-                <view class="member-stats" wx:if="{{item.lastWeight}}">
-                    <text class="member-weight">{{item.lastWeight}}kg</text>
-                    <text class="member-time">{{item.lastMeasureTime ? '近期' : ''}}</text>
+                <view class="member-content">
+                    <text class="member-name">{{item.name}}</text>
+                    <view class="member-info" wx:if="{{item.age || item.height}}">
+                        <text class="info-item" wx:if="{{item.age}}">{{item.age}}岁</text>
+                        <text class="info-divider" wx:if="{{item.age && item.height}}">|</text>
+                        <text class="info-item" wx:if="{{item.height}}">{{item.height}}cm</text>
+                    </view>
+                    <view class="member-stats" wx:if="{{item.lastWeight}}">
+                        <text class="member-weight">{{item.lastWeight}}kg</text>
+                        <text class="member-time">{{item.lastMeasureTime ? '近期' : ''}}</text>
+                    </view>
                 </view>
                 <view class="match-badge" wx:if="{{matchedMember && matchedMember.id === item.id}}">
-                    <text>✓ 匹配</text>
+                    <text> ✓ </text>
                 </view>
             </view>
         </scroll-view>
@@ -195,7 +197,7 @@
                 <view class="stat-value">
                     <text class="stat-number {{visceralFatRangeClass}}">{{visceralFat}}</text>
                 </view>
-                <text class="stat-range {{visceralFatRangeClass}}">{{visceralFatText}} (正常 1-9)</text>
+                <text class="stat-range {{visceralFatRangeClass}}">1-9</text>
             </view>
         </view>
 
@@ -207,7 +209,7 @@
                     <text class="stat-number {{boneRangeClass}}">{{boneMass}}</text>
                     <text class="stat-unit">kg</text>
                 </view>
-                <text class="stat-range {{boneRangeClass}}">正常范围 {{currentMember.gender === 'male' ? '2.5-4.0kg' : '2.0-3.5kg'}}</text>
+                <text class="stat-range {{boneRangeClass}}">{{currentMember.gender === 'male' ? '2.5-4.0kg' : '2.0-3.5kg'}}</text>
             </view>
         </view>
     </view>

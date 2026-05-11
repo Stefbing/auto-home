@@ -121,7 +121,6 @@ Page({
     bmiRangeText: '',
     bodyFatRangeClass: '',
     bodyFatNormalRange: '',
-    visceralFatText: '正常',
     showMemberSection: false
   },
 
@@ -505,7 +504,7 @@ Page({
         autoResetCancelled: true  // 标记用户已取消自动重置
         // scalePageCompleted 保持为 true，继续忽略蓝牙数据
       });
-      
+
       wx.showToast({
         title: '已取消自动重置',
         icon: 'none',
@@ -882,7 +881,7 @@ Page({
       bmrRangeClass: this.getBmrRangeClass(bmr, isMale, age, weight),
       visceralFatRangeClass: this.getVisceralFatRangeClass(visceralFat),
       boneRangeClass: this.getBoneRangeClass(boneMass, isMale),
-      
+
       // 范围文本
       bmiRangeText: this.getBmiRangeText(bmi),
       bodyFatNormalRange: isMale ? '10-20%' : '18-28%'
@@ -1225,10 +1224,10 @@ Page({
     const memberId = e.currentTarget.dataset.id;
     const memberName = e.currentTarget.dataset.name;
     const member = this.data.members.find(m => m.id === memberId);
-  
+
     // 检查是否为默认成员（relationship === 'self'）
     const isDefault = member && member.relationship === 'self';
-  
+
     if (isDefault) {
       // 默认成员：只有编辑选项
       wx.showActionSheet({

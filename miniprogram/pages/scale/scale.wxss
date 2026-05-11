@@ -355,7 +355,7 @@ page {
 
 .gauge-card {
   background: #FFFFFF;
-  padding: 24rpx 0;
+  padding: 16rpx 0;
   border-radius: 36rpx;
   box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.04),
     0 0 0 1rpx rgba(0, 0, 0, 0.02) inset;
@@ -378,15 +378,15 @@ page {
 
 .gauge-viewport {
   position: relative;
-  width: 600rpx;
-  height: 350rpx;
+  width: 480rpx;
+  height: 280rpx;
   overflow: hidden;
 }
 
 .gauge-container {
   position: absolute;
-  width: 600rpx;
-  height: 600rpx;
+  width: 480rpx;
+  height: 480rpx;
   top: 0;
   left: 0;
   border-radius: 50%;
@@ -395,9 +395,9 @@ page {
 
 .tick {
   position: absolute;
-  left: 300rpx;
+  left: 240rpx;
   top: 0;
-  transform-origin: center 300rpx;
+  transform-origin: center 240rpx;
   background: #E2E8F0;
 }
 
@@ -421,14 +421,14 @@ page {
   font-family: 'DIN Alternate', -apple-system, sans-serif;
 }
 
-.l-0 { left: 45rpx; top: 300rpx; transform: translateY(-50%); }
-.l-75 { left: 50%; top: 50rpx; transform: translateX(-50%); }
-.l-150 { right: 45rpx; top: 300rpx; transform: translateY(-50%); }
+.l-0 { left: 40rpx; top: 240rpx; transform: translateY(-50%); }
+.l-75 { left: 50%; top: 40rpx; transform: translateX(-50%); }
+.l-150 { right: 36rpx; top: 240rpx; transform: translateY(-50%); }
 
 .needle-layer {
   position: absolute;
-  width: 600rpx;
-  height: 600rpx;
+  width: 480rpx;
+  height: 480rpx;
   top: 0;
   left: 0;
   z-index: 10;
@@ -437,14 +437,14 @@ page {
 
 .needle-blade {
   position: absolute;
-  top: 20rpx;
+  top: 16rpx;
   left: 50%;
-  width: 10rpx;
-  height: 180rpx;
+  width: 8rpx;
+  height: 144rpx;
   background: linear-gradient(to bottom, #F43F5E 0%, rgba(244, 63, 94, 0) 100%);
   transform: translateX(-50%);
   clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
-  filter: drop-shadow(0 0 12rpx rgba(244, 63, 94, 0.4));
+  filter: drop-shadow(0 0 9rpx rgba(244, 63, 94, 0.4));
 }
 
 .data-hub {
@@ -479,7 +479,7 @@ page {
 }
 
 .weight-value {
-  font-size: 90rpx;
+  font-size: 80rpx;
   font-weight: 800;
   color: #1E293B;
   line-height: 1;
@@ -489,7 +489,7 @@ page {
 }
 
 .weight-unit {
-  font-size: 36rpx;
+  font-size: 30rpx;
   font-weight: 600;
   color: #94A3B8;
   margin-left: 12rpx;
@@ -736,9 +736,10 @@ page {
 }
 
 .member-card {
-  display: inline-block;
-  width: 172rpx;
-  padding: 24rpx 16rpx 20rpx;
+  display: inline-flex;
+  align-items: center;
+  width: calc((100% - 32rpx) / 3);
+  padding: 16rpx 12rpx;
   margin-right: 16rpx;
   margin-top: 16rpx;
   background: rgba(255, 255, 255, 0.95);
@@ -746,11 +747,10 @@ page {
   border-radius: 20rpx;
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.03),
     0 0 0 1rpx rgba(0, 0, 0, 0.02) inset;
-  text-align: center;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  vertical-align: top;
   box-sizing: border-box;
   position: relative;
+  gap: 12rpx;
 }
 
 .member-card:last-child {
@@ -770,28 +770,34 @@ page {
 }
 
 .member-avatar {
-  width: 80rpx;
-  height: 80rpx;
+  width: 56rpx;
+  height: 56rpx;
   border-radius: 50%;
-  margin: 0 auto 12rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
 }
 
 .avatar-text {
-  font-size: 36rpx;
+  font-size: 24rpx;
   font-weight: 700;
   color: #FFFFFF;
 }
 
+.member-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
 .member-name {
-  display: block;
-  font-size: 26rpx;
+  font-size: 24rpx;
   font-weight: 600;
   color: #1E293B;
-  margin-bottom: 8rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -800,43 +806,42 @@ page {
 .member-info {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6rpx;
-  margin-bottom: 8rpx;
+  gap: 4rpx;
 }
 
 .info-item {
-  font-size: 20rpx;
+  font-size: 18rpx;
   color: #64748B;
   font-weight: 500;
 }
 
 .info-divider {
-  font-size: 18rpx;
+  font-size: 16rpx;
   color: #CBD5E1;
 }
 
 .member-stats {
-  margin-top: 8rpx;
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
 }
 
 .member-weight {
-  font-size: 24rpx;
+  font-size: 20rpx;
   color: #3B82F6;
   font-weight: 700;
 }
 
 .member-time {
-  font-size: 18rpx;
+  font-size: 16rpx;
   color: #94A3B8;
-  margin-left: 4rpx;
 }
 
 .match-badge {
   position: absolute;
   top: -8rpx;
   right: -8rpx;
-  padding: 4rpx 12rpx;
+  padding: 2rpx 8rpx;
   background: linear-gradient(135deg, #10B981 0%, #059669 100%);
   border-radius: 100rpx;
   box-shadow: 0 2rpx 8rpx rgba(16, 185, 129, 0.3);
