@@ -50,7 +50,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 #### 步骤 2: 安装依赖
 ```bash
 # 使用 uv 安装依赖（推荐）
-uv pip install -r backend/requirements.txt
+uv pip install -r requirements.txt
 
 # 或使用传统方式
 pip install -r requirements.txt
